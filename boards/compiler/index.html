@@ -272,6 +272,56 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 .field input:focus,.field textarea:focus{border-color:var(--ink)}
 .hint{margin-top:7px;font-size:11.5px;color:var(--ink-mute)}
 
+/* An element carrying `hidden` still shows if a rule gives it a display value,
+   because the attribute's own style is only a UA default. .modal-foot sets
+   display:flex, so hiding anything inside one silently did nothing. */
+[hidden]{display:none !important}
+
+/* ── saved scans ──
+   The menu hangs off a button in the modal footer, so it opens upward and is
+   right-aligned to it — dropping downward would put it off the bottom of the
+   dialog. */
+.qwrap{position:relative;display:inline-flex}
+.qmenu{
+  position:absolute;bottom:calc(100% + 8px);right:0;transform:translateY(4px);
+  min-width:270px;max-width:330px;z-index:30;
+  background:var(--paper);border-radius:var(--r-md);box-shadow:0 10px 40px rgba(0,0,0,.28);
+  border:1px solid var(--line-soft);padding:6px;text-align:left;
+  max-height:320px;overflow:auto;
+  opacity:0;pointer-events:none;transition:opacity .16s,transform .16s;
+}
+.qmenu.on{opacity:1;pointer-events:auto;transform:translateY(0)}
+.qrow{
+  display:flex;align-items:center;gap:10px;width:100%;
+  padding:9px 10px;border-radius:var(--r-sm);text-align:left;
+  transition:background .14s;
+}
+.qrow:hover{background:var(--paper-alt)}
+.qrow .qt{font-size:13px;font-weight:600;color:var(--ink);line-height:1.3}
+.qrow .qs{margin-top:2px;font-size:11px;color:var(--ink-mute);line-height:1.3}
+.qrow .qgo{flex:1;min-width:0;text-align:left}
+/* Delete stays quiet until the row is under the cursor: this menu is for
+   running a saved scan, not for editing the list, and a row of red crosses
+   invites the wrong click. */
+.qdel{
+  flex:none;width:24px;height:24px;border-radius:var(--r-sm);
+  display:grid;place-items:center;color:var(--ink-mute);opacity:0;
+  transition:opacity .14s,background .14s,color .14s;
+}
+.qrow:hover .qdel{opacity:1}
+.qdel:hover{background:#FDF3F3;color:var(--red)}
+.qdel svg{width:13px;height:13px}
+.qempty{padding:12px 10px;font-size:12px;color:var(--ink-mute)}
+
+/* Takes the count text's place in the footer, so naming costs no extra row. */
+#selName{
+  flex:1;min-width:0;margin-right:auto;
+  height:38px;padding:0 12px;border:1px solid var(--line);border-radius:var(--r-sm);
+  background:var(--paper);outline:none;font:inherit;font-size:13px;
+  transition:border-color .2s;
+}
+#selName:focus{border-color:var(--ink)}
+
 /* ── facet groups in the Service Visits menu ── */
 .facet{margin-bottom:20px}
 .facet:last-child{margin-bottom:0}
@@ -494,10 +544,19 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
     </div>
     <div id="facets"></div>
   </div>
-  <div class="modal-foot">
+  <!-- Three buttons, one row, always. Naming borrows the space the count text
+       occupies rather than adding a second row of controls, and the header's ×
+       is the way out — a Cancel button beside it was one exit too many. -->
+  <div class="modal-foot" id="svFoot">
     <span class="modal-sub" id="svCount" style="margin-right:auto"></span>
-    <button class="btn btn-ghost" data-close>Cancel</button>
-    <button class="btn btn-dark" id="runScan">Run scan</button>
+    <input id="selName" maxlength="40" autocomplete="off" spellcheck="false"
+           placeholder="Name these filters — e.g. Morning holds" hidden>
+    <button class="btn btn-ghost" id="saveSel">Save Filters</button>
+    <div class="qwrap">
+      <button class="btn btn-ghost" id="savedBtn" aria-haspopup="true" aria-expanded="false">Saved Scans</button>
+      <div class="qmenu" id="qmenu" role="menu"></div>
+    </div>
+    <button class="btn btn-dark" id="runScan">Run Scan</button>
   </div>
 </div>
 
@@ -905,6 +964,10 @@ $("svBtn").addEventListener("click", () => {
   }
   S.tool = "sv";
   paintMenu();
+  // Reopening always lands on the plain three buttons, never mid-way through
+  // naming something the last visit abandoned.
+  setNaming(false);
+  closeQuick();
   showModal($("svModal"));
 });
 
@@ -1024,14 +1087,17 @@ function progWatch(){
 function progHide(){ clearInterval(progTimer); $("prog").hidden = true; }
 
 /* ── run ── */
-$("runScan").addEventListener("click", async () => {
+/* One scan implementation, two ways in — the modal's Run scan and a saved
+   selection off the Quick Scan menu. Kept as one function so the two can never
+   disagree about what a scan is or how a failure reads. `btn` is whichever
+   control was pressed, so the spinner appears where the click landed. */
+async function runScan(btn){
   if(S.busy) return;
   if(!S.chosenKinds.length){ $("svCount").textContent = "Pick at least one thing to look for"; return; }
 
   S.busy = true;
-  const btn = $("runScan");
-  const restore = btn.innerHTML;
-  btn.disabled = true; btn.innerHTML = '<i class="spin"></i>Scanning';
+  const restore = btn ? btn.innerHTML : null;
+  if(btn){ btn.disabled = true; btn.innerHTML = '<i class="spin"></i>Scanning'; }
   clearNotes(); progWatch();
 
   try{
@@ -1048,9 +1114,186 @@ $("runScan").addEventListener("click", async () => {
     hideModal();
   }finally{
     S.busy = false; progHide();
-    btn.disabled = false; btn.innerHTML = restore;
+    if(btn){ btn.disabled = false; btn.innerHTML = restore; }
   }
+}
+
+$("runScan").addEventListener("click", () => runScan($("runScan")));
+
+/* ─────────────────────── saved selections ───────────────────────
+   Setting up a Service Visits scan means picking sites, kinds and a handful of
+   facets, and the same handful comes up every morning. A saved selection is
+   exactly the three things a scan is made of — sites, filters, kinds — so
+   replaying one is the same call the modal would have made.
+
+   In localStorage rather than on the server: it is a personal habit, not a
+   board setting, and two people sharing a machine should not inherit each
+   other's. It also keeps a new state file out of the board folder, which on a
+   published estate is one more thing that would need excluding by hand. */
+
+const PRESET_KEY = "compiler.presets";
+
+function loadPresets(){
+  try{
+    const raw = JSON.parse(localStorage.getItem(PRESET_KEY) || "[]");
+    return Array.isArray(raw) ? raw.filter(p => p && p.name) : [];
+  }catch{ return []; }               // a corrupt entry reads as none saved
+}
+function storePresets(list){
+  try { localStorage.setItem(PRESET_KEY, JSON.stringify(list)); }
+  catch { note("Could not save — this browser is refusing local storage.", true); }
+}
+
+const SITE_LABEL = { onsite:"Onsite", offsite:"Offsite", both:"Both sites" };
+
+function presetSummary(p){
+  const n = Object.values(p.filters || {}).filter(v => v && v.length).length;
+  const k = (p.kinds || []).length;
+  return [
+    SITE_LABEL[p.sites] || p.sites,
+    n ? `${n} filter${n === 1 ? "" : "s"}` : "no filters",
+    `${k} kind${k === 1 ? "" : "s"}`,
+  ].join(" · ");
+}
+
+/* A saved selection can outlive the facets it was built from — the server
+   publishes those, and one can be retired. Anything unrecognised is dropped on
+   the way in rather than sent to a scan that would reject it. */
+function applyPreset(p){
+  const known = S.facets ? Object.keys(S.facets) : [];
+  const filters = {};
+  for(const k of known) filters[k] = [];
+  for(const [k, v] of Object.entries(p.filters || {})){
+    if(!known.includes(k)) continue;
+    const valid = new Set((S.facets[k].options || []).map(o => o.v));
+    filters[k] = (v || []).filter(x => valid.has(x));
+  }
+  S.filters = filters;
+
+  const kindValues = new Set(S.kinds.map(k => k.v));
+  const kinds = (p.kinds || []).filter(k => kindValues.has(k));
+  S.chosenKinds = kinds.length ? kinds : S.chosenKinds;
+
+  // Offsite may have been unset since the selection was saved; falling back to
+  // onsite beats scanning nothing.
+  S.sites = (p.sites !== "onsite" && !S.offsiteTrtId) ? "onsite" : (p.sites || "onsite");
+}
+
+function paintQuick(){
+  const list = loadPresets();
+  // The button stays put whether or not anything is saved — it moving in and
+  // out of a three-button row would shuffle the other two under the cursor.
+  $("savedBtn").disabled = list.length === 0;
+  $("qmenu").innerHTML = list.length
+    ? list.map((p, i) => `
+      <div class="qrow">
+        <button class="qgo" data-run="${i}">
+          <div class="qt">${esc(p.name)}</div>
+          <div class="qs">${esc(presetSummary(p))}</div>
+        </button>
+        <button class="qdel" data-del="${i}" title="Delete ${esc(p.name)}" aria-label="Delete ${esc(p.name)}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+               stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>`).join("")
+    : `<div class="qempty">Nothing saved yet.</div>`;
+}
+
+const closeQuick = () => {
+  $("qmenu").classList.remove("on");
+  $("savedBtn").setAttribute("aria-expanded", "false");
+};
+
+$("savedBtn").addEventListener("click", e => {
+  e.stopPropagation();
+  const open = $("qmenu").classList.toggle("on");
+  $("savedBtn").setAttribute("aria-expanded", String(open));
 });
+document.addEventListener("click", e => {
+  if(!e.target.closest(".qwrap")) closeQuick();
+});
+/* Before the shared Escape handler, which closes the whole modal: one press
+   should dismiss the menu and leave the selection behind it alone. */
+document.addEventListener("keydown", e => {
+  if(e.key !== "Escape") return;
+  if($("qmenu").classList.contains("on")){ e.stopPropagation(); closeQuick(); }
+}, true);
+
+$("qmenu").addEventListener("click", e => {
+  const del = e.target.closest("[data-del]");
+  if(del){
+    e.stopPropagation();
+    const list = loadPresets();
+    list.splice(Number(del.dataset.del), 1);
+    storePresets(list);
+    paintQuick();
+    if(!list.length) closeQuick();
+    return;
+  }
+
+  const go = e.target.closest("[data-run]");
+  if(!go) return;
+  const p = loadPresets()[Number(go.dataset.run)];
+  if(!p) return;
+  closeQuick();
+
+  if(!S.trtId){ note("Set a TRT first — the scan is scoped to one centre."); return; }
+  applyPreset(p);
+  paintMenu();                        // so the modal agrees if it is opened next
+  runScan($("runScan"));
+});
+
+/* ── saving the current filters ──
+   Naming happens in the row that is already there: the count text steps aside
+   for an input and Save Filters becomes the confirm. No second row, no extra
+   Cancel — Escape backs out, and the header's × closes the dialog. */
+
+let naming = false;
+
+function setNaming(on){
+  naming = on;
+  $("selName").hidden = !on;
+  $("svCount").hidden = on;
+  $("saveSel").textContent = on ? "Save" : "Save Filters";
+  $("saveSel").classList.toggle("btn-dark", on);
+  $("saveSel").classList.toggle("btn-ghost", !on);
+  if(on){ $("selName").value = ""; $("selName").focus(); }
+}
+
+$("selName").addEventListener("keydown", e => {
+  if(e.key === "Enter"){ e.preventDefault(); commitName(); }
+  if(e.key === "Escape"){ e.preventDefault(); e.stopPropagation(); setNaming(false); }
+});
+
+$("saveSel").addEventListener("click", () => {
+  if(!naming){ setNaming(true); return; }
+  commitName();
+});
+
+function commitName(){
+  const name = $("selName").value.trim();
+  if(!name){ $("selName").focus(); return; }
+
+  const list = loadPresets();
+  const entry = {
+    name,
+    sites  : S.sites,
+    // Only the facets actually narrowing something, so a stored selection does
+    // not carry every empty key the menu happens to have.
+    filters: Object.fromEntries(Object.entries(S.filters).filter(([, v]) => v && v.length)),
+    kinds  : [...S.chosenKinds],
+    savedAt: new Date().toISOString(),
+  };
+
+  // Same name replaces, rather than quietly keeping two rows that read alike.
+  const at = list.findIndex(p => p.name.toLowerCase() === name.toLowerCase());
+  if(at >= 0) list[at] = entry; else list.push(entry);
+
+  storePresets(list);
+  paintQuick();
+  setNaming(false);
+  $("svCount").textContent = `Saved as “${name}”`;
+}
 
 /* ── rows ── */
 /* The row reads the same words the filter offered. The index stores
@@ -1550,6 +1793,8 @@ $("resetBoard").addEventListener("click", async e => {
     S.offsiteTrt   = st.offsiteTrt || null;
     paintSites();
     paintConnections(st.connections);
+    // After the facets land: a saved selection is validated against them.
+    paintQuick();
   }catch(err){
     note("Could not reach the server: " + err.message, true);
   }
