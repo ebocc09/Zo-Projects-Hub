@@ -209,7 +209,7 @@ function publish({ token, message } = {}){
   const idx = path.join(os.tmpdir(), `zo-publish-${process.pid}-${Date.now()}.idx`);
   const withIndex = { env: { ...process.env, GIT_INDEX_FILE: idx, ...RAW_BYTES } };
 
-  let commit;
+  let commit, manifest;
   try{
     // A throwaway index means none of this reaches the real one, so an
     // interrupted publish cannot leave staged changes behind.
@@ -222,7 +222,7 @@ function publish({ token, message } = {}){
     // The manifest is written straight into the object store and added by hash,
     // so it never appears in the working tree — publishing must not leave a
     // stray file behind for the next `git status` to report.
-    const manifest = { published: new Date().toISOString(), files: {} };
+    manifest = { published: new Date().toISOString(), files: {} };
     for(const rel of plan.files) manifest.files[rel] = blobShaOf(path.join(ROOT, rel));
     const blob = git(["hash-object", "-w", "--stdin"],
                      { input: JSON.stringify(manifest, null, 2) + "\n",
@@ -256,6 +256,11 @@ function publish({ token, message } = {}){
     // means a retry re-pushes the same snapshot rather than stacking a second.
     throw new Error(gitFailure(err));
   }
+
+  /* Record what we just sent as this machine's installed state. Otherwise
+     Check for Updates here fetches the CDN's older copy for the next few
+     minutes and offers to install it over what was just published. */
+  try { require("./updater").recordInstalled(manifest); } catch {}
 
   return { ok: true, nothing: false, commit, ...plan };
 }

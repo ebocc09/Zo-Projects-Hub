@@ -1598,7 +1598,9 @@ async function checkUpdates({ quiet } = {}){
   try{
     const d = await api("/api/update/check");
     if(d.upToDate){
-      say.textContent = "Up to date" + (d.published ? " — published " + when(d.published) : "");
+      say.textContent = d.behindCdn
+        ? "Up to date — GitHub's cache is still catching up with your last publish"
+        : "Up to date" + (d.published ? " — published " + when(d.published) : "");
       return d;
     }
     say.textContent = `${d.total} file${d.total === 1 ? "" : "s"} to update`;

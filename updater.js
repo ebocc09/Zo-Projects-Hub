@@ -104,6 +104,20 @@ async function check(boards = []){
   const remote = published.files || {};
   const installed = readInstalled();
 
+  /* raw.githubusercontent is a CDN and lags a publish by a few minutes. Without
+     this, checking straight after publishing fetches the *previous* manifest,
+     finds the local files differ from it, and offers to install the older
+     version over the newer one — an update that runs backwards. Anything older
+     than what this machine already has is the CDN catching up, not an update. */
+  if(installed.published && published.published &&
+     new Date(published.published) < new Date(installed.published)){
+    return {
+      upToDate: true, behindCdn: true,
+      published: published.published, since: installed.published,
+      changed: [], removed: [], refused: [], groups: [], needsRestart: false, total: 0,
+    };
+  }
+
   const changed = [], refused = [];
   for(const [rel, sha] of Object.entries(remote)){
     if(isSecret(rel) || isState(rel)){ refused.push({ rel, why: "not a publishable file" }); continue; }
@@ -254,4 +268,7 @@ async function apply(io = {}){
   }
 }
 
-module.exports = { check, apply, friendly, MANIFEST_FILE, OWNER, REPO, REF };
+module.exports = { check, apply, friendly, MANIFEST_FILE, OWNER, REPO, REF,
+                   /* publish.js records what it just sent, so the publishing
+                      machine knows it is ahead while the CDN catches up. */
+                   recordInstalled: writeInstalled };
