@@ -85,6 +85,11 @@ function publishedTree(){
     const m = rec.match(/^\d+ blob ([0-9a-f]+)\t([\s\S]+)$/);
     if(m) map.set(m[2], m[1]);
   }
+  /* The manifest is generated into the tree at publish time and has no local
+     counterpart, so leaving it here makes every subsequent publish report it as
+     removed — and, worse, keeps "nothing has changed" permanently false, so the
+     Hub would push a fresh commit every time the button was pressed. */
+  map.delete(MANIFEST);
   return map;
 }
 
@@ -140,6 +145,23 @@ function authEnv(token){
   };
 }
 
+/* ── publish the bytes that are actually on disk ──
+   This repo has core.autocrlf=true, so git rewrites CRLF to LF when it stores a
+   blob. Half the estate is CRLF, so the blob git wrote and the file on disk
+   hashed to different things — and everything downstream is built on those
+   hashes agreeing. The manifest recorded the disk hash while the CDN served the
+   normalised blob, so an updater would have found 35 files permanently out of
+   date and refused every one of them as a failed integrity check.
+
+   Turning conversion off for these invocations makes the published bytes an
+   exact copy of the working tree. It also happens to be the correct answer for
+   the .cmd and .bat launchers, which want their CRLF. */
+const RAW_BYTES = {
+  GIT_CONFIG_COUNT: "1",
+  GIT_CONFIG_KEY_0: "core.autocrlf",
+  GIT_CONFIG_VALUE_0: "false",
+};
+
 /** What GitHub currently has on the target branch, or null. */
 function remoteHead(token){
   try{
@@ -185,7 +207,7 @@ function publish({ token, message } = {}){
   }
 
   const idx = path.join(os.tmpdir(), `zo-publish-${process.pid}-${Date.now()}.idx`);
-  const withIndex = { env: { ...process.env, GIT_INDEX_FILE: idx } };
+  const withIndex = { env: { ...process.env, GIT_INDEX_FILE: idx, ...RAW_BYTES } };
 
   let commit;
   try{
@@ -203,7 +225,8 @@ function publish({ token, message } = {}){
     const manifest = { published: new Date().toISOString(), files: {} };
     for(const rel of plan.files) manifest.files[rel] = blobShaOf(path.join(ROOT, rel));
     const blob = git(["hash-object", "-w", "--stdin"],
-                     { input: JSON.stringify(manifest, null, 2) + "\n" }).trim();
+                     { input: JSON.stringify(manifest, null, 2) + "\n",
+                       env: { ...process.env, ...RAW_BYTES } }).trim();
     git(["update-index", "--add", "--cacheinfo", `100644,${blob},${MANIFEST}`], withIndex);
 
     const tree = git(["write-tree"], withIndex).trim();
