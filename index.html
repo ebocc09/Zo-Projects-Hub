@@ -1644,6 +1644,11 @@ $("updGo").addEventListener("click", async () => {
     if(d.deleted)   bits.push(`<div class="upd-grp"><span class="nm">${d.deleted} removed</span></div>`);
     if(d.restarted && d.restarted.length)
       bits.push(`<div class="upd-grp"><span class="nm">Restarted</span><span class="ct">${d.restarted.map(esc).join(", ")}</span></div>`);
+    if(d.failed && d.failed.length)
+      bits.push(`<div class="upd-note"><b>Did not come back up:</b>
+        ${d.failed.map(f => esc(f.serial) + " — " + esc(f.error)).join("<br>")}<br>
+        The files updated; the board did not restart. Start it from its tile, and
+        check <b>logs/</b> if it fails again.</div>`);
     if(d.backedUp && d.backedUp.length)
       bits.push(`<div class="upd-note">${d.backedUp.length} file${d.backedUp.length === 1 ? " was" : "s were"}
         edited on this machine and would have been overwritten. The old

@@ -336,7 +336,8 @@ const server = http.createServer(async (req, res) => {
           isRunning : b => !!states.find(s => s.serial === b.serial && s.running),
           stopBoard : async b => { log(`update: stopping ${b.serial}`); await stop(b); },
           startBoard: async b => { const r = await launch(b);
-                                   log(`update: restarting ${b.serial}: ${r.ok ? "up" : r.error}`); },
+                                   log(`update: restarting ${b.serial}: ${r.ok ? "up" : r.error}`);
+                                   return r; },
         });
         log(`update applied: ${out.installed || 0} file(s), ${out.deleted || 0} removed`);
         return sendJson(res, 200, { ok: true, ...out });

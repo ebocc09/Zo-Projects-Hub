@@ -247,17 +247,22 @@ async function apply(io = {}){
     writeInstalled({ published: remoteManifest.published, files: remoteManifest.files });
 
     /* ── 5. bring the boards back ── */
-    const restarted = [];
+    /* Report what actually came back, not what we asked to come back. A board
+       that fails to rebind its port is the single most likely way an update
+       goes wrong, and "Restarted ZO-004" over a dead board would send someone
+       looking anywhere but here. */
+    const restarted = [], failed = [];
     for(const board of toRestart){
-      if(startBoard) await startBoard(board);
-      restarted.push(board.serial);
+      const r = startBoard ? await startBoard(board) : { ok: true };
+      if(r && r.ok === false) failed.push({ serial: board.serial, error: r.error || "did not come back up" });
+      else restarted.push(board.serial);
     }
 
     return {
       ok: true, nothing: false,
       installed: plan.changed.length,
       deleted: plan.removed.length,
-      restarted,
+      restarted, failed,
       backedUp,
       backupDir: backedUp.length ? backupDir : null,
       needsRestart: plan.needsRestart,

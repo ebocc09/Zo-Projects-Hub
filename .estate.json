@@ -1,5 +1,5 @@
 {
-  "published": "2026-08-12T05:03:37.498Z",
+  "published": "2026-08-12T05:14:47.577Z",
   "files": {
     ".gitignore": "2f84e638bc126d0c171194e003ca1a94d25b24f4",
     "README.md": "704650fa66e8ac66095182e0b7b30181f219c359",
@@ -60,7 +60,7 @@
     "estate-files.js": "0fb74e5523cc41f50e2aa886aba3d40a9a55b44b",
     "garage-oauth.js": "b6e14aa67f878bc38772fd6de4e15af7e2972f84",
     "health.js": "0ab4c58f6e17b0b4eaea7792a891ea521cea798d",
-    "index.html": "46f5786cf0251655a90339f182847b3d7ba79a08",
+    "index.html": "51eca8c050d1edea98e3c9b00a380a89109a303f",
     "map-intrepid.js": "feef20ca97204e38fce1e1a94f83e7573ef8758f",
     "package-portable.js": "534904d278b523f8161187bc0daeae81e3c5d9bd",
     "package.json": "64c956932be68fe21154230a7be5a2e01bdd9c5d",
@@ -69,8 +69,8 @@
     "probes.js": "be3776246becf6bbb82c71189a55789dc31dcc7b",
     "publish.js": "a48a1f2a041615ad33600626d3f79191e044debc",
     "registry.js": "fe6d0eaae383f1128752ada9250783b79121650e",
-    "server.js": "6152e1ad7cf3c8d6aacce6fb2255ff25cae35de8",
+    "server.js": "fa11429a4620046111cca6fe3554ad7bf57d619f",
     "signin.js": "96659cd2cc5df13e0179ed59df1f2416c1d2df44",
-    "updater.js": "9b10f40d43c55a8a436eb056d8383a3d8589fcbf"
+    "updater.js": "afd03e6c22a5bb2e1dc6a8bf6a8aa6ce08e6b408"
   }
 }
