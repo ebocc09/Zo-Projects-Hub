@@ -99,11 +99,11 @@ function publishedTree(){
  *            removed:string[], first:boolean}}
  */
 function preview(){
-  const { files, dropped } = vettedFiles(ROOT);
+  const { files, dropped, untracked } = vettedFiles(ROOT);
   assertNoSecrets(files, "the publish set");
 
   const prev = publishedTree();
-  if(!prev) return { files, dropped, added: files, changed: [], removed: [], first: true };
+  if(!prev) return { files, dropped, untracked, added: files, changed: [], removed: [], first: true };
 
   const added = [], changed = [];
   for(const rel of files){
@@ -113,7 +113,7 @@ function preview(){
   }
   const now = new Set(files);
   const removed = [...prev.keys()].filter(p => !now.has(p)).sort();
-  return { files, dropped, added, changed, removed, first: false };
+  return { files, dropped, untracked, added, changed, removed, first: false };
 }
 
 /* An identity is required to write a commit object and this repo may not have

@@ -1677,7 +1677,14 @@ function paintPublish(d){
     ? line("all", "add", d.files)
     : line("new", "add", d.added) + line("changed", "chg", d.changed) + line("removed", "del", d.removed);
 
-  $("pubList").innerHTML = html || "<div>Nothing has changed since the last publish.</div>";
+  /* Called out on their own line: these are in no commit, so they have had no
+     review at all, and a scratch file left in the folder is exactly how
+     something unintended ends up on a public repo. */
+  const loose = (d.untracked || []).length
+    ? `<div style="margin-top:8px"><b class="del">not in git</b> ${d.untracked.map(esc).join("  ·  ")}</div>`
+    : "";
+
+  $("pubList").innerHTML = (html + loose) || "<div>Nothing has changed since the last publish.</div>";
   $("pubList").hidden = false;
   $("pubDropped").textContent = d.dropped.length
     ? `${d.dropped.length} machine-local file dropped: ${d.dropped.join(", ")}`

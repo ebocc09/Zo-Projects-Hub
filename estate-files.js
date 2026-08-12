@@ -46,10 +46,19 @@ const isState  = p => STATE.some(re => re.test(String(p)));
  * @returns {{files: string[], dropped: string[]}} POSIX-separated repo-relative paths
  */
 function vettedFiles(root = ROOT){
-  const listed = execFileSync(
-    "git", ["ls-files", "--cached", "--others", "--exclude-standard"],
-    { cwd: root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }
-  ).split("\n").map(s => s.trim()).filter(Boolean);
+  const run = args => execFileSync("git", args,
+    { cwd: root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 })
+    .split("\n").map(s => s.trim()).filter(Boolean);
+
+  const listed = run(["ls-files", "--cached", "--others", "--exclude-standard"]);
+  /* Untracked-but-not-ignored files ship too — that is deliberate, because an
+     uncommitted board edit is the normal state here. But it also means any
+     scratch file left lying in the tree goes out with everything else, and on a
+     public repo that is how a debug dump or a half-finished note gets
+     published. Reported separately so the review list can say which files are
+     new to the repo rather than burying them among seventy others. */
+  const untracked = new Set(run(["ls-files", "--others", "--exclude-standard"])
+    .map(p => p.split(path.sep).join("/")));
 
   const files = [], dropped = [];
   for(const rel of listed){
@@ -60,7 +69,8 @@ function vettedFiles(root = ROOT){
     if(!st.isFile()) continue;
     files.push(rel.split(path.sep).join("/"));
   }
-  return { files: files.sort(), dropped };
+  const sorted = files.sort();
+  return { files: sorted, dropped, untracked: sorted.filter(f => untracked.has(f)) };
 }
 
 /**
