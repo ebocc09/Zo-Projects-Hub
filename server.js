@@ -358,7 +358,9 @@ const server = http.createServer(async (req, res) => {
       if(!authed(body)) return sendJson(res, 401, { error: "Wrong password" });
       try{
         const out = publisher.publish({
-          token: credstore.githubToken(),
+          // Not githubToken(): that one is handed to teammates by the QR on the
+          // Task Tracker tile, and must never carry push rights to the estate.
+          token: credstore.publishToken(),
           message: body.message,
         });
         log(out.nothing ? "publish: nothing to send" : `publish: ${out.commit.slice(0, 8)}`);

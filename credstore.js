@@ -78,7 +78,15 @@ const EMPTY = { version: 2, updated: null, garage: {}, intrepid: "",
                    that sync their own data back to a repo. It is here for the
                    same reason everything else is: so it lives outside every
                    project folder and cannot be committed by accident. */
-                github: { token: "" } };
+                github: { token: "" },
+
+                /* Publishing the estate is a *separate* token, deliberately.
+                   The one above is handed out — the Task Tracker tile copies it
+                   to a clipboard and shows it as a QR for teammates to scan. A
+                   single shared token that could also push to the estate repo
+                   would hand every teammate who scanned that code the ability
+                   to publish to everyone else. Two purposes, two credentials. */
+                publish: { token: "" } };
 
 function readStore(){
   try{
@@ -86,12 +94,13 @@ function readStore(){
     return { ...EMPTY, ...raw,
              garage   : { ...(raw.garage || {}) },
              garageMcp: { ...EMPTY.garageMcp, ...(raw.garageMcp || {}) },
-             github   : { ...EMPTY.github, ...(raw.github || {}) } };
+             github   : { ...EMPTY.github, ...(raw.github || {}) },
+             publish  : { ...EMPTY.publish, ...(raw.publish || {}) } };
   }catch{
     // Missing or malformed reads as absent. A board must not fail to start
     // because a shared file it does not own got mangled.
     return { ...EMPTY, garage: {}, garageMcp: { ...EMPTY.garageMcp },
-             github: { ...EMPTY.github } };
+             github: { ...EMPTY.github }, publish: { ...EMPTY.publish } };
   }
 }
 
@@ -110,6 +119,7 @@ function writeStore(patch){
     garage   : { ...cur.garage, ...(patch.garage || {}) },
     garageMcp: { ...cur.garageMcp, ...(patch.garageMcp || {}) },
     github   : { ...cur.github, ...(patch.github || {}) },
+    publish  : { ...cur.publish, ...(patch.publish || {}) },
     version  : 2,
     updated  : new Date().toISOString()
   };
@@ -147,6 +157,12 @@ function intrepidCookie(local = ""){
 function githubToken(){ return readStore().github.token || ""; }
 const setGithubToken = token => writeStore({ github: { token: String(token || "").trim() } });
 
+/* Never handed to a board, never copied to a clipboard, never drawn as a QR —
+   the only caller is publish.js. Kept apart from githubToken() so the two can
+   never be confused at the point of use. */
+function publishToken(){ return readStore().publish.token || ""; }
+const setPublishToken = token => writeStore({ publish: { token: String(token || "").trim() } });
+
 function mcpClient(){ return readStore().garageMcp.client || null; }
 function mcpTokens(){ return readStore().garageMcp.tokens || null; }
 
@@ -175,6 +191,10 @@ function summary(){
     /* Masked by the prefix rather than the tail: GitHub tokens all start
        github_pat_ and the interesting part is which one this is, so the first
        few characters after the prefix identify it without handing it over. */
+    publish: {
+      set : Boolean(s.publish.token),
+      hint: s.publish.token ? s.publish.token.slice(0, 15) + "…" : ""
+    },
     github: {
       set : Boolean(s.github.token),
       hint: s.github.token ? s.github.token.slice(0, 15) + "…" : ""
@@ -190,4 +210,5 @@ function clearStore(){
 module.exports = { STORE_FILE, readStore, writeStore,
                    garageCookie, intrepidCookie, summary, clearStore,
                    mcpClient, mcpTokens, setMcpClient, setMcpTokens, clearMcp,
-                   githubToken, setGithubToken };
+                   githubToken, setGithubToken,
+                   publishToken, setPublishToken };

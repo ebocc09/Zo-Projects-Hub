@@ -59,10 +59,14 @@ function gitFailure(err){
     .filter(Boolean).map(String).join("\n").trim();
   if(/ENOENT/i.test(text) && !/remote/i.test(text))
     return "git is not installed on this machine, or is not on PATH.";
-  if(/could not read Username|Authentication failed|403|401/i.test(text))
-    return "GitHub rejected the credentials. The stored token needs Contents: " +
-           "Read and write on Zo-Projects-Hub — the Task Tracker token alone is " +
-           "scoped to that repo only.";
+  if(/denied to|403/i.test(text))
+    return "GitHub authenticated the token but refused the write. The token needs " +
+           "Contents: Read and write on Zo-Projects-Hub — read access alone still " +
+           "lets the repo be listed and cloned, which is why it looks connected. " +
+           "Check it at github.com/settings/personal-access-tokens.";
+  if(/could not read Username|Authentication failed|401/i.test(text))
+    return "GitHub rejected the token outright. It may have expired, or never had " +
+           "this repository selected.";
   if(/non-fast-forward|rejected|fetch first/i.test(text))
     return "GitHub has commits this machine has not seen — something changed the " +
            "repo outside the Hub. Resolve that before publishing again.";
@@ -123,10 +127,26 @@ function authEnv(token){
   return {
     ...process.env,
     GIT_TERMINAL_PROMPT: "0",                  // fail instead of hanging on a prompt
-    GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: "http.extraheader",
-    GIT_CONFIG_VALUE_0: "AUTHORIZATION: basic " + basic,
+    GIT_CONFIG_COUNT: "2",
+    /* Git Credential Manager is configured on this repo, and a credential it
+       has cached for github.com will be offered alongside ours — leaving which
+       one authenticates up to chance, and producing a "denied" that the token
+       itself does not explain. Emptying the helper for this invocation only
+       makes the header below the single source of credentials. */
+    GIT_CONFIG_KEY_0: "credential.helper",
+    GIT_CONFIG_VALUE_0: "",
+    GIT_CONFIG_KEY_1: "http.extraheader",
+    GIT_CONFIG_VALUE_1: "AUTHORIZATION: basic " + basic,
   };
+}
+
+/** What GitHub currently has on the target branch, or null. */
+function remoteHead(token){
+  try{
+    const out = git(["ls-remote", "origin", `refs/heads/${TARGET}`], { env: authEnv(token) });
+    const m = out.match(/^([0-9a-f]{40})\s/m);
+    return m ? m[1] : null;
+  }catch{ return null; }
 }
 
 function ensureRemote(){
@@ -144,8 +164,25 @@ function publish({ token, message } = {}){
   if(!token) throw new Error("No GitHub token saved — add one in Admin › Sign-ins.");
 
   const plan = preview();
-  const nothing = !plan.first && !plan.added.length && !plan.changed.length && !plan.removed.length;
-  if(nothing) return { ok: true, nothing: true, ...plan };
+  const nothingNew = !plan.first && !plan.added.length && !plan.changed.length && !plan.removed.length;
+
+  let existing = null;
+  try { existing = git(["rev-parse", "--verify", LOCAL_REF]).trim(); } catch {}
+
+  /* A previous run can leave a built commit that never made it to GitHub — the
+     tree is assembled first and the push happens last. Without this, the retry
+     compares the working tree against that local commit, finds them identical,
+     and cheerfully reports "nothing to send" while GitHub still has nothing.
+     So "nothing to do" has to mean the remote already has this exact commit,
+     not merely that we have already committed it. */
+  if(nothingNew && existing){
+    ensureRemote();
+    if(remoteHead(token) === existing) return { ok: true, nothing: true, ...plan };
+    try{
+      git(["push", "origin", `${LOCAL_REF}:refs/heads/${TARGET}`], { env: authEnv(token) });
+    }catch(err){ throw new Error(gitFailure(err)); }
+    return { ok: true, nothing: false, resent: true, commit: existing, ...plan };
+  }
 
   const idx = path.join(os.tmpdir(), `zo-publish-${process.pid}-${Date.now()}.idx`);
   const withIndex = { env: { ...process.env, GIT_INDEX_FILE: idx } };
