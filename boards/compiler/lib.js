@@ -1,4 +1,4 @@
-/* The Compiler — shared core.
+/* The Compiler — shared core. (update test, 2026-08-12)
 
    A board of tools over the two systems that between them describe a vehicle:
    Garage's index says what a car IS, Intrepid says what is WRONG with it.
