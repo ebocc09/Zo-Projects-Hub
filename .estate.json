@@ -1,7 +1,7 @@
 {
-  "published": "2026-08-12T04:54:23.051Z",
+  "published": "2026-08-12T04:59:49.880Z",
   "files": {
-    ".gitignore": "e11ff96107bcedf49101a58cc7cbdf1ce24debb3",
+    ".gitignore": "2f84e638bc126d0c171194e003ca1a94d25b24f4",
     "README.md": "704650fa66e8ac66095182e0b7b30181f219c359",
     "Start Zo Hub.cmd": "880c88a671b620e5869f902436400e59b948d56e",
     "boards/charging-tracker/.gitignore": "2f146ee1bff4d687e727dae38aadc885fb14ea72",
@@ -57,7 +57,7 @@
     "config.json": "e9cdfdadc13fb1ab38ac24b44d27c406d1c2b8bf",
     "connect.js": "521f4d407af2e3a7aed2d9be90f7f92fb85ca16b",
     "credstore.js": "8d578e70e41b75227d9463028a15b866308831a4",
-    "estate-files.js": "3ddb9229fdf1dcf48026da97b800b43872fea619",
+    "estate-files.js": "0fb74e5523cc41f50e2aa886aba3d40a9a55b44b",
     "garage-oauth.js": "b6e14aa67f878bc38772fd6de4e15af7e2972f84",
     "health.js": "0ab4c58f6e17b0b4eaea7792a891ea521cea798d",
     "index.html": "64686e7c1b4148e6826984f94283863287af24d8",

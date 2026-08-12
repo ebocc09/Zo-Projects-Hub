@@ -19,3 +19,6 @@ boards/*/.vin-trt-cache.json
 
 # Per-board server output from launches.
 logs/
+
+# What the updater keeps when an incoming file would overwrite a local edit.
+.zo-backup/

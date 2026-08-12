@@ -33,6 +33,11 @@ const STATE = [
   /(^|[\\/])logs[\\/]/i,
   /\.log$/i,
   /(^|[\\/])credentials\.json$/i,
+  /* What the updater sets aside before overwriting a locally-edited file. It
+     lives inside the estate folder and is untracked, so without this it would
+     be swept into the next publish — uploading one machine's private edits to
+     everyone else, which is the opposite of what keeping a backup is for. */
+  /(^|[\\/])\.zo-backup[\\/]/i,
 ];
 
 const isSecret = p => SECRET.test(String(p));
