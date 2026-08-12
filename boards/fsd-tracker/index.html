@@ -1,0 +1,2852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FSD Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ══════════════════════════════ ZO-1 ══════════════════════════════
+   House style. Ink and paper, one accent, uppercase micro-labels with wide
+   tracking, display numerals tracked tight. Here the single accent is BLUE
+   and it means one thing only: FSD was engaged.                         */
+:root{
+  --ink:#171A20; --ink-soft:#393C41; --ink-mute:#5C5E62;
+  --line:#D0D1D2; --line-soft:#E8E8E9;
+  --paper:#FFFFFF; --paper-alt:#F4F4F4;
+  --red:#E82127; --blue:#3E6AE1;
+  --grey-car:#9AA0A6; --amber:#F5B31B; --green:#12BB6A;
+  --r-sm:4px; --r-md:8px; --r-lg:18px;
+  --shadow:0 2px 10px rgba(0,0,0,.08);
+  --shadow-lg:0 8px 40px rgba(0,0,0,.16);
+  --nav-h:56px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  color:var(--ink); background:var(--paper);
+  font-size:14px; line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,select,textarea{font-family:inherit;font-size:14px;color:inherit}
+body.no-scroll{overflow:hidden}
+/* Any class here that sets display: flex outranks the UA sheet's
+   [hidden]{display:none}, so hidden elements render anyway. This one line is
+   what keeps the Connections tab out of the locked password gate. */
+[hidden]{display:none !important}
+
+/* ───────────────────────────── Nav ───────────────────────────── */
+.nav{
+  position:sticky;top:0;z-index:60;height:var(--nav-h);
+  display:flex;align-items:center;gap:18px;padding:0 22px;
+  background:var(--paper);border-bottom:1px solid var(--line-soft);
+}
+.wordmark{
+  font-weight:600;font-size:16px;letter-spacing:.42em;
+  color:var(--ink);text-indent:.42em;user-select:none;
+}
+.nav-div{width:1px;height:18px;background:var(--line)}
+.nav-title{font-weight:500;font-size:14px;color:var(--ink-soft)}
+.nav-spacer{flex:1}
+.trt-btn{
+  display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;
+  border:1px solid var(--line);border-radius:var(--r-sm);
+  font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-soft);transition:border-color .2s,background .15s;
+}
+.trt-btn:hover{border-color:var(--ink);background:var(--paper-alt)}
+.trt-btn b{font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:.04em}
+/* Gear plus label, matching the Charging Tracker exactly — an unlabelled
+   gear reads as "settings for this widget" rather than "the admin area". */
+.nav-btn{
+  display:flex;align-items:center;gap:7px;
+  height:32px;padding:0 13px;border-radius:var(--r-sm);
+  font-size:12px;font-weight:500;color:var(--ink);
+  transition:background .15s;
+}
+.nav-btn:hover{background:rgba(23,26,32,.07)}
+.nav-btn svg{width:17px;height:17px;display:block}
+
+/* ───────────────────────────── Hero ───────────────────────────── */
+.hero{
+  position:relative;overflow:hidden;
+  background:var(--ink);color:#fff;
+  padding:40px 22px 54px;text-align:center;
+}
+/* Faded lane markings behind everything. Flat 2D, no photography. */
+.hero-art{position:absolute;inset:0;width:100%;height:100%;opacity:.5;pointer-events:none}
+.hero-inner{position:relative;max-width:840px;margin:0 auto}
+
+/* The banner graphic: a top-down car sitting on its projected FSD path.
+   The blue ribbon runs UNDER the car and past it in both directions, which
+   is what makes it read as a path being followed rather than a spotlight. */
+.fsd-art{width:186px;height:auto;display:block;margin:0 auto 18px}
+@keyframes pathFlow{to{stroke-dashoffset:-56}}
+.fsd-art .flow{animation:pathFlow 2.2s linear infinite}
+
+.hero h1{margin:0 0 8px;font-size:38px;font-weight:600;letter-spacing:-.02em}
+.hero p{margin:0 auto 30px;max-width:520px;font-size:14px;color:rgba(255,255,255,.68)}
+
+.btn{
+  height:42px;padding:0 32px;border-radius:var(--r-sm);
+  font-size:12px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;
+  transition:background .15s,border-color .2s,opacity .15s;
+}
+.hero-actions{display:flex;gap:9px;justify-content:center;flex-wrap:wrap}
+.btn-primary{background:#fff;color:var(--ink)}
+.btn-primary:hover{background:#E8E8E9}
+/* Secondary on the dark band. --line would vanish against --ink, so the
+   border is a white alpha instead. */
+.btn-onink{
+  background:transparent;color:#fff;
+  border:1px solid rgba(255,255,255,.32);
+}
+.btn-onink:hover{border-color:#fff;background:rgba(255,255,255,.08)}
+.btn[disabled]{opacity:.4;cursor:not-allowed}
+.btn-dark{background:var(--ink);color:#fff}
+.btn-dark:hover{background:#000}
+.btn-ghost{background:var(--paper);color:var(--ink);border:1px solid var(--line)}
+.btn-ghost:hover{border-color:var(--ink);background:var(--paper-alt)}
+
+/* ───────────────────────────── Stat strip ───────────────────────────── */
+.stats{
+  display:flex;background:var(--paper);
+  border-bottom:1px solid var(--line-soft);
+}
+.stat{flex:1;padding:18px 22px;border-right:1px solid var(--line-soft)}
+.stat:last-child{border-right:none}
+.stat-k{
+  font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-mute);
+}
+.stat-v{
+  margin-top:4px;font-size:22px;font-weight:600;letter-spacing:-.01em;
+  font-variant-numeric:tabular-nums;
+}
+.stat-v small{font-size:12px;font-weight:600;color:var(--ink-mute);margin-left:3px;letter-spacing:0}
+
+/* ───────────────────────────── List ───────────────────────────── */
+main{max-width:1140px;margin:0 auto;padding:22px}
+.list-head{
+  display:flex;align-items:center;gap:12px;margin:0 0 14px;
+}
+/* The subtitle is the only thing here allowed to shrink; without min-width:0 a
+   flex item refuses to go below its content width and pushes the row wide. */
+.list-head #listSub{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* One group pinned right, so adding a button does not need a new margin rule. */
+.list-actions{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none;
+              position:relative}
+.list-head h2{
+  margin:0;font-size:13px;font-weight:600;letter-spacing:.11em;text-transform:uppercase;
+}
+.list-head span{font-size:12px;color:var(--ink-mute)}
+.list{display:flex;flex-direction:column;gap:9px}
+
+.veh{
+  display:grid;grid-template-columns:196px 1fr 176px;
+  align-items:center;gap:20px;
+  padding:14px 18px 14px 8px;
+  background:var(--paper);
+  border:1px solid var(--line-soft);border-radius:var(--r-lg);
+  transition:border-color .2s,box-shadow .2s;
+  animation:rowIn .34s cubic-bezier(.2,.8,.3,1);
+}
+@keyframes rowIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+.veh:hover{box-shadow:var(--shadow)}
+/* State lives in the border, never a background fill. Blue = FSD engaged,
+   red = delivered but never engaged. */
+.veh.used{border-color:rgba(62,106,225,.5)}
+.veh.none{border-color:rgba(232,33,39,.38)}
+.veh.failed{border-color:rgba(232,33,39,.4)}
+
+.scene{width:190px;height:145px;display:block}   /* matches the 170×130 viewBox */
+
+/* The car carries the same signal as the border. A tint rather than a
+   saturated fill — the silhouette should still read as a car, not a warning
+   label — with the lamp signature at full strength so the hue is legible
+   even at row scale. */
+.car-body{fill:var(--grey-car);transition:fill .2s}
+.lamp{stroke:#FFFFFF;stroke-opacity:.55}
+.veh.used  .car-body{fill:#A9C3F3}
+.veh.used  .lamp{stroke:#3E6AE1;stroke-opacity:.95}
+.veh.none  .car-body{fill:#EFAEB0}
+.veh.none  .lamp{stroke:#C82026;stroke-opacity:.85}
+.veh.failed .car-body{fill:#D7D9DB}
+.veh.failed .lamp{stroke:#8A8C8E;stroke-opacity:.7}
+
+.veh-id{min-width:0}
+.vin-row{display:flex;align-items:baseline;gap:8px;min-width:0}
+.vin{
+  font-size:15px;font-weight:600;letter-spacing:.055em;
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;
+}
+/* The VIN is the row's heading, so it stays ink-coloured rather than joining
+   the customer name in blue — two links of equal weight beside each other
+   would read as a pair of buttons. The underline on hover is the whole tell,
+   which is enough for a target the pointer is already on. */
+a.vin-link{
+  color:inherit;text-decoration:none;display:block;
+  border-bottom:1px solid transparent;
+}
+a.vin-link:hover{border-bottom-color:var(--blue);color:var(--blue)}
+
+/* RN sits beside the VIN as a quiet identifier, not a state pill. */
+.rn{
+  flex:none;font-size:11.5px;font-weight:600;letter-spacing:.06em;
+  color:var(--blue);font-variant-numeric:tabular-nums;
+}
+/* A name, not a number — so drop the tabular figures and the tracking that
+   suited an RN, and let it truncate rather than shove the VIN around. */
+.order{
+  text-decoration:none;letter-spacing:0;font-variant-numeric:normal;
+  min-width:0;max-width:230px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;border-bottom:1px solid transparent;
+}
+.order:hover{border-bottom-color:currentColor}
+.model{
+  flex:none;font-size:11.5px;font-weight:600;letter-spacing:.02em;
+  color:var(--ink-mute);white-space:nowrap;
+}
+.veh-sub{
+  margin-top:5px;font-size:11.5px;color:var(--ink-mute);
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+}
+.badge{
+  display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 9px;
+  border-radius:10px;
+  font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  background:#EEEFF0;color:#5C5E62;
+}
+.veh.used .badge.fsd{background:#E9EEFC;color:#2B4CA8}
+.badge.warn{background:#FFF4D6;color:#8A6200}
+.badge.err{background:#FDE7E8;color:#A3161B}
+/* Moved, but not far enough to count. A miss, so it wears the same red as the
+   row border rather than the grey of a car with no data at all. */
+.badge.under{background:#FDE7E8;color:#A3161B}
+/* Still inside the measurement window, so the figure beside it is not final.
+   A caveat rather than a verdict, so it stays quiet — and it carries a live
+   dot because "counting" is a state, not an outcome. */
+.badge.live{background:#E8F2EF;color:#15665A}
+.badge.live::before{
+  content:"";width:5px;height:5px;border-radius:50%;background:currentColor;
+  animation:livePulse 1.9s ease-in-out infinite;
+}
+@keyframes livePulse{0%,100%{opacity:.3}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){
+  .badge.live::before{animation:none}
+}
+.advisor{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Two people can appear on a row and they mean different things, so each
+   wears its role. Unlabelled they would read as one name and a spare. */
+.who{
+  display:inline-flex;align-items:baseline;gap:5px;
+  min-width:0;max-width:210px;
+}
+.who i{
+  font-style:normal;font-size:9.5px;font-weight:600;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--ink-mute);
+  border:1px solid var(--line);border-radius:3px;padding:1px 4px;flex:none;
+}
+/* The truncation has to live on the text itself. text-overflow does nothing on
+   a flex container, so putting it on .who let long names overflow the card,
+   widen the document and send the fixed-position modals off to one side. */
+.who span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+/* The advisor is reference, not the subject of the measurement. */
+.who.adv{color:var(--ink-mute)}
+
+.readout{text-align:right}
+.miles{
+  font-size:29px;font-weight:600;letter-spacing:-.025em;
+  font-variant-numeric:tabular-nums;line-height:1.1;
+}
+.miles small{font-size:12px;font-weight:600;color:var(--ink-mute);margin-left:4px;letter-spacing:0}
+.miles.dim{color:var(--grey-car)}
+.readout-k{
+  margin-top:2px;
+  font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-mute);
+}
+/* Miles the window cut off. Deliberately quiet — it is context for one car,
+   not a figure anything is scored on, and it must never compete with the
+   number above it. */
+.readout-t{
+  margin-top:3px;
+  font-size:11px;font-weight:500;
+  font-variant-numeric:tabular-nums;
+  color:var(--ink-mute);
+}
+
+.empty{padding:70px 22px;text-align:center;color:var(--ink-mute)}
+.empty svg{width:150px;height:auto;display:block;margin:0 auto 14px;opacity:.6}
+.empty h3{margin:0 0 6px;font-size:15px;font-weight:600;color:var(--ink)}
+.empty p{margin:0;font-size:13px}
+
+.note{
+  margin:0 0 14px;padding:11px 14px;border-radius:var(--r-md);
+  background:#FFF4D6;color:#8A6200;font-size:12.5px;
+}
+.note.bad{background:#FDE7E8;color:#A3161B}
+
+/* ───────────────────────────── Overlays ───────────────────────────── */
+.scrim{
+  position:fixed;inset:0;background:rgba(23,26,32,.42);
+  opacity:0;pointer-events:none;transition:opacity .22s;z-index:80;
+}
+.scrim.on{opacity:1;pointer-events:auto}
+
+.modal{
+  position:fixed;z-index:90;left:50%;top:50%;transform:translate(-50%,-48%) scale(.98);
+  width:520px;max-width:92vw;max-height:88vh;background:var(--paper);
+  border-radius:var(--r-md);box-shadow:var(--shadow-lg);
+  opacity:0;pointer-events:none;
+  display:flex;flex-direction:column;overflow:hidden;
+  transition:opacity .22s,transform .22s cubic-bezier(.2,.8,.3,1),
+             width .24s cubic-bezier(.3,.9,.3,1);
+}
+.modal.on{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
+/* Locked, Admin is a narrow code prompt. Unlocked it becomes a workspace, so
+   it takes real estate — same two-shapes-in-one-dialog idea as the Charging
+   Tracker, just without the section rail since there is only one tab. */
+#admin{width:452px}
+#admin.unlocked{width:1040px;height:min(86vh,780px)}
+.modal-head{
+  padding:18px 20px;border-bottom:1px solid var(--line-soft);
+  display:flex;align-items:center;flex:none;
+}
+.modal-head h3{
+  margin:0;font-size:13px;font-weight:600;letter-spacing:.11em;text-transform:uppercase;
+}
+/* Which day and centre these numbers are for, beside the title — a
+   leaderboard with no scope stated invites the wrong comparison. */
+.modal-sub{
+  margin-left:12px;font-size:11.5px;color:var(--ink-mute);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;
+}
+.modal-body{padding:20px;overflow-y:auto}
+/* Thirty rows need room; the table's own scroller does the work inside. */
+.modal.wide{width:860px;height:min(86vh,720px)}
+.modal.wide .modal-body{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.modal-foot{
+  padding:0 20px 20px;display:flex;gap:8px;justify-content:flex-end;flex:none;
+}
+
+/* ── Password gate: a 2FA-style six-digit prompt ── */
+.lock-ic{
+  width:46px;height:46px;margin:6px auto 14px;border-radius:50%;
+  background:var(--paper-alt);display:flex;align-items:center;justify-content:center;
+}
+.lock-ic svg{width:21px;height:21px;color:var(--ink-soft)}
+.gate-t{text-align:center;font-size:13px;color:var(--ink-mute);margin-bottom:18px}
+.otp{display:flex;gap:9px;justify-content:center;margin-bottom:2px}
+.otp-box{
+  width:46px;height:56px;padding:0;
+  border:1px solid var(--line);border-radius:var(--r-md);
+  background:var(--paper);
+  text-align:center;font-size:22px;font-weight:600;
+  font-variant-numeric:tabular-nums;
+  outline:none;transition:border-color .15s,box-shadow .15s,background .15s;
+  -webkit-text-security:disc;
+}
+.otp-box::-webkit-outer-spin-button,.otp-box::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.otp-box:focus{border-color:var(--ink);box-shadow:0 0 0 3px rgba(23,26,32,.10)}
+.otp-box.filled{background:var(--paper-alt);border-color:#A9ABAD}
+.otp.bad .otp-box{border-color:var(--red);background:#FDE7E8}
+.otp.bad{animation:otpShake .38s cubic-bezier(.36,.07,.19,.97)}
+@keyframes otpShake{
+  10%,90%{transform:translateX(-2px)} 20%,80%{transform:translateX(4px)}
+  30%,50%,70%{transform:translateX(-7px)} 40%,60%{transform:translateX(7px)}
+}
+.gate-err{margin-top:10px;font-size:12.5px;color:#A3161B;text-align:center;height:17px}
+@media (max-width:420px){ .otp{gap:6px} .otp-box{width:40px;height:50px;font-size:19px} }
+
+.btn-x{
+  margin-left:auto;width:30px;height:30px;display:grid;place-items:center;
+  border-radius:var(--r-sm);color:var(--ink-mute);transition:background .15s;
+}
+.btn-x:hover{background:var(--paper-alt);color:var(--ink)}
+.btn-x svg{width:16px;height:16px}
+
+/* ── Admin workspace: section rail beside a scrolling pane ──
+   Same structure as the Charging Tracker. min-height:0 on both tracks
+   matters: a grid item defaults to min-height:auto, refuses to shrink below
+   its content, and pushes the scrollbar onto the page instead of the pane. */
+.admin{display:grid;grid-template-columns:218px 1fr;min-height:0;flex:1}
+.admin-rail{
+  display:flex;flex-direction:column;
+  border-right:1px solid var(--line-soft);
+  background:var(--paper-alt);
+  padding:10px 0;overflow-y:auto;min-height:0;
+}
+.rail-item{
+  position:relative;display:flex;align-items:center;gap:10px;
+  width:100%;padding:10px 16px;text-align:left;
+  font-size:12.5px;font-weight:500;color:var(--ink-soft);
+  transition:background .15s,color .15s;
+}
+.rail-item svg{width:16px;height:16px;flex:none;opacity:.62}
+.rail-item:hover{background:rgba(23,26,32,.05);color:var(--ink)}
+.rail-item.on{background:var(--paper);color:var(--ink);font-weight:600}
+.rail-item.on svg{opacity:1}
+.rail-item.on::before{
+  content:"";position:absolute;left:0;top:6px;bottom:6px;width:2px;background:var(--ink);
+}
+/* A section carrying something the operator should notice — a cookie that
+   just expired, a Garage token that will not load. */
+.rail-item .warn{
+  width:6px;height:6px;border-radius:50%;background:var(--red);
+  margin-left:auto;flex:none;
+}
+.rail-item .warn.ok{background:var(--green);animation:livePulse 2s ease-in-out infinite}
+@keyframes livePulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(18,187,106,.5)}
+  70%    {box-shadow:0 0 0 5px rgba(18,187,106,0)}
+}
+.rail-foot{
+  margin-top:auto;padding:14px 16px 4px;
+  font-size:10.5px;line-height:1.5;color:var(--ink-mute);
+}
+.admin-pane{overflow-y:auto;padding:26px 32px 30px;min-width:0;min-height:0}
+/* Long-form hints stay readable rather than stretching the full width. */
+.admin-pane .sec{max-width:620px}
+.sec{display:none}
+.sec.on{display:block;animation:secIn .2s ease}
+@keyframes secIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.sec-h{margin:0 0 4px;font-size:15px;font-weight:600;letter-spacing:-.01em}
+.sec-p{margin:0 0 18px;font-size:12.5px;color:var(--ink-mute);line-height:1.5}
+
+.btn-block{
+  width:100%;height:42px;border-radius:var(--r-sm);
+  font-size:12px;font-weight:600;letter-spacing:.11em;text-transform:uppercase;
+  border:1px solid var(--line);background:var(--paper);
+  transition:.15s;margin-bottom:9px;
+}
+.btn-block:hover{border-color:var(--ink);background:var(--paper-alt)}
+.btn-block.red{color:#A3161B;border-color:rgba(232,33,39,.4)}
+.btn-block.red:hover{background:#FDE7E8;border-color:var(--red)}
+/* Armed: a destructive button asks twice, in place, rather than throwing a
+   confirm() at someone who is already reading the button. */
+.btn-block.red.armed{background:#FDE7E8;border-color:var(--red);color:#A3161B}
+.btn-block.solid{background:var(--ink);color:#fff;border-color:var(--ink)}
+.btn-block.solid:hover{background:#000}
+.sep{height:1px;background:var(--line-soft);margin:20px 0}
+
+/* ── mode picker ──
+   Two cards rather than a switch. A switch says "on or off"; these are two
+   named ways of running the report, and the difference between them is a
+   sentence long, so each option needs room to say what it is. */
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
+.mode{
+  text-align:left;padding:13px 14px;border:1px solid var(--line);
+  border-radius:var(--r-md);background:var(--paper);cursor:pointer;
+  font:inherit;color:var(--ink);transition:border-color .14s,background .14s;
+}
+.mode:hover{border-color:var(--ink-mute)}
+.mode.on{border-color:var(--ink);background:var(--paper-alt);box-shadow:inset 0 0 0 1px var(--ink)}
+.mode-n{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;margin-bottom:4px}
+.mode-n .tick{
+  width:14px;height:14px;border-radius:50%;border:1.5px solid var(--line);flex:none;
+  display:grid;place-items:center;
+}
+.mode.on .mode-n .tick{border-color:var(--ink);background:var(--ink)}
+.mode.on .mode-n .tick::after{content:"";width:5px;height:5px;border-radius:50%;background:#fff}
+.mode-d{font-size:11.5px;color:var(--ink-mute);line-height:1.45}
+
+/* What advanced adds, listed rather than described, so the trade is legible
+   at a glance instead of buried in a paragraph. */
+.adds{margin:0 0 16px;padding:12px 14px;border:1px dashed var(--line);
+      border-radius:var(--r-md);background:var(--paper-alt)}
+.adds-h{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;
+        color:var(--ink-mute);margin-bottom:8px}
+.adds ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.adds li{font-size:12.5px;display:flex;align-items:flex-start;gap:8px;line-height:1.4}
+.adds li svg{width:13px;height:13px;flex:none;margin-top:2px;color:var(--green)}
+.adds .cost{margin-top:10px;padding-top:10px;border-top:1px solid var(--line-soft);
+            font-size:11.5px;color:var(--ink-mute);line-height:1.45}
+
+/* Advanced-only controls collapse rather than grey out — a disabled field
+   that cannot be used is just clutter in basic mode. */
+.adv-only[hidden]{display:none}
+
+/* Kept for the input-plus-buttons row in the threshold field; the sign-in
+   block it was written for now lives on the Hub. */
+.connect-row{display:flex;gap:8px}
+
+/* ── host filter menu ──
+   A dropdown rather than a row of chips, because a large centre has thirty-odd
+   hosts. Anything past a handful needs a search field, so it has one; the list
+   scrolls and every entry carries its car count so picking is informed. */
+.menu{
+  position:absolute;top:calc(100% + 6px);right:0;z-index:40;
+  width:288px;max-height:340px;background:var(--paper);
+  border:1px solid var(--line);border-radius:var(--r-md);
+  box-shadow:var(--shadow-lg);display:flex;flex-direction:column;overflow:hidden;
+}
+.menu-search{padding:9px;border-bottom:1px solid var(--line-soft);flex:none}
+.menu-search input{
+  width:100%;border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:7px 9px;font:inherit;font-size:12.5px;background:var(--paper);color:var(--ink);
+}
+.menu-search input:focus{outline:none;border-color:var(--ink)}
+.menu-list{overflow-y:auto;padding:5px;min-height:0}
+.menu-item{
+  display:flex;align-items:center;gap:9px;width:100%;
+  padding:7px 9px;border:0;border-radius:var(--r-sm);background:none;
+  font:inherit;font-size:12.5px;color:var(--ink);cursor:pointer;text-align:left;
+}
+.menu-item:hover{background:var(--paper-alt)}
+.menu-item.on{background:var(--ink);color:#fff}
+.menu-item .n{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.menu-item .c{font-variant-numeric:tabular-nums;font-size:11.5px;color:var(--ink-mute);flex:none}
+.menu-item.on .c{color:rgba(255,255,255,.75)}
+.menu-item .tick{width:13px;flex:none;opacity:0}
+.menu-item.on .tick{opacity:1}
+.menu-sep{height:1px;background:var(--line-soft);margin:5px 2px}
+.menu-none{padding:14px 10px;font-size:12px;color:var(--ink-mute);text-align:center}
+
+/* ══════════════════════════ leaderboard ══════════════════════════
+   Thirty-plus hosts is past the point where colour can carry identity, so
+   this is a TABLE with inline meters rather than a chart. One hue, because
+   the bars encode magnitude — a rate — not thirty separate identities.
+
+   The fill deliberately does not run accent→amber→red with the rate. This
+   ranks people, and at these sample sizes painting somebody's 60% in danger
+   red asserts something the data cannot support. Magnitude, not severity. */
+
+/* Sequential blue ramp: track is a light step of the fill's own hue.
+   Monotonic in lightness (L 0.937 → 0.561); fill clears 4.82:1 on white and
+   4.01:1 against its own track. */
+.lb{ --meter-fill:var(--blue); --meter-track:#E3EAFC; }
+
+.lb-wrap{display:flex;flex-direction:column;min-height:0;flex:1}
+
+/* Sort controls: one row above the data, per the interaction spec. */
+.lb-bar{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:0 0 14px;border-bottom:1px solid var(--line-soft);margin-bottom:2px;
+}
+.lb-bar .lbl{font-size:11px;font-weight:600;text-transform:uppercase;
+             letter-spacing:.07em;color:var(--ink-mute);margin-right:2px}
+
+/* ── the day's best ──
+   A hero figure, singular. Proportional figures, not tabular — tabular makes
+   a large standalone number look loose. */
+.lb-top{
+  display:flex;align-items:center;gap:18px;padding:16px 18px;margin:16px 0 6px;
+  border:1px solid var(--line);border-radius:var(--r-md);background:var(--paper-alt);
+}
+.lb-top-k{font-size:11px;font-weight:600;text-transform:uppercase;
+          letter-spacing:.07em;color:var(--ink-mute);margin-bottom:5px}
+.lb-top-n{font-size:19px;font-weight:600;letter-spacing:-.01em;line-height:1.15}
+.lb-top-s{font-size:12px;color:var(--ink-mute);margin-top:4px}
+.lb-top-v{margin-left:auto;text-align:right;flex:none}
+.lb-top-fig{font-size:48px;font-weight:600;line-height:1;letter-spacing:-.03em;
+            color:var(--ink)}
+.lb-top-fig small{font-size:19px;font-weight:500;color:var(--ink-mute);margin-left:2px}
+.lb-top-c{font-size:11.5px;color:var(--ink-mute);margin-top:5px}
+
+.lb-none{padding:14px 0;font-size:12.5px;color:var(--ink-mute)}
+
+/* ── the table ── */
+.lb-scroll{overflow-y:auto;min-height:0;flex:1;margin:0 -4px;padding:0 4px}
+.lb-head,.lb-row{
+  display:grid;grid-template-columns:30px minmax(120px,1fr) 52px 92px 132px 78px;
+  gap:12px;align-items:center;
+}
+.lb-head{
+  position:sticky;top:0;z-index:1;background:var(--paper);
+  padding:9px 8px;border-bottom:1px solid var(--line-soft);
+  font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--ink-mute);
+}
+.lb-row{
+  padding:10px 8px;border-bottom:1px solid var(--line-soft);cursor:pointer;
+  border-radius:var(--r-sm);font-size:12.5px;
+}
+.lb-row:hover{background:var(--paper-alt)}
+.lb-row.on{background:var(--ink);color:#fff}
+.lb-row.on .lb-sub,.lb-row.on .lb-num{color:rgba(255,255,255,.75)}
+.lb-row.on .lb-meter-t{background:rgba(255,255,255,.26)}
+
+/* Rank is ordinal, so tabular figures — these align down a column. */
+.lb-rank{font-variant-numeric:tabular-nums;font-size:12px;color:var(--ink-mute);
+         text-align:right}
+.lb-row.on .lb-rank{color:rgba(255,255,255,.75)}
+/* Emphasis: the leader is the only row that gets weight. */
+.lb-row.lead .lb-rank{color:var(--blue);font-weight:700}
+.lb-row.lead.on .lb-rank{color:#fff}
+
+.lb-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lb-sub{font-size:11px;color:var(--ink-mute);font-weight:400}
+.lb-num{font-variant-numeric:tabular-nums;text-align:right;color:var(--ink-soft)}
+.lb-row.on .lb-num{color:#fff}
+
+/* Meter: 4px rounded data-end, track a lighter step of the same hue. */
+.lb-meter{display:flex;align-items:center;gap:9px}
+.lb-meter-t{flex:1;height:6px;border-radius:3px;background:var(--meter-track);
+            overflow:hidden}
+.lb-meter-f{height:100%;border-radius:3px;background:var(--meter-fill);
+            transition:width .25s ease}
+.lb-meter-v{font-variant-numeric:tabular-nums;font-size:12px;font-weight:600;
+            min-width:34px;text-align:right}
+/* An unqualified rate is shown but visibly held back from the ranking. */
+.lb-row.thin .lb-meter-f{background:var(--grey-car)}
+.lb-row.thin .lb-meter-v{color:var(--ink-mute);font-weight:400}
+
+.lb-foot{padding:12px 2px 0;font-size:11.5px;color:var(--ink-mute);line-height:1.5;
+         border-top:1px solid var(--line-soft);margin-top:2px}
+
+/* Advisor view: volume only. There is no meter here because there is no rate
+   to show — FSD is never attributed to the advisor. */
+.lb-adv .lb-head,.lb-adv .lb-row{grid-template-columns:30px minmax(140px,1fr) 62px 96px}
+
+@media(max-width:720px){
+  .lb-head,.lb-row{grid-template-columns:26px minmax(90px,1fr) 44px 110px}
+  .lb-hide{display:none}
+}
+
+/* Selected-host banner: states the two percentages in words, because "24%"
+   and "83%" side by side invite exactly the wrong reading. */
+.hostbar{
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:11px 14px;margin:0 0 14px;border:1px solid var(--line-soft);
+  border-radius:var(--r-md);background:var(--paper-alt);font-size:12.5px;
+}
+.hostbar b{font-weight:600}
+.hostbar .clear{
+  margin-left:auto;border:1px solid var(--line);background:var(--paper);
+  border-radius:var(--r-sm);padding:5px 10px;font:inherit;font-size:11.5px;
+  cursor:pointer;color:var(--ink-mute);
+}
+.hostbar .clear:hover{border-color:var(--ink);color:var(--ink)}
+
+/* ── run progress ──
+   A national scan is minutes long. The bar is not decoration: without it the
+   page is indistinguishable from a hang. */
+.prog{
+  margin:0 0 14px;padding:14px 16px;border:1px solid var(--line-soft);
+  border-radius:var(--r-md);background:var(--paper);box-shadow:var(--shadow);
+}
+.prog-top{display:flex;align-items:baseline;gap:10px;margin-bottom:9px}
+.prog-t{font-size:13px;font-weight:600}
+.prog-c{font-size:11.5px;color:var(--ink-mute);margin-left:auto;
+        font-variant-numeric:tabular-nums}
+.prog-bar{height:4px;border-radius:2px;background:var(--line-soft);overflow:hidden}
+.prog-fill{height:100%;background:var(--blue);border-radius:2px;
+           transition:width .3s ease;width:0}
+/* Enumerating has no denominator to divide by, so it sweeps instead. */
+.prog-fill.indet{width:34% !important;animation:sweep 1.15s ease-in-out infinite}
+@keyframes sweep{0%{margin-left:-34%}100%{margin-left:100%}}
+.prog-sub{margin-top:8px;font-size:11.5px;color:var(--ink-mute);line-height:1.45}
+
+/* ───────────────────────────── Fields ───────────────────────────── */
+.field{margin-bottom:18px}
+.field:last-child{margin-bottom:0}
+.field label{
+  display:block;margin-bottom:6px;
+  font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-mute);
+}
+.field input[type=text],.field input[type=date],.field input[type=password],.field input[type=number],.field textarea,.field select{
+  width:100%;height:42px;padding:0 12px;
+  border:1px solid var(--line);border-radius:var(--r-sm);
+  background:var(--paper);outline:none;transition:border-color .2s;
+}
+.field textarea{height:78px;padding:10px 12px;resize:vertical;line-height:1.45;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px}
+.field input:focus,.field textarea:focus,.field select:focus{border-color:var(--ink)}
+.field .hint{margin-top:6px;font-size:11.5px;color:var(--ink-mute)}
+/* A VIN is read a character at a time when it is being checked against a
+   screen or a windscreen, so it gets even spacing and no lower case to
+   second-guess. The input uppercases what is typed; the value is uppercased
+   again on submit, because a paste can arrive without a keystroke. */
+.field input.vin-in{
+  text-transform:uppercase;
+  font-variant-numeric:tabular-nums;
+  letter-spacing:.06em;
+}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+/* Type-ahead results. Sits inline under the field rather than floating, so it
+   cannot be clipped by the dialog and needs no positioning logic. */
+.sitelist{
+  margin-top:8px;border:1px solid var(--line-soft);border-radius:var(--r-md);
+  max-height:236px;overflow-y:auto;
+}
+.site{
+  display:flex;align-items:baseline;gap:10px;width:100%;
+  padding:9px 12px;text-align:left;
+  border-bottom:1px solid var(--line-soft);
+  transition:background .15s;
+}
+.site:last-child{border-bottom:none}
+.site:hover,.site.cur{background:var(--paper-alt)}
+.site-n{font-size:13px;font-weight:500;color:var(--ink);flex:1;min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.site-c{font-size:11.5px;color:var(--ink-mute);flex:none}
+.site-id{
+  font-size:11.5px;font-weight:600;letter-spacing:.04em;
+  font-variant-numeric:tabular-nums;color:var(--blue);flex:none;
+}
+.site-none{padding:11px 12px;font-size:12.5px;color:var(--ink-mute)}
+
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.chip{
+  height:28px;padding:0 12px;border:1px solid var(--line);border-radius:var(--r-sm);
+  font-size:10.5px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-soft);transition:border-color .2s,background .15s;
+}
+.chip:hover{border-color:var(--ink);background:var(--paper-alt)}
+.chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+.conn{
+  display:flex;align-items:center;gap:9px;
+  padding:11px 12px;border:1px solid var(--line-soft);border-radius:var(--r-md);
+  margin-bottom:12px;font-size:12.5px;
+}
+.conn .dot{width:8px;height:8px;border-radius:50%;background:var(--grey-car);flex:none}
+.conn.ok .dot{background:var(--green)}
+.conn.bad .dot{background:var(--red)}
+.conn b{font-weight:600}
+.conn span{color:var(--ink-mute);margin-left:auto;text-align:right;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:58%}
+
+.sec-title{
+  margin:22px 0 12px;padding-top:18px;border-top:1px solid var(--line-soft);
+  font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-mute);
+}
+.sec-title:first-child{margin-top:0;padding-top:0;border-top:none}
+
+.spin{
+  width:14px;height:14px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;
+  border-radius:50%;display:inline-block;vertical-align:-2px;margin-right:8px;
+  animation:sp .7s linear infinite;
+}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+.foot{
+  border-top:1px solid var(--line-soft);padding:18px 22px;
+  display:flex;gap:10px;flex-wrap:wrap;
+  font-size:11.5px;color:var(--ink-mute);
+}
+.foot span:not(:last-child)::after{content:"·";margin-left:10px}
+
+@media(max-width:820px){
+  .veh{grid-template-columns:1fr;gap:12px}
+  .scene{width:100%;height:150px}
+  .readout{text-align:left}
+  .stats{flex-wrap:wrap}
+  .stat{min-width:50%;border-bottom:1px solid var(--line-soft)}
+}
+
+/* ── where sign-ins went ──
+   The one place a board still mentions signing in. Not a warning: the normal
+   state is that the Hub already holds the session, so this reads as a pointer
+   rather than an error, and it stays put whether or not anything is missing. */
+.hub-note{margin-top:12px;padding:11px 13px;border-radius:var(--r-md);
+  border:1px solid var(--line-soft);background:var(--paper-alt);
+  font-size:12px;line-height:1.55;color:var(--ink-mute)}
+.hub-note b{font-weight:600;color:var(--ink-soft)}
+.hub-note a{display:inline-block;margin-top:6px;color:var(--blue);
+  text-decoration:none;border-bottom:1px solid transparent}
+.hub-note a:hover{border-bottom-color:currentColor}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wordmark">TESLA</div>
+  <div class="nav-div"></div>
+  <div class="nav-title">FSD Tracker</div>
+
+  <button class="trt-btn" id="trtBtn" title="Change the delivery centre this dashboard reads">
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9"
+         stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-5.5-7-11a7 7 0 1 1 14 0c0 5.5-7 11-7 11Z"/><circle cx="12" cy="10" r="2.6"/></svg>
+    <span id="trtCaption">Enter TRT</span><b id="trtLabel"></b>
+  </button>
+
+  <div class="nav-spacer"></div>
+
+  <button class="nav-btn" id="adminBtn" title="Admin">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </svg>
+    Admin
+  </button>
+</nav>
+
+<section class="hero">
+  <!-- Backdrop: lane markings receding, flat vector only. -->
+  <svg class="hero-art" viewBox="0 0 1440 300" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <g stroke="#FFFFFF" stroke-opacity=".07" stroke-width="2">
+      <path d="M-40 300 L520 -20"/><path d="M240 300 L660 -20"/>
+      <path d="M1480 300 L920 -20"/><path d="M1200 300 L780 -20"/>
+    </g>
+    <g stroke="#FFFFFF" stroke-opacity=".05" stroke-width="1.5" stroke-dasharray="26 22">
+      <path d="M0 96 H1440"/><path d="M0 168 H1440"/><path d="M0 240 H1440"/>
+    </g>
+  </svg>
+
+  <div class="hero-inner">
+    <!-- ══ Banner: top-down car on its FSD path ══
+         The blue ribbon passes UNDER the car and continues past it in both
+         directions. That is what sells "following a path" rather than
+         "parked in a spotlight". The dashed centre line animates so the
+         graphic reads as motion without any bitmap or gradient. -->
+    <svg class="fsd-art" viewBox="0 0 260 300" aria-hidden="true">
+      <defs>
+        <clipPath id="lane"><rect x="0" y="0" width="260" height="300"/></clipPath>
+      </defs>
+
+      <g clip-path="url(#lane)">
+        <!-- projected path: widens toward the horizon -->
+        <path d="M96 300 L112 0 L148 0 L164 300 Z" fill="#3E6AE1" opacity=".22"/>
+        <path d="M96 300 L112 0"  stroke="#5B85F0" stroke-width="2.5" fill="none" opacity=".85"/>
+        <path d="M164 300 L148 0" stroke="#5B85F0" stroke-width="2.5" fill="none" opacity=".85"/>
+        <path class="flow" d="M130 300 L130 0" stroke="#7FA1F7" stroke-width="2"
+              stroke-dasharray="14 14" fill="none" opacity=".55"/>
+      </g>
+
+      <!-- ══ car, top-down, nose up ══ -->
+      <g>
+        <!-- tyres first, so the body occludes their inner edges -->
+        <rect x="78"  y="120" width="12" height="30" rx="4" fill="#0E1013"/>
+        <rect x="170" y="120" width="12" height="30" rx="4" fill="#0E1013"/>
+        <rect x="78"  y="205" width="12" height="30" rx="4" fill="#0E1013"/>
+        <rect x="170" y="205" width="12" height="30" rx="4" fill="#0E1013"/>
+
+        <!-- body: tapered nose, full shoulders, slightly narrowed tail -->
+        <path d="M130 96
+                 C150 96 166 108 170 126
+                 C174 146 175 186 173 214
+                 C172 234 166 246 158 250
+                 L102 250
+                 C94 246 88 234 87 214
+                 C85 186 86 146 90 126
+                 C94 108 110 96 130 96 Z"
+              fill="#E4E6E8"/>
+
+        <!-- mirrors -->
+        <path d="M88 142 L76 145 L76 151 L88 149 Z" fill="#C3C7CB"/>
+        <path d="M172 142 L184 145 L184 151 L172 149 Z" fill="#C3C7CB"/>
+
+        <!-- glass roof running the length of the cabin, as on the real car -->
+        <path d="M130 122 C147 122 158 131 161 146 L161 196
+                 C161 210 154 218 143 220 L117 220
+                 C106 218 99 210 99 196 L99 146
+                 C102 131 113 122 130 122 Z"
+              fill="#171A20" opacity=".82"/>
+        <!-- windscreen highlight -->
+        <path d="M130 124 C145 124 155 132 158 145 L102 145 C105 132 115 124 130 124 Z"
+              fill="#3B4048" opacity=".9"/>
+
+        <!-- bonnet crease -->
+        <path d="M130 100 L130 118" stroke="#C3C7CB" stroke-width="1.4" stroke-linecap="round"/>
+
+        <!-- headlight signature, forward edge -->
+        <path d="M104 103 C110 100 118 98.5 128 98.4" stroke="#9FB8F5" stroke-width="2.2"
+              stroke-linecap="round" fill="none"/>
+        <path d="M156 103 C150 100 142 98.5 132 98.4" stroke="#9FB8F5" stroke-width="2.2"
+              stroke-linecap="round" fill="none"/>
+      </g>
+    </svg>
+
+    <h1>FSD Tracker</h1>
+    <p>Miles customers drove on Full Self-Driving <b>after</b> taking delivery — never the
+       lot moves and PDI miles banked before it.</p>
+    <div class="hero-actions">
+      <button class="btn btn-primary" id="loadTodayBtn">Load today</button>
+      <button class="btn btn-onink" id="searchVinBtn">Search VIN or RN</button>
+      <button class="btn btn-onink" id="optionsBtn">Options</button>
+    </div>
+  </div>
+</section>
+
+<!-- Always on screen, like the Charging Tracker's strip. It reads zero before
+     anything is loaded rather than appearing from nowhere on first submit. -->
+<div class="stats" id="stats">
+  <div class="stat"><div class="stat-k">Delivered</div><div class="stat-v" id="sDelivered">0</div></div>
+  <div class="stat" id="statDrove"><div class="stat-k">Drove FSD</div><div class="stat-v" id="sDrove">0</div></div>
+  <div class="stat"><div class="stat-k">Total FSD miles</div><div class="stat-v" id="sTotal">0<small>mi</small></div></div>
+</div>
+
+<main>
+  <div id="prog" hidden></div>
+  <div id="notes"></div>
+
+  <div class="list-head" id="listHead" hidden>
+    <h2 id="listTitle">Deliveries</h2>
+    <span id="listSub"></span>
+    <div class="list-actions">
+    <button class="chip" id="hostFilterBtn" hidden
+            title="Show only one delivery host's cars">
+      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+           style="vertical-align:-1px;margin-right:6px">
+        <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/>
+      </svg><span id="hostFilterLabel">All hosts</span>
+      <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor"
+           stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"
+           style="vertical-align:0;margin-left:6px"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+
+    <!-- Anchored to .list-actions, so it tracks the button without any JS. -->
+    <div class="menu" id="hostMenu" hidden>
+      <div class="menu-search">
+        <input type="text" id="hostSearch" placeholder="Search hosts" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="menu-list" id="hostMenuList"></div>
+    </div>
+
+    <button class="chip" id="lbBtn" hidden
+            title="Rank delivery hosts by FSD adoption for this day">
+      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+           style="vertical-align:-1px;margin-right:6px">
+        <path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>
+      </svg>Leaderboard
+    </button>
+    <button class="chip" id="exportBtn" title="Download exactly what is on screen as an Excel workbook">
+      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+           style="vertical-align:-1px;margin-right:6px">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>
+      </svg>Export current
+    </button>
+    </div>
+  </div>
+
+  <div id="hostbar"></div>
+
+  <div class="list" id="list"></div>
+
+  <div class="empty" id="empty">
+    <svg viewBox="10 20 138 100" aria-hidden="true">
+      <ellipse cx="79" cy="113" rx="62" ry="4.5" fill="#171A20" opacity=".08"/>
+      <path d="M22 110.2 C20.5 104 19.7 90 19.7 80 C19.8 71 22 65 27.3 61.7
+               C30 59.5 33 56.5 37.1 53.3 C39 44 52 29.2 79 29
+               C106 29.2 119 44 120.9 53.3 C125 56.5 128 59.5 130.7 61.7
+               C136 65 138.2 71 138.3 80 C138.3 90 137.5 104 136 110.2 Z"
+            fill="#171A20" opacity=".18"/>
+    </svg>
+    <h3>No statistics loaded</h3>
+    <p>Choose Load today, Search VIN or RN for one car, or Options for another date.</p>
+  </div>
+</main>
+
+<footer class="foot">
+  <span>Reading <b>GUI_fsdUserTotalMiles</b> post-handoff delta</span>
+  <span id="fTrt">TRT —</span>
+  <span id="fSrc">Garage</span>
+  <span>FSD Tracker</span>
+</footer>
+
+<!-- ══════════════════════════ OVERLAYS ══════════════════════════ -->
+<div class="scrim" id="scrim"></div>
+
+<!-- Load statistics -->
+<div class="modal" id="loadModal" role="dialog" aria-label="Load statistics">
+  <div class="modal-head"><h3>Load statistics</h3>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body">
+    <div class="field">
+      <label for="fDate">Delivery date</label>
+      <input type="date" id="fDate">
+      <div class="chips">
+        <button class="chip" data-day="0">Today</button>
+        <button class="chip" data-day="-1">Yesterday</button>
+        <button class="chip" data-day="-2">2 days ago</button>
+      </div>
+      <div class="hint">Same-day figures keep climbing all evening — an 18:00 pickup has
+        barely driven by 19:00. Yesterday gives a settled number.</div>
+    </div>
+
+    <div class="field">
+      <label for="fEnd">Through (optional)</label>
+      <input type="date" id="fEnd">
+      <div class="hint">Leave blank for a single day. Ranges are capped at 31 days.</div>
+    </div>
+
+  </div>
+  <div class="modal-foot">
+    <button class="btn btn-ghost" data-close>Cancel</button>
+    <button class="btn btn-dark" id="submitLoad">Submit</button>
+  </div>
+</div>
+
+<!-- Search VIN or RN — one car, its own date, its own centre.
+     One box rather than two: they are both "the number I have for this car",
+     they cannot be confused for each other, and asking which kind it is would
+     be asking a question the field can answer itself. -->
+<div class="modal" id="vinModal" role="dialog" aria-label="Search VIN or RN">
+  <div class="modal-head"><h3>Search VIN or RN</h3>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body">
+    <div class="field">
+      <label for="vinInput">VIN or reference number</label>
+      <input type="text" id="vinInput" class="vin-in" maxlength="17"
+             autocomplete="off" spellcheck="false" autocapitalize="characters"
+             placeholder="5YJ3E1EA7PF000000 or RN123456789">
+      <div class="hint" id="vinHint"></div>
+    </div>
+  </div>
+  <div class="modal-foot">
+    <button class="btn btn-ghost" data-close>Cancel</button>
+    <button class="btn btn-dark" id="submitVin">Search</button>
+  </div>
+</div>
+
+<!-- Leaderboard -->
+<div class="modal wide lb" id="lbModal" role="dialog" aria-label="Leaderboard">
+  <div class="modal-head"><h3>Leaderboard</h3>
+    <span id="lbCtx" class="modal-sub"></span>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body lb-wrap">
+    <div class="lb-bar">
+      <span class="lbl">Rank by</span>
+      <button class="chip on" data-sort="fsdRate">FSD rate</button>
+      <button class="chip" data-sort="cars">Deliveries</button>
+      <button class="chip" data-sort="totalMi">Total miles</button>
+      <span class="lbl" style="margin-left:auto">Show</span>
+      <button class="chip on" data-view="hosts">Hosts</button>
+      <button class="chip" data-view="advisors">Advisors</button>
+    </div>
+    <div id="lbTop"></div>
+    <div class="lb-scroll" id="lbBody"></div>
+    <div class="lb-foot" id="lbFoot"></div>
+  </div>
+</div>
+
+<!-- Enter TRT -->
+<div class="modal" id="trtModal" role="dialog" aria-label="Enter TRT">
+  <div class="modal-head"><h3>Enter TRT</h3>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body">
+    <div class="field">
+      <label for="trtInput">Site name or TRT ID</label>
+      <input type="text" id="trtInput" autocomplete="off" spellcheck="false"
+             placeholder="Start typing — Houston, Fremont, 17589…">
+      <div class="sitelist" id="siteList" hidden></div>
+      <div class="hint" id="trtHint">Nobody remembers TRT numbers. Type a site name and pick
+        from the list; the number comes along with it.</div>
+    </div>
+  </div>
+  <div class="modal-foot">
+    <button class="btn btn-ghost" data-close>Cancel</button>
+    <button class="btn btn-dark" id="trtSave">Use this TRT</button>
+  </div>
+</div>
+
+<!-- Admin -->
+<div class="modal" id="admin" role="dialog" aria-label="Admin">
+  <div class="modal-head"><h3>Admin</h3>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+
+  <!-- Password gate -->
+  <div class="modal-body" id="gate">
+    <div class="lock-ic">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+      </svg>
+    </div>
+    <div class="gate-t">Restricted area. Enter the 6-digit admin code.</div>
+    <div class="otp" id="otp">
+      <input class="otp-box" type="password" inputmode="numeric" autocomplete="one-time-code" maxlength="1" aria-label="Digit 1">
+      <input class="otp-box" type="password" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 2">
+      <input class="otp-box" type="password" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 3">
+      <input class="otp-box" type="password" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 4">
+      <input class="otp-box" type="password" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 5">
+      <input class="otp-box" type="password" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 6">
+    </div>
+    <div class="gate-err" id="gateErr"></div>
+    <button class="btn btn-dark" id="pwBtn" style="width:100%">Unlock</button>
+  </div>
+
+  <!-- Unlocked: rail of sections beside a scrolling pane -->
+  <div class="admin" id="settings" hidden>
+
+    <nav class="admin-rail" aria-label="Settings sections">
+      <button class="rail-item on" data-sec="connections">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 2v6M15 2v6M7 8h10v5a5 5 0 0 1-10 0z"/><path d="M12 18v4"/>
+        </svg>
+        Connections
+        <span class="warn" id="railWarnConn" hidden></span>
+      </button>
+      <button class="rail-item" data-sec="about">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/>
+        </svg>
+        Measurement
+      </button>
+      <button class="rail-item" data-sec="maintenance">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/>
+        </svg>
+        Maintenance
+      </button>
+      <div class="rail-foot">
+        Credentials are stored in <b>.connections.json</b>, which is gitignored
+        and never leaves this machine.
+      </div>
+    </nav>
+
+    <div class="admin-pane">
+
+    <section class="sec on" id="secConnections">
+      <h4 class="sec-h">Sources</h4>
+      <p class="sec-p">How a report is put together. Basic needs nothing set up at all;
+        advanced adds the two fields Garage does not carry.</p>
+
+      <div class="modes">
+        <button class="mode on" id="modeBasic" data-mode="basic">
+          <div class="mode-n"><i class="tick"></i>Basic</div>
+          <div class="mode-d">Garage only. No cookie, nothing to expire, works for
+            any centre.</div>
+        </button>
+        <button class="mode" id="modeAdvanced" data-mode="advanced">
+          <div class="mode-n"><i class="tick"></i>Advanced</div>
+          <div class="mode-d">Adds Intrepid for the fields Garage has no record of.</div>
+        </button>
+      </div>
+
+      <div class="adds" id="advAdds" hidden>
+        <div class="adds-h">Advanced adds</div>
+        <ul id="advList"></ul>
+        <div class="cost">Nothing else changes. The mileage is measured the same way in
+          both modes, so switching can only add columns — it can never move a number.</div>
+      </div>
+
+      <div class="conn" id="cTesladex"><i class="dot"></i><b>Tesladex</b><span>—</span></div>
+      <div class="conn" id="cGarage"><i class="dot"></i><b>Garage</b><span>—</span></div>
+      <div class="conn adv-only" id="cIntrepid" hidden><i class="dot"></i><b>Intrepid</b><span>—</span></div>
+      <button class="btn btn-ghost" id="testBtn" style="width:100%">Test connections</button>
+      <div class="hub-note">
+        Sign-ins live on the <b>Zo Projects Hub</b>. One session there covers every
+        board, including this one.
+        <a href="http://localhost:3100" target="_blank" rel="noopener">Open the Hub</a>
+      </div>
+    </section>
+
+    <section class="sec" id="secAbout">
+      <h4 class="sec-h">Measurement</h4>
+      <p class="sec-p">What the number in each row actually means, so it is not
+        mistaken for something else.</p>
+
+      <div class="sec-title">What counts as using FSD</div>
+      <p class="sec-p">A car has to reach this distance on FSD after handoff to count as
+        having used it. Short of that the row stays red, it is left out of the day's
+        <b>drove FSD</b> count, and the host's FSD rate does not credit it — a few tenths
+        of a mile is a bay reposition or a roll off the pad, not a customer choosing the
+        feature.</p>
+      <div class="field">
+        <label for="barIn">Minimum FSD miles</label>
+        <div class="connect-row">
+          <input id="barIn" type="number" min="0" max="50" step="0.1" inputmode="decimal"
+                 style="flex:1;min-width:0" aria-describedby="barHint">
+          <button class="btn btn-dark" id="barSave" style="flex:none">Save</button>
+          <button class="btn btn-ghost" id="barReset" style="flex:none">Default</button>
+        </div>
+        <div class="hint" id="barHint">Applies to the report already on screen — nothing is
+          measured again, only judged again.</div>
+      </div>
+
+      <div class="sec-title">Post-delivery FSD miles</div>
+      <p class="sec-p"><b>GUI_fsdUserTotalMiles</b> at the end of the window, minus the
+        same reading at handoff. Raw lifetime mileage would be misleading — every car
+        arrives with a few FSD miles already banked from lot moves and PDI.</p>
+      <p class="sec-p">On a couple of cars a day that counter is stuck: the identical
+        value in every sample for a fortnight, on a car that plainly drove. Subtracting
+        a stuck counter gives a confident zero, which reads as a host who sent someone
+        home without a demo. Those cars are measured on
+        <b>GUI_apFsdTotalMiles</b> instead — the same quantity from another source,
+        which agrees with the usual counter to the thousandth of a mile on every car
+        where both are working. The backup is only ever consulted when the usual one
+        never moves at all, so it can never change a figure the usual one could
+        produce, and a car that genuinely sat still still reads zero. Those rows are
+        marked <b>Backup counter</b>.</p>
+
+      <div class="sec-title">The <span class="win-h">12</span>-hour window</div>
+      <p class="sec-p">Miles are counted for the first <b><span class="win-h">12</span>
+        hours</b> after handoff and no longer. That is the drive home and the first
+        evening out — the part of the trip that reflects how the handover went. What
+        the customer does with the car on day three is a different question, and
+        letting it in would mean an older delivery always out-scored a newer one
+        purely for having had more time.</p>
+      <p class="sec-p">A row still inside its window is marked <b>Counting</b> and its
+        figure will keep climbing; hover it for the closing time. Once the window has
+        closed the number is final, and the car is never read again — the answer is
+        kept, so re-running a settled date costs nothing and returns exactly what it
+        returned before.</p>
+
+      <div class="sec-title">The baseline</div>
+      <p class="sec-p">The last telemetry sample at or before the recorded delivery
+        timestamp. That is close to, but not exactly, the moment of handoff, so any
+        staff driving in between would be counted as customer use. Typical gaps run a
+        few minutes; a row whose gap exceeds an hour is flagged in the list and in the
+        summary.</p>
+
+      <div class="sec-title">Timing</div>
+      <p class="sec-p">Today's deliveries are all still counting — a car handed over at
+        18:00 has barely driven by 19:00, and its window does not close until the early
+        hours. Yesterday's date gives a page of settled numbers.</p>
+
+      <div class="sec-title">Which cars</div>
+      <p class="sec-p">Tesladex is asked directly for cars delivered on the date whose
+        <b>vehicle routing location</b> is this centre. The VRL survives delivery — the
+        scheduling block that named the destination does not — and it is indexed, so
+        the whole day arrives in one query.</p>
+      <p class="sec-p">This used to work by reading each car's telemetry for the
+        <b>trt_id</b> it held at handoff, which meant probing every car delivered
+        nationally that day: thousands of calls to keep a few dozen, and about twelve
+        minutes. Checked against that method over one full day, the two pick the same
+        cars for this centre exactly — and where they disagree elsewhere, VRL is the
+        better value, naming a centre where telemetry still held a logistics code.
+        That path now runs only for a car with no VRL at all, which so far has never
+        happened.</p>
+
+      <div class="sec-title">The 14-day limit</div>
+      <p class="sec-p">Mileage comes from telemetry, which reaches back 336 hours. Past
+        that a car's baseline at handoff has aged out and the delta cannot be measured,
+        so older dates are refused outright rather than quietly returning wrong
+        numbers.</p>
+
+      <div class="sec-title">Sources</div>
+      <p class="sec-p">Garage alone in basic mode: tesladex for the population and the
+        delivery timestamp, vitals for the centre and the mileage curve. Advanced adds
+        Intrepid, which is the only place a reference number or a delivery host
+        exists — it is joined on VIN and never used to decide which cars appear.</p>
+
+      <div class="sec-title">Delivery host</div>
+      <p class="sec-p">The host is who actually conducted the handover, read from
+        <b>DriverADUserName</b>. That is <i>not</i> the delivery advisor, who owns the
+        appointment — across one centre's deliveries the two differed on roughly a
+        third of cars, so they are not interchangeable.</p>
+      <p class="sec-p">Intrepid gives the host as a bare network username with no name
+        beside it. Names are recovered first from the advisor fields on appointments
+        already being read, which arrive as matched username-and-name pairs, and
+        otherwise from a Garage account lookup. A host who cannot be named is shown
+        as their username rather than dropped.</p>
+
+      <div class="sec-title">The two percentages</div>
+      <p class="sec-p"><b>Share</b> is that host's slice of the day — their cars over
+        all deliveries. <b>FSD</b> is how many of <i>their own</i> cars were driven on
+        FSD. They answer different questions and are not comparable, so the car count
+        sits beside both: three cars at 100% is not a better day than twenty at 85%.</p>
+    </section>
+
+    <section class="sec" id="secMaintenance">
+      <h4 class="sec-h">Maintenance</h4>
+      <p class="sec-p">Housekeeping. Nothing here touches Intrepid or Garage —
+        no vehicle, delivery or customer record can be altered from this dashboard,
+        which only ever reads.</p>
+
+      <button class="btn-block" id="clearStatsBtn">Clear loaded statistics</button>
+      <button class="btn-block adv-only" id="refreshTrtBtn" hidden>Refresh site directory</button>
+      <div class="hint adv-only" id="refreshTrtHint" hidden>The TRT&nbsp;→&nbsp;site name map
+        comes from Intrepid and is cached for a week. Refresh it if a centre has been
+        renamed or newly opened.</div>
+
+      <div class="sep"></div>
+
+      <button class="btn-block" id="clearVinBtn">Clear delivering-centre cache</button>
+      <div class="hint" id="clearVinHint">Left over from when a car's centre had to be read
+        from its telemetry. Routing location now answers that in the search itself, so this
+        cache is only touched for a car with no routing location at all. Safe to clear;
+        these days there is usually nothing in it.</div>
+
+      <button class="btn-block" id="clearMeasureBtn">Clear settled measurements</button>
+      <div class="hint" id="clearMeasureHint">Once a car's
+        <span class="win-h">12</span>-hour window closes its figure can never change, so
+        it is kept and the car is not read again. Clear this only if a stored number is
+        suspect; the next run of those dates then re-reads every car.</div>
+
+      <div class="sep"></div>
+
+      <button class="btn-block red" id="resetBtn">Reset dashboard</button>
+      <div class="hint" id="resetHint">Clears loaded statistics, the default TRT and the
+        cached site directory, and returns the page to a fresh state.
+        <b>Saved credentials are kept</b> — use Connections to change those.</div>
+
+      <div class="sep"></div>
+      <button class="btn-block" id="lockBtn">Lock admin</button>
+    </section>
+
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ───────────────────────────── state ─────────────────────────────
+   `mode` mirrors the server's saved setting. It is held here too so the
+   toggle can re-run the current view immediately instead of waiting for a
+   round trip, and so the list can be relabelled the moment it changes. */
+const S = { trtId: null, password: "", rows: [], busy: false,
+            mode: "basic", spec: null, vitalsDays: 14,
+            hosts: [], advisors: [], host: null,   // host = filtered-to name, null = all
+            // True when what is on screen is one car found by VIN rather than
+            // a centre's day. The leaderboard and host filter read this.
+            single: false,
+            // Base for the per-VIN vitals links, from the server's config so
+            // a Garage in another region is linked to correctly.
+            garageUrl: null,
+            lbSort: "fsdRate", lbView: "hosts", minQualify: 3,
+            // The bar a car has to reach to count as having driven on FSD.
+            // Seeded with the shipped default so the page can colour a row
+            // before any run has told it otherwise; every report and the
+            // admin panel replace it with the server's figure.
+            droveThreshold: 1,
+            // How long after handoff miles are counted for. Seeded with the
+            // shipped default and replaced by the server's figure on first
+            // paint, so no wording on this page hardcodes "12".
+            windowHours: 12 };
+
+/* One definition, read from the server, used by the rows and the stat strip
+   alike — the page previously carried its own copy of the rule in two places
+   and both had to be found when it changed. `>=` because the standard is that
+   a car has to *reach* the distance. */
+const droveFsd = r => r.error == null && r.miles != null && r.miles >= S.droveThreshold;
+
+// 1 -> "1", 1.5 -> "1.5". A whole-mile bar should not read as "1.0 miles".
+const barLabel = () => String(Number(S.droveThreshold.toFixed(2)));
+
+const $  = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
+  c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" })[c]);
+
+/* Model naming, same table as the Charging Tracker so the two agree. */
+const MODEL_NAME = {
+  "3":"Model 3", y:"Model Y", s:"Model S", x:"Model X",
+  ct:"Cybertruck", cybertruck:"Cybertruck", cybercab:"Cybercab",
+  semi:"Semi", roadster:"Roadster", my:"Model Y", m3:"Model 3"
+};
+function modelLabel(raw){
+  if(!raw) return null;
+  const k = String(raw).trim().toLowerCase();
+  if(!k) return null;
+  if(MODEL_NAME[k]) return MODEL_NAME[k];
+  return k.charAt(0).toUpperCase() + k.slice(1);
+}
+
+/* ── Model 3 Highland, front elevation ──
+   Lifted from the Charging Tracker so a row looks identical across the two
+   dashboards. Flat 2D silhouette: flat roof between the A-pillars, lamps set
+   to a point, mirrors high at the A-pillar base. The `.car-body` fill is the
+   one thing that changes — here it carries FSD state, not charge state. */
+function carModel3(){
+  return `
+    <g>
+      <path d="M33.3 48.5 L25 47.5 C23.2 47.4 22.8 49 23.8 50.5 L25.5 52.3 L33.3 52.8 Z" fill="#33373C"/>
+      <path d="M124.7 48.5 L133 47.5 C134.8 47.4 135.2 49 134.2 50.5 L132.5 52.3 L124.7 52.8 Z" fill="#33373C"/>
+      <path class="car-body" d="
+        M22 110.2 C20.5 104 19.7 90 19.7 80 C19.8 71 22 65 27.3 61.7
+        C30 59.5 33 56.5 37.1 53.3 C39 44 49 29.8 61 29.2 L97 29.2
+        C109 29.8 119 44 120.9 53.3 C125 56.5 128 59.5 130.7 61.7
+        C136 65 138.2 71 138.3 80 C138.3 90 137.5 104 136 110.2 Z"/>
+      <path d="M39 52.5 C42 42.5 50 33.8 61 32 L97 32 C108 33.8 116 42.5 119 52.5 Z"
+            fill="#171A20" opacity=".56"/>
+      <path d="M46.5 79.2 L25 68.9 C22.8 68.2 21.8 69.8 23 71.4 L26 74.4 L45.5 80.6 Z"
+            fill="#171A20" opacity=".70"/>
+      <path d="M111.5 79.2 L133 68.9 C135.2 68.2 136.2 69.8 135 71.4 L132 74.4 L112.5 80.6 Z"
+            fill="#171A20" opacity=".70"/>
+      <path class="lamp" fill="none" stroke-width="1.5" stroke-linecap="round" d="M45.9 78.6 L25.8 69.4"/>
+      <path class="lamp" fill="none" stroke-width="1.5" stroke-linecap="round" d="M112.1 78.6 L132.2 69.4"/>
+      <path d="M76 73.5 h6 M79 73.5 v3.2" stroke="#171A20" stroke-opacity=".22"
+            stroke-width="1" stroke-linecap="round"/>
+      <rect x="22" y="105" width="13" height="5.4" rx="1.6" fill="#171A20" opacity=".45"/>
+      <rect x="123" y="105" width="13" height="5.4" rx="1.6" fill="#171A20" opacity=".45"/>
+      <path d="M24 90 L28 90 L27.2 102 L23 102 Z" fill="#171A20" opacity=".12"/>
+      <path d="M134 90 L130 90 L130.8 102 L135 102 Z" fill="#171A20" opacity=".12"/>
+      <rect x="40" y="96" width="78" height="4.6" rx="2.3" fill="#171A20" opacity=".38"/>
+    </g>`;
+}
+
+/* The car sits on a short blue path when FSD was engaged — the same visual
+   language as the banner, so the row and the header say the same thing. */
+function scene(used){
+  return `
+  <svg class="scene" viewBox="0 0 170 130" aria-hidden="true">
+    <ellipse cx="79" cy="113" rx="64" ry="5" fill="#171A20" opacity=".10"/>
+    ${used ? `
+      <path d="M44 122 L60 108 L98 108 L114 122 Z" fill="#3E6AE1" opacity=".16"/>
+      <path d="M44 122 L60 108" stroke="#3E6AE1" stroke-width="1.6" opacity=".55" fill="none"/>
+      <path d="M114 122 L98 108" stroke="#3E6AE1" stroke-width="1.6" opacity=".55" fill="none"/>` : ""}
+    ${carModel3()}
+  </svg>`;
+}
+
+/* ───────────────────────────── overlays ───────────────────────────── */
+/* ── reporting ──
+   Errors in a browser on someone else's desk are invisible to everyone who
+   could fix them. These go to the server log. Fire-and-forget: a failed
+   report must never become a second problem. */
+function report(level, msg){
+  try{
+    fetch("/api/clientlog", {
+      method : "POST",
+      headers: { "Content-Type": "application/json" },
+      body   : JSON.stringify({ level, msg: String(msg).slice(0, 500) }),
+      keepalive: true
+    }).catch(() => {});
+  }catch{}
+}
+
+window.addEventListener("error", e =>
+  report("error", `${e.message} @ ${e.filename || "page"}:${e.lineno}:${e.colno}`));
+window.addEventListener("unhandledrejection", e =>
+  report("error", "unhandled rejection: " + ((e.reason && e.reason.message) || e.reason)));
+
+/* Named openModal/closeModal, not open/close, and that matters more than it
+   looks. A top-level `function open()` in a classic script becomes a property
+   of window — it REPLACES the built-in window.open. The sign-in button then
+   called this modal helper instead of opening a tab: Admin closed (because
+   opening a modal closes the current one first) and the whole thing died on
+   "".classList. Nothing in the console pointed at the cause. Same trap applies
+   to close() shadowing window.close. */
+let openEl = null;
+function openModal(el){
+  closeModal();
+  openEl = el;
+  el.classList.add("on");
+  $("scrim").classList.add("on");
+  document.body.classList.add("no-scroll");
+}
+function closeModal(){
+  if(openEl){ openEl.classList.remove("on"); openEl = null; }
+  $("scrim").classList.remove("on");
+  document.body.classList.remove("no-scroll");
+}
+$("scrim").addEventListener("click", closeModal);
+document.addEventListener("keydown", e => {
+  if(e.key !== "Escape") return;
+  // The menu is a layer above the modals, so it goes first.
+  if(!$("hostMenu").hidden) return closeHostMenu();
+  closeModal();
+});
+document.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", closeModal));
+
+/* ───────────────────────────── api ───────────────────────────── */
+async function api(path, body){
+  const res = await fetch(path, body === undefined ? {} : {
+    method : "POST",
+    headers: { "Content-Type": "application/json" },
+    body   : JSON.stringify(body)
+  });
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if(!res.ok) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), data);
+  return data;
+}
+
+function note(msg, bad){
+  $("notes").innerHTML = `<div class="note${bad ? " bad" : ""}">${esc(msg)}</div>`;
+}
+const clearNotes = () => { $("notes").innerHTML = ""; };
+
+/* ───────────────────────────── progress ─────────────────────────────
+   Scoping a national day is thousands of Garage calls and runs for minutes.
+   The server publishes where it is; this polls for it. Without this the page
+   shows a spinner for ten minutes and looks broken. */
+
+const PHASE = {
+  starting  : { t: "Starting",           s: "Opening a Garage session." },
+  enumerate : { t: "Listing deliveries", s: "Asking tesladex which cars this centre handed over." },
+  // Only reached for cars the index could not place, which is normally none.
+  scope     : { t: "Placing stray cars",
+                s: "A few cars have no routing location; checking their telemetry instead." },
+  scoped    : { t: "Listing deliveries", s: "" },
+  vehicles  : { t: "Measuring FSD miles", s: "Reading each car's mileage curve since handoff." }
+};
+
+let progTimer = null;
+
+function progHide(){
+  clearInterval(progTimer);
+  progTimer = null;
+  $("prog").hidden = true;
+  $("prog").innerHTML = "";
+}
+
+function progPaint(p){
+  const meta = PHASE[p.phase] || { t: "Working", s: "" };
+  const known = p.total > 0 && p.done != null && p.phase !== "enumerate";
+  const pct   = known ? Math.min(100, Math.round(p.done / p.total * 100)) : 0;
+
+  // Only worth an estimate once there is enough of a sample to divide by.
+  let eta = "";
+  if(known && p.done > 25 && p.elapsed > 5){
+    const left = Math.round((p.total - p.done) / (p.done / p.elapsed));
+    eta = left > 90 ? ` · about ${Math.ceil(left / 60)} min left`
+                    : (left > 5 ? ` · about ${left}s left` : "");
+  }
+
+  const count = p.phase === "enumerate"
+    ? (p.got ? p.got.toLocaleString() + " found" : "")
+    : (known ? `${p.done.toLocaleString()} / ${p.total.toLocaleString()}` : "");
+
+  $("prog").innerHTML = `
+    <div class="prog">
+      <div class="prog-top">
+        <span class="prog-t">${esc(meta.t)}</span>
+        <span class="prog-c">${esc(count)}${esc(eta)}</span>
+      </div>
+      <div class="prog-bar">
+        <div class="prog-fill${known ? "" : " indet"}" style="width:${pct}%"></div>
+      </div>
+      ${meta.s ? `<div class="prog-sub">${esc(meta.s)}</div>` : ""}
+    </div>`;
+  $("prog").hidden = false;
+}
+
+function progWatch(){
+  progPaint({ phase: "starting", elapsed: 0 });
+  clearInterval(progTimer);
+  progTimer = setInterval(async () => {
+    try{
+      const p = await api("/api/progress");
+      if(p.running) progPaint(p);
+    }catch{ /* a missed poll is not worth surfacing */ }
+  }, 1200);
+}
+
+/* ───────────────────────────── render ───────────────────────────── */
+/* No TRT until someone types one. The button then reads plainly "Enter TRT"
+   rather than showing a number nobody chose.
+
+   Once a TRT resolves, the site name replaces the whole control — "17589"
+   means nothing at a glance, "Houston-Cypress" means everything. The number
+   survives in the tooltip. */
+
+/* Writing it back is fire-and-forget: the choice is already live in the page,
+   and a failed save should not block the run someone is about to start. It
+   simply means the next visit asks again. */
+function rememberTrt(id){
+  api("/api/trt", { trtId: id == null ? "" : id })
+    .catch(() => note("That centre is set for now, but could not be saved as the default.", true));
+}
+
+function setTrt(id, info){
+  S.trtId = id || null;
+  S.trtInfo = info || null;
+
+  const btn = $("trtBtn");
+  const name = info && info.name;
+
+  if(!S.trtId){
+    $("trtCaption").textContent = "Enter TRT";
+    $("trtLabel").textContent = "";
+    btn.title = "Change the delivery centre this dashboard reads";
+    $("fTrt").textContent = "TRT not set";
+    return;
+  }
+
+  if(name){
+    // Site name alone; the caption would only crowd it.
+    $("trtCaption").textContent = name;
+    $("trtLabel").textContent = "";
+    btn.title = `TRT ${S.trtId}` + (info.full ? ` — ${info.full}` : "");
+    $("fTrt").textContent = `${name} · TRT ${S.trtId}`;
+  }else{
+    $("trtCaption").textContent = "TRT";
+    $("trtLabel").textContent = String(S.trtId);
+    btn.title = `TRT ${S.trtId} — no site name found in the location directory`;
+    $("fTrt").textContent = "TRT " + S.trtId;
+  }
+}
+
+/* Resolve in the background; the number is usable immediately either way. */
+async function resolveTrt(id){
+  setTrt(id, null);
+  try{
+    const d = await api("/api/trt?id=" + encodeURIComponent(id));
+    if(S.trtId === Number(id) || S.trtId === id) setTrt(id, d.info);
+  }catch{ /* cosmetic only */ }
+}
+
+/* The exact handoff instant is new — the old Intrepid path only ever had the
+   date. Shown as a local time because that is how anyone at the centre thinks
+   about a pickup slot, with the full stamp kept in the tooltip. */
+function handoffLabel(r){
+  if(!r.deliveredAt) return r.date;
+  const d = new Date(r.deliveredAt);
+  if(isNaN(d)) return r.date;
+  return `${r.date} · ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+}
+function handoffTitle(r){
+  return r.deliveredAt
+    ? "Marked delivered " + new Date(r.deliveredAt).toLocaleString()
+    : "Delivery date " + r.date;
+}
+
+/* Why a row is still moving, and when it stops. Naming the closing time is
+   the point — "not final yet" invites a re-run in five minutes, a time says
+   when it is worth coming back. */
+function windowTitle(r){
+  const base = `Miles are counted for the first ${S.windowHours} h after handoff`;
+  const d = r.windowEndsAt ? new Date(r.windowEndsAt) : null;
+  return d && !isNaN(d)
+    ? `${base} — this window closes at ${d.toLocaleString()}, so the figure will keep climbing until then`
+    : `${base}, and this one has not closed yet`;
+}
+
+/* ── the miles the window left out ──
+   Shown only when there are some. A car whose window is still open, or one
+   that has not moved since it closed, has a to-date figure identical to the
+   headline, and printing the same number twice in two sizes reads as a bug.
+   A tenth is the threshold because that is what the readout above rounds to —
+   below it the two lines would render the same digits anyway. */
+function toDateLine(r){
+  if(r.error || r.miles == null || r.milesToDate == null) return "";
+  if(r.milesToDate - r.miles < 0.05) return "";
+
+  const at = r.toDateAt ? new Date(r.toDateAt) : null;
+  const asOf = at && !isNaN(at) ? `, as of ${at.toLocaleString()}` : "";
+  const title = `${r.milesToDate.toFixed(2)} mi on FSD since handoff with no cutoff${asOf
+    } — ${(r.milesToDate - r.miles).toFixed(2)} mi of it fell outside the ${S.windowHours
+    } h window and is not counted in the figure above`;
+
+  return `<div class="readout-t" title="${esc(title)}">${
+    r.milesToDate.toFixed(1)} mi to date</div>`;
+}
+
+/* ───────────────────────────── host filter ─────────────────────────────
+   Advanced only — basic has no host to filter by. The rows on screen are
+   always `visibleRows()`, so the list, the stat strip and the export can
+   never disagree about what is being shown. */
+
+const hostKey = r => r.host || r.hostUser || "";
+const visibleRows = () =>
+  S.host == null ? S.rows : S.rows.filter(r => hostKey(r) === S.host);
+
+/* Both header controls appear together — they are the same feature seen two
+   ways, and neither means anything without hosts to work with.
+
+   One car is not a population: a leaderboard of a single host, or a filter
+   whose only option is the host already on screen, would be a ranking of
+   nothing. A VIN search hides both rather than rendering them empty. */
+function paintHosts(){
+  const has = S.mode === "advanced" && S.hosts.length > 0 && !S.single;
+  $("lbBtn").hidden = !has;
+  $("hostFilterBtn").hidden = !has;
+  $("hostFilterLabel").textContent = S.host == null ? "All hosts" : S.host;
+  $("hostFilterBtn").classList.toggle("on", S.host != null);
+  if(!has){ $("hostbar").innerHTML = ""; closeHostMenu(); }
+  else paintHostBar();
+}
+
+/* ── host filter menu ── */
+function closeHostMenu(){
+  $("hostMenu").hidden = true;
+  document.removeEventListener("mousedown", hostMenuAway);
+}
+
+function hostMenuAway(e){
+  // Clicking the button is its own toggle; anything else outside closes.
+  if($("hostMenu").contains(e.target) || $("hostFilterBtn").contains(e.target)) return;
+  closeHostMenu();
+}
+
+function paintHostMenu(){
+  const q = $("hostSearch").value.trim().toLowerCase();
+  const hits = S.hosts.filter(h => !q || (h.host || "").toLowerCase().includes(q));
+
+  const tick = `<svg class="tick" viewBox="0 0 24 24" width="13" height="13" fill="none"
+      stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"
+      ><path d="M20 6 9 17l-5-5"/></svg>`;
+
+  // "All hosts" is pinned and never filtered out — it is the way back.
+  const all = `
+    <button class="menu-item${S.host == null ? " on" : ""}" data-host="">
+      ${tick}<span class="n">All hosts</span><span class="c">${S.rows.length}</span>
+    </button>
+    <div class="menu-sep"></div>`;
+
+  $("hostMenuList").innerHTML = all + (hits.length
+    ? hits.map(h => `
+        <button class="menu-item${S.host === h.host ? " on" : ""}" data-host="${esc(h.host)}">
+          ${tick}<span class="n">${esc(h.host || "(unknown)")}</span>
+          <span class="c">${h.cars}</span>
+        </button>`).join("")
+    : `<div class="menu-none">No host matches “${esc(q)}”.</div>`);
+
+  $("hostMenuList").querySelectorAll(".menu-item").forEach(el =>
+    el.addEventListener("click", () => {
+      const v = el.dataset.host;
+      S.host = v === "" ? null : v;
+      closeHostMenu();
+      paintHosts();
+      paintList();
+    }));
+}
+
+$("hostFilterBtn").addEventListener("click", () => {
+  if(!$("hostMenu").hidden) return closeHostMenu();
+  $("hostSearch").value = "";
+  paintHostMenu();
+  $("hostMenu").hidden = false;
+  // Bound after this click finishes, or it would close on its own event.
+  setTimeout(() => document.addEventListener("mousedown", hostMenuAway), 0);
+  // Only worth focusing when there is enough to search through.
+  if(S.hosts.length > 8) setTimeout(() => $("hostSearch").focus(), 40);
+});
+
+$("hostSearch").addEventListener("input", paintHostMenu);
+$("hostSearch").addEventListener("keydown", e => {
+  if(e.key === "Escape"){ e.stopPropagation(); closeHostMenu(); return; }
+  // Enter takes the first real match, so a search can be finished by typing.
+  if(e.key === "Enter"){
+    const first = $("hostMenuList").querySelectorAll(".menu-item")[1];
+    if(first) first.click();
+  }
+});
+
+/* ── leaderboard ──
+   A table, not a chart. Past roughly seven categories colour stops carrying
+   identity, and a centre can have thirty-plus hosts — so rank and name carry
+   identity, and the single-hue meter carries magnitude. */
+
+const SORTS = {
+  fsdRate: { label: "FSD rate",
+             cmp: (a, b) => b.fsdRate - a.fsdRate || b.cars - a.cars },
+  cars   : { label: "Deliveries",
+             cmp: (a, b) => b.cars - a.cars || b.totalMi - a.totalMi },
+  totalMi: { label: "Total miles",
+             cmp: (a, b) => b.totalMi - a.totalMi || b.cars - a.cars }
+};
+
+/* Ranking by rate alone hands first place to whoever did one car. Hosts under
+   the threshold still appear, in order, but are marked and skipped for the
+   top spot — and the rule is printed at the foot rather than applied
+   invisibly. */
+function rankedHosts(){
+  const s = SORTS[S.lbSort] || SORTS.fsdRate;
+  const list = S.hosts.slice().sort(s.cmp);
+  if(S.lbSort !== "fsdRate") return { list, lead: list[0] || null };
+  return { list, lead: list.find(h => h.qualified) || null };
+}
+
+function paintLeaderboard(){
+  const advisorView = S.lbView === "advisors";
+  const box = $("lbModal");
+  box.classList.toggle("lb-adv", advisorView);
+
+  document.querySelectorAll("#lbModal [data-sort]").forEach(b => {
+    b.classList.toggle("on", b.dataset.sort === S.lbSort);
+    // Nothing to rank advisors by — the only measure here is volume.
+    b.disabled = advisorView;
+    b.style.opacity = advisorView ? ".4" : "";
+  });
+  document.querySelectorAll("#lbModal [data-view]").forEach(b =>
+    b.classList.toggle("on", b.dataset.view === S.lbView));
+
+  $("lbCtx").textContent = S.listSub ? S.listSub.split(" · ").slice(0, 2).join(" · ") : "";
+
+  if(advisorView) return paintAdvisorTable();
+
+  const { list, lead } = rankedHosts();
+
+  /* One hero figure, and only when someone actually qualifies for it. */
+  $("lbTop").innerHTML = lead ? `
+    <div class="lb-top">
+      <div>
+        <div class="lb-top-k">Top performing host</div>
+        <div class="lb-top-n">${esc(lead.host || "(unknown)")}</div>
+        <div class="lb-top-s">${lead.drove} of ${lead.resolved} cars driven on FSD
+          · ${lead.cars} deliveries · ${lead.totalMi.toLocaleString()} mi</div>
+      </div>
+      <div class="lb-top-v">
+        <div class="lb-top-fig">${lead.fsdRate}<small>%</small></div>
+        <div class="lb-top-c">FSD rate</div>
+      </div>
+    </div>`
+    : `<div class="lb-none">No host reached ${S.minQualify} deliveries, so no top
+         performer is called for this day.</div>`;
+
+  $("lbBody").innerHTML = `
+    <div class="lb-head">
+      <span style="text-align:right">#</span>
+      <span>Delivery host</span>
+      <span style="text-align:right">Cars</span>
+      <span style="text-align:right" class="lb-hide">Share of day</span>
+      <span>FSD rate</span>
+      <span style="text-align:right" class="lb-hide">Total mi</span>
+    </div>
+    ${list.map((h, i) => `
+      <div class="lb-row${h === lead ? " lead" : ""}${h.qualified ? "" : " thin"}${
+             S.host === h.host ? " on" : ""}" data-host="${esc(h.host)}"
+           title="Click to show only ${esc(h.host || "this host")}'s deliveries">
+        <span class="lb-rank">${i + 1}</span>
+        <span class="lb-name">${esc(h.host || "(unknown)")}${
+          h.qualified ? "" : ` <span class="lb-sub">· too few to rank</span>`}</span>
+        <span class="lb-num">${h.cars}</span>
+        <span class="lb-num lb-hide">${h.share}%</span>
+        <span class="lb-meter">
+          <span class="lb-meter-t"><span class="lb-meter-f" style="width:${h.fsdRate}%"></span></span>
+          <span class="lb-meter-v">${h.fsdRate}%</span>
+        </span>
+        <span class="lb-num lb-hide">${h.totalMi.toLocaleString()}</span>
+      </div>`).join("")}`;
+
+  $("lbBody").querySelectorAll(".lb-row").forEach(el =>
+    el.addEventListener("click", () => {
+      const v = el.dataset.host;
+      S.host = (S.host === v) ? null : v;    // clicking the active row clears it
+      paintHosts();
+      paintList();
+      closeModal();
+    }));
+
+  $("lbFoot").innerHTML =
+    `Rates are per host — their own cars that drove FSD, not a share of the day.
+     A car counts once it reaches <b>${barLabel()} mi</b> on FSD after handoff.
+     A host needs ${S.minQualify} deliveries to be eligible for the top spot;
+     below that a rate is noise and is shown in grey.
+     Click any row to filter the list to that host.`;
+}
+
+/* Volume only. The advisor owns the appointment; the host ran the handover and
+   is the only person the mileage is attributed to. */
+function paintAdvisorTable(){
+  const list = S.advisors || [];
+  $("lbTop").innerHTML = "";
+
+  $("lbBody").innerHTML = list.length ? `
+    <div class="lb-head">
+      <span style="text-align:right">#</span>
+      <span>Delivery advisor</span>
+      <span style="text-align:right">Cars</span>
+      <span style="text-align:right">Share of day</span>
+    </div>
+    ${list.map((a, i) => `
+      <div class="lb-row" style="cursor:default">
+        <span class="lb-rank">${i + 1}</span>
+        <span class="lb-name">${esc(a.advisor)}</span>
+        <span class="lb-num">${a.cars}</span>
+        <span class="lb-num">${a.share}%</span>
+      </div>`).join("")}`
+    : `<div class="lb-none">No advisor names came back for this day.</div>`;
+
+  $("lbFoot").innerHTML =
+    `Appointment volume only. FSD is never attributed to the advisor — the
+     <b>host</b> conducted the handover, and the two are different people on
+     roughly a third of cars. Switch to Hosts for FSD rates.`;
+}
+
+$("lbBtn").addEventListener("click", () => {
+  openModal($("lbModal"));
+  paintLeaderboard();
+});
+
+document.querySelectorAll("#lbModal [data-sort]").forEach(b =>
+  b.addEventListener("click", () => { S.lbSort = b.dataset.sort; paintLeaderboard(); }));
+document.querySelectorAll("#lbModal [data-view]").forEach(b =>
+  b.addEventListener("click", () => { S.lbView = b.dataset.view; paintLeaderboard(); }));
+
+/* Spelling both percentages out. "24%" and "83%" next to each other read as
+   comparable quantities; they are not remotely the same measurement. */
+function paintHostBar(){
+  const el = $("hostbar");
+  if(S.host == null){ el.innerHTML = ""; return; }
+
+  const h = S.hosts.find(x => x.host === S.host);
+  if(!h){ el.innerHTML = ""; return; }
+
+  el.innerHTML = `
+    <div class="hostbar">
+      <span><b>${esc(h.host || "(unknown)")}</b></span>
+      <span>handled <b>${h.cars}</b> of ${S.rows.length} deliveries — <b>${h.share}%</b> of the day</span>
+      <span><b>${h.drove}</b> of their ${h.resolved} drove FSD — <b>${h.fsdRate}%</b></span>
+      <span>${h.totalMi.toLocaleString()} mi total, ${h.avgMi} avg</span>
+      <button class="clear" id="hostClear">Show all</button>
+    </div>`;
+  $("hostClear").addEventListener("click", () => {
+    S.host = null;
+    paintHosts();
+    paintList();
+  });
+}
+
+/* The list and the stat strip both follow the filter. */
+function paintList(){
+  const rows = visibleRows();
+  $("empty").hidden = rows.length > 0;
+  $("list").innerHTML = rows.map(rowHtml).join("");
+
+  const ok    = rows.filter(r => r.error == null && r.miles != null);
+  const drove = ok.filter(droveFsd);
+  const mi    = ok.reduce((a, r) => a + r.miles, 0);
+
+  $("sDelivered").textContent = rows.length;
+  $("sDrove").textContent     = drove.length;
+  $("statDrove").title        = `Cars that reached ${barLabel()} mi on FSD after handoff`;
+  $("sTotal").innerHTML       = Number(mi.toFixed(1)).toLocaleString() + '<small>mi</small>';
+
+  if(S.listSub){
+    $("listSub").textContent = S.host == null
+      ? S.listSub
+      : `${S.listSub} · filtered to ${S.host}`;
+  }
+}
+
+/* The VIN, linked to the car's vitals in Garage — the page anyone goes to
+   next when a figure on this one looks wrong, and the source of the very
+   reading being reported.
+
+   `/vehicles/<vin>/vitals` is Garage's own route: its VIN debug page builds
+   exactly this href, in a new tab, so the id segment takes a VIN and no
+   numeric device lookup is needed here.
+
+   Falls back to plain text if the page never learned the Garage host, which
+   only happens if the state call failed — a link to "undefined/vehicles" is
+   worse than no link. */
+function vinLink(r){
+  const plain = `<div class="vin" title="${esc(r.vin)}">${esc(r.vin)}</div>`;
+  if(!S.garageUrl) return plain;
+
+  return `<a class="vin vin-link" target="_blank" rel="noreferrer"
+             href="${esc(S.garageUrl)}/vehicles/${encodeURIComponent(r.vin)}/vitals"
+             title="${esc(r.vin)} — open this car's vitals in Garage">${esc(r.vin)}</a>`;
+}
+
+/* The customer, linked to their order. The reference number is what the link
+   is built from but not what it shows — a name is what anyone reading this
+   actually recognises, and the RN stays in the tooltip and the export.
+
+   No RN means no order to link to, so nothing is rendered; a name with a dead
+   link would be worse than no link. */
+function orderLink(r){
+  if(!r.rn) return "";
+  const label = r.customer || r.rn;
+  return `<a class="rn order" target="_blank" rel="noopener"
+             href="https://os.tesla.com/vehicle-order/${encodeURIComponent(r.rn)}"
+             title="Open order ${esc(r.rn)} in OS">${esc(label)}</a>`;
+}
+
+function rowHtml(r){
+  const used  = droveFsd(r);
+  const mdl   = modelLabel(r.model);
+  const state = r.error ? "failed" : (used ? "used" : "none");
+
+  // A car that moved but fell short reads as a different outcome from one
+  // that never engaged, and it is the one worth arguing about — so it says
+  // how far short it was rather than claiming FSD was never used.
+  const short = !used && !r.error && r.miles != null && r.miles > 0;
+
+  return `
+  <div class="veh ${state}">
+    ${scene(used)}
+
+    <div class="veh-id">
+      <div class="vin-row">
+        ${vinLink(r)}
+        ${orderLink(r)}
+        ${mdl ? `<span class="model">${esc(mdl)}</span>` : ""}
+      </div>
+      <div class="veh-sub">
+        ${used ? `<span class="badge fsd">FSD engaged</span>`
+               : (r.error ? `<span class="badge err">No data</span>`
+               : (short ? `<span class="badge under" title="Drove ${r.miles.toFixed(2)} mi on FSD — under the ${barLabel()} mi bar, so it does not count">Under ${barLabel()} mi</span>`
+                        : `<span class="badge">No FSD use</span>`))}
+        ${r.host || r.hostUser
+          ? `<span class="who" title="Delivery host — conducted the handover; the FSD miles are attributed here"><i>Host</i><span>${esc(r.host || r.hostUser)}</span></span>`
+          : ""}
+        ${r.advisor && r.advisor !== (r.host || r.hostUser)
+          ? `<span class="who adv" title="Delivery advisor — owns the appointment. Shown for reference; FSD is never attributed to the advisor"><i>Advisor</i><span>${esc(r.advisor)}</span></span>`
+          : ""}
+        <span title="${esc(handoffTitle(r))}">${esc(handoffLabel(r))}</span>
+        ${r.final === false
+          ? `<span class="badge live" title="${esc(windowTitle(r))}">Counting</span>`
+          : ""}
+        ${r.gapMin != null && r.gapMin > 60
+          ? `<span class="badge warn" title="The last telemetry sample before handoff was ${r.gapMin} min earlier, so a little staff driving could be counted here">Baseline ${r.gapMin}m</span>`
+          : ""}
+        ${r.altCounter
+          ? `<span class="badge warn" title="This car's usual FSD odometer never moved all fortnight — it is stuck, not idle. The figure here is read off the vehicle's backup FSD counter, which agrees with the usual one to the thousandth of a mile on every car where both are working.">Backup counter</span>`
+          : ""}
+      </div>
+    </div>
+
+    <div class="readout">
+      <div class="miles ${r.miles == null ? "dim" : ""}"${
+        // The readout rounds to a tenth, so a car on 0.96 shows "1.0" and is
+        // still red. The exact figure on hover is what settles that.
+        r.miles == null ? "" : ` title="${r.miles.toFixed(2)} mi on FSD ${
+          r.final === false ? `so far, ${S.windowHours} h from handoff`
+                            : `in the ${S.windowHours} h after handoff`}"`}>${
+        r.miles == null ? "—" : r.miles.toFixed(1)}<small>mi</small></div>
+      <div class="readout-k">FSD · first ${S.windowHours} h</div>
+      ${toDateLine(r)}
+    </div>
+  </div>`;
+}
+
+function render(data){
+  const s = data.summary;
+  S.rows     = data.rows;
+  S.hosts    = data.hosts || [];
+  S.advisors = data.advisors || [];
+  if(data.minQualify) S.minQualify = data.minQualify;
+  // != null, not a truth test: a bar of 0 is a real setting.
+  if(data.droveThreshold != null) setThreshold(data.droveThreshold);
+  // Before the rows are painted — they write the window into every readout.
+  if(data.windowHours) setWindow(data.windowHours);
+
+  // A reload replaces the population, so a filter naming someone who is no
+  // longer in it has to go — silently showing zero rows would look like a bug.
+  if(S.host != null && !S.hosts.some(h => h.host === S.host)) S.host = null;
+
+  // The server has the last word on mode: advanced with no cookie comes back
+  // as basic, and the page must not keep claiming otherwise.
+  if(data.mode) setMode(data.mode, { paint: true });
+
+  /* A single-car search does not change which centre the dashboard is pointed
+     at. The car may well belong to another one, and quietly repointing the TRT
+     would send the next Load today somewhere the operator never chose. */
+  S.single = Boolean(data.single);
+  if(!S.single) setTrt(data.trtId, data.trt);
+
+  // A car that was never delivered, or is too old to measure, comes back with
+  // no dates at all — there is no day for it to belong to.
+  const days = data.dates || [];
+  const span = !days.length ? ""
+    : days.length === 1 ? days[0]
+    : `${days[0]} → ${days[days.length - 1]}`;
+
+  // Drives the export filename: site and window, so files stay distinguishable
+  // in a Downloads folder.
+  const site = (data.trt && data.trt.name) ? data.trt.name : "trt" + data.trtId;
+  // Named by whichever number was searched, so a file saved after an RN search
+  // is findable by the number the person actually had in hand.
+  S.label = S.single
+    ? `${data.rn || data.vin}${span ? "-" + span : ""}`
+    : `${site}-${days.length === 1 ? days[0] : days[0] + "_to_" + days[days.length - 1]}`;
+  $("listHead").hidden = false;
+  $("listTitle").textContent = S.single ? "Vehicle" : "Deliveries";
+
+  // How many cars had to be sifted to find these is worth stating: it is the
+  // reason the run took minutes, and it makes an empty list legible. A
+  // single-car search sifted nothing — it asked the index for one car — so it
+  // says what it found instead: the day and the centre the car belongs to.
+  // The RN leads when there was one, because that is the number that was
+  // typed; the VIN follows it rather than replacing it.
+  const scanned = (data.perDate || []).reduce((a, d) => a + (d.national || 0), 0);
+  S.listSub = S.single
+    ? [data.rn, data.vin, span, data.trtId ? `TRT ${data.trtId}` +
+        ((data.trt && data.trt.name) ? ` · ${data.trt.name}` : "") : ""]
+        .filter(Boolean).join(" · ")
+    : `${span} · TRT ${data.trtId} · ${s.resolved} of ${s.vehicles} resolved` +
+      (scanned ? ` · ${scanned.toLocaleString()} scanned` : "");
+
+  paintHosts();
+  paintList();
+
+  const msgs = [...(data.notices || [])];
+  if(s.failed)   msgs.push(`${s.failed} vehicle(s) returned no telemetry.`);
+  if(s.gapLeaky) msgs.push(`${s.gapLeaky} vehicle(s) have a pre-handoff baseline older than an hour — a little staff driving may be counted in those rows.`);
+  if(s.altCounter) msgs.push(`${s.altCounter} vehicle(s) have a stuck FSD odometer and were measured on the backup counter instead — they would otherwise have read zero.`);
+  if(msgs.length) note(msgs.join(" ")); else clearNotes();
+}
+
+/* ───────────────────────────── export ─────────────────────────────
+   Sends the rows already on screen rather than asking for a fresh report:
+   the file then matches the page exactly, costs nothing, and cannot come
+   back with different numbers — FSD miles climb through the day. */
+$("exportBtn").addEventListener("click", async () => {
+  // "What is on screen" includes the host filter — exporting the whole day
+  // while the page shows one person's cars would be a nasty surprise.
+  const rows = visibleRows();
+  if(!rows.length){ note("Nothing loaded to export.", true); return; }
+
+  const btn = $("exportBtn");
+  btn.disabled = true;
+  // innerHTML, not textContent — the label carries an inline SVG.
+  const label = btn.innerHTML;
+  btn.textContent = "Exporting";
+
+  try{
+    const res = await fetch("/api/export", {
+      method : "POST",
+      headers: { "Content-Type": "application/json" },
+      body   : JSON.stringify({
+        // The host lands in the filename so a per-person file is identifiable
+        // in a Downloads folder.
+        label: (S.label || "export") + (S.host ? "-" + S.host.replace(/\s+/g, "") : ""),
+        mode : S.mode,
+        rows : rows.map(r => ({ ...r, modelLabel: modelLabel(r.model) || r.model || "" }))
+      })
+    });
+    if(!res.ok){
+      let msg = `HTTP ${res.status}`;
+      try { msg = (await res.json()).error || msg; } catch {}
+      throw new Error(msg);
+    }
+
+    const blob = await res.blob();
+    const cd   = res.headers.get("Content-Disposition") || "";
+    const hit  = cd.match(/filename="([^"]+)"/);
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url;
+    a.download = hit ? hit[1] : "fsd-export.xlsx";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Revoke late; Safari cancels the download if the URL dies too early.
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }catch(err){
+    note("Export failed: " + err.message, true);
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = label;
+  }
+});
+
+/* ───────────────────────────── load ───────────────────────────── */
+/* The one path that actually fetches. Every hero button and both dialogs
+   funnel through here so there is a single place that can be busy, and a
+   single place that handles a dead cookie or a missing TRT.
+
+   `req` is either {date} or {vin} — the two kinds of question this page can
+   ask. It is kept whole in S.spec rather than flattened to a string, so a
+   mode switch re-runs whichever one produced what is on screen. */
+async function runLoad(req, btn){
+  if(S.busy) return;
+
+  /* A VIN carries its own centre, so it is the one request that does not need
+     a TRT set first. An RN is not exempt — it is resolved out of a centre's
+     appointments, so it falls through to the picker like a date range does. */
+  if(!S.trtId && !req.vin){
+    $("trtInput").value = "";
+    openModal($("trtModal"));
+    note("Enter the TRT of the delivery centre first.");
+    setTimeout(() => $("trtInput").focus(), 60);
+    return;
+  }
+
+  S.busy = true;
+  S.spec = req;                        // remembered so a mode switch can re-run it
+  const restore = btn ? btn.innerHTML : null;
+  if(btn){ btn.disabled = true; btn.innerHTML = '<i class="spin"></i>Loading'; }
+  clearNotes();
+  progWatch();
+
+  try{
+    const data = await api("/api/fsd", { ...req, trtId: S.trtId, mode: S.mode });
+
+    /* ── the answer has to be to the question that was asked ──
+       A one-car search must come back as one car. This is not paranoia about
+       arithmetic; it is the one way this page can be wrong without looking
+       wrong. The page is read off disk on every request while server.js is
+       held in memory from whenever the board last started, so a board that has
+       not been restarted serves a NEW page from an OLD server. That server has
+       never heard of the field the new page is sending, ignores it, finds no
+       VIN, falls back to "today", and answers with the centre's whole day —
+       which renders perfectly as a screen full of cars that have nothing to do
+       with what was typed. It cost an afternoon once. */
+    if((req.vin || req.rn) && !data.single){
+      throw new Error(
+        `A search for one car came back as a whole day, so the board did not understand ` +
+        `what was asked — it is running older code than the page it served. Restart this ` +
+        `board from the Zo Projects Hub and try again.`);
+    }
+
+    render(data);
+    closeModal();
+  }catch(err){
+    note(err.needsCookie
+      ? err.message + "  Open Admin › Sources to paste a fresh one."
+      : err.message, true);
+    closeModal();
+    if(err.needsTrt){
+      $("trtInput").value = "";
+      openModal($("trtModal"));
+      setTimeout(() => $("trtInput").focus(), 60);
+    }
+  }finally{
+    S.busy = false;
+    progHide();
+    if(btn){ btn.disabled = false; btn.innerHTML = restore; }
+  }
+}
+
+/* Today is far and away the common case, so it gets its own button and skips
+   the dialog entirely. */
+$("loadTodayBtn").addEventListener("click", () => {
+  const today = window.__today || "";
+  $("fDate").value = today;
+  $("fEnd").value = "";
+  runLoad({ date: today }, $("loadTodayBtn"));
+});
+
+/* ── one car ──
+   Deliberately not a filter over a loaded day: the question "what did this
+   car do" is usually asked about one nobody has pulled a report for, often
+   from another centre entirely, and making someone load a whole day first to
+   find one row would answer a different question. */
+$("searchVinBtn").addEventListener("click", () => {
+  $("vinInput").value = "";
+  showOneHint();
+  openModal($("vinModal"));
+  setTimeout(() => $("vinInput").focus(), 60);
+});
+
+/* Checked here as well as on the server: a typo should come back the instant
+   it is submitted, not after a round trip that reports "no vehicle found" and
+   reads like the car is missing rather than the number mistyped. */
+const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/;
+const RN_RE  = /^RN\d{6,12}$/;
+
+/* RN is accepted without its prefix, because the number gets dictated that
+   way as often as it gets copied off an order page. */
+const normRn = s => /^\d{6,12}$/.test(s) ? "RN" + s : s;
+
+/* The two are never ambiguous — a VIN is 17 characters and always has letters
+   in it, an RN is RN plus digits — so the box can simply tell which it was
+   given instead of making anyone declare it. */
+function classify(raw){
+  const s = String(raw || "").trim().toUpperCase().replace(/\s+/g, "");
+  if(VIN_RE.test(s)) return { kind: "vin", value: s };
+  if(RN_RE.test(normRn(s))) return { kind: "rn", value: normRn(s) };
+  return { kind: null, value: s };
+}
+
+const HINT_IDLE =
+  "A VIN is looked up nationally — the delivery date and the centre come off " +
+  "the car, and it need not belong to the TRT on screen.";
+const HINT_VIN =
+  "VIN — the delivery date and the centre come off the car, so there is nothing " +
+  "else to fill in.";
+
+/* Said before the search rather than after it fails. An RN is resolved out of
+   one centre's appointments, so the two things a VIN never has to care about —
+   which centre is on screen, and whether Intrepid is connected — both decide
+   whether this works. */
+function hintRn(){
+  const where = S.trtInfo && S.trtInfo.name ? `${S.trtInfo.name} (TRT ${S.trtId})`
+              : S.trtId                     ? `TRT ${S.trtId}`
+                                            : null;
+  if(!where){
+    return { text: "Reference number — but no centre is set, and an RN is looked up in " +
+                   "one centre's appointments. Choose Enter TRT first, or search the VIN.",
+             bad: true };
+  }
+  if(S.mode !== "advanced"){
+    return { text: `Reference number — but this needs Intrepid, and the board is in ` +
+                   `basic mode. Sign in on the Hub, or search the VIN instead.`,
+             bad: true };
+  }
+  return { text: `Reference number — searched in ${where}'s appointments over the last ` +
+                 `${S.vitalsDays || 14} days. A car handed over at another centre will not ` +
+                 `be found; search its VIN for that.`, bad: false };
+}
+
+function showOneHint(){
+  const { kind } = classify($("vinInput").value);
+  const el = $("vinHint");
+  if(kind === "rn"){
+    const h = hintRn();
+    el.textContent = h.text;
+    el.style.color = h.bad ? "var(--red)" : "";
+    return;
+  }
+  el.textContent = kind === "vin" ? HINT_VIN : HINT_IDLE;
+  el.style.color = "";
+}
+
+function submitVin(){
+  const { kind, value } = classify($("vinInput").value);
+
+  if(!kind){
+    // Told apart by shape, so the message names the likelier mistake rather
+    // than complaining about both formats at once.
+    const digits = /^\d+$/.test(value);
+    $("vinHint").textContent =
+      value.length === 17     ? "A VIN never contains I, O or Q — they would be misread as 1 and 0."
+      : digits                ? `A reference number is 6 to 12 digits after RN; that is ${value.length}.`
+      : /^RN/.test(value)     ? "A reference number is RN followed by the order's digits, nothing else."
+                              : `A VIN is 17 characters and an RN is RN plus digits; that is ${value.length} characters.`;
+    $("vinHint").style.color = "var(--red)";
+    $("vinInput").focus();
+    return;
+  }
+
+  runLoad(kind === "rn" ? { rn: value } : { vin: value }, $("submitVin"));
+}
+
+$("submitVin").addEventListener("click", submitVin);
+$("vinInput").addEventListener("input", showOneHint);
+$("vinInput").addEventListener("keydown", e => { if(e.key === "Enter") submitVin(); });
+
+$("optionsBtn").addEventListener("click", () => {
+  if(!$("fDate").value) $("fDate").value = window.__today || "";
+  openModal($("loadModal"));
+  setTimeout(() => $("fDate").focus(), 60);
+});
+
+$("submitLoad").addEventListener("click", () => {
+  const date = $("fDate").value;
+  const end  = $("fEnd").value;
+  if(!date){ $("fDate").focus(); return; }
+  runLoad({ date: end && end !== date ? `${date}..${end}` : date }, $("submitLoad"));
+});
+
+document.querySelectorAll("[data-day]").forEach(chip => {
+  chip.addEventListener("click", () => {
+    const d = new Date();
+    d.setDate(d.getDate() + Number(chip.dataset.day));
+    const p = n => String(n).padStart(2, "0");
+    $("fDate").value = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    $("fEnd").value = "";
+    document.querySelectorAll("[data-day]").forEach(c => c.classList.toggle("on", c === chip));
+  });
+});
+
+/* ───────────────────────────── TRT ───────────────────────────── */
+$("trtBtn").addEventListener("click", () => {
+  $("trtInput").value = "";
+  clearSites();
+  openModal($("trtModal"));
+  setTimeout(() => $("trtInput").focus(), 60);
+});
+
+/* ── site type-ahead ──
+   The directory is ~1,800 sites and already cached server-side, so a query
+   per keystroke is cheap; it is debounced anyway to avoid a request storm
+   while someone types, and stale responses are dropped by sequence number. */
+let siteSeq = 0, siteTimer = null, siteHits = [], siteCur = -1;
+
+function clearSites(){
+  siteHits = []; siteCur = -1;
+  $("siteList").hidden = true;
+  $("siteList").innerHTML = "";
+}
+
+function paintSites(){
+  const list = $("siteList");
+  if(!siteHits.length){
+    list.innerHTML = `<div class="site-none">No site matches that.</div>`;
+    list.hidden = false;
+    return;
+  }
+  list.innerHTML = siteHits.map((s, i) => `
+    <button class="site${i === siteCur ? " cur" : ""}" data-i="${i}">
+      <span class="site-n">${esc(s.name)}</span>
+      ${s.city ? `<span class="site-c">${esc(s.city)}${s.province ? ", " + esc(s.province) : ""}</span>` : ""}
+      <span class="site-id">${s.trtId}</span>
+    </button>`).join("");
+  list.hidden = false;
+
+  list.querySelectorAll(".site").forEach(el =>
+    el.addEventListener("click", () => chooseSite(siteHits[Number(el.dataset.i)])));
+}
+
+async function querySites(q){
+  const mine = ++siteSeq;
+  try{
+    const d = await api("/api/sites?q=" + encodeURIComponent(q));
+    if(mine !== siteSeq) return;          // a newer keystroke already won
+    siteHits = d.sites || [];
+    siteCur = siteHits.length ? 0 : -1;
+    paintSites();
+  }catch{ clearSites(); }
+}
+
+$("trtInput").addEventListener("input", () => {
+  const q = $("trtInput").value.trim();
+  clearTimeout(siteTimer);
+  if(q.length < 2){ clearSites(); return; }
+  siteTimer = setTimeout(() => querySites(q), 140);
+});
+
+$("trtInput").addEventListener("keydown", e => {
+  if(!siteHits.length) return;
+  if(e.key === "ArrowDown"){ e.preventDefault(); siteCur = Math.min(siteCur + 1, siteHits.length - 1); paintSites(); }
+  if(e.key === "ArrowUp"  ){ e.preventDefault(); siteCur = Math.max(siteCur - 1, 0); paintSites(); }
+  if(e.key === "Enter" && siteCur >= 0){ e.preventDefault(); chooseSite(siteHits[siteCur]); }
+});
+
+function chooseSite(site){
+  if(!site) return;
+  clearSites();
+  setTrt(site.trtId, site);
+  rememberTrt(site.trtId);
+  closeModal();
+  note(`${site.name}${site.city ? " · " + site.city + (site.province ? ", " + site.province : "") : ""}` +
+       ` — TRT ${site.trtId}. This is now the default and will be here next time.`);
+}
+$("trtSave").addEventListener("click", async () => {
+  const v = $("trtInput").value.trim();
+
+  // A name typed with a list showing: take the highlighted row, so the button
+  // does the same thing Enter would.
+  if(!/^\d+$/.test(v)){
+    if(siteHits.length) return chooseSite(siteHits[siteCur >= 0 ? siteCur : 0]);
+    note("Type a site name and pick from the list, or enter a numeric TRT.", true);
+    return;
+  }
+
+  const btn = $("trtSave");
+  btn.disabled = true; btn.textContent = "Looking up";
+  let info = null;
+  try{ info = (await api("/api/trt?id=" + encodeURIComponent(v))).info; }catch{}
+  btn.disabled = false; btn.textContent = "Use this TRT";
+
+  setTrt(Number(v), info);
+  rememberTrt(Number(v));
+  closeModal();
+  note(info
+    ? `${info.name}${info.city ? " · " + info.city + (info.province ? ", " + info.province : "") : ""} — TRT ${v}. This is now the default and will be here next time.`
+    : `TRT ${v} saved as the default, but no site name matched the location directory. Loading will still try it.`);
+});
+
+/* ───────────────────────────── admin ───────────────────────────── */
+$("adminBtn").addEventListener("click", () => {
+  openModal($("admin"));
+  if(!S.password) setTimeout(() => otpBoxes[0].focus(), 60);
+});
+
+/* Six-digit code entry, same behaviour as the Charging Tracker: auto-advance,
+   backspace steps back, arrows move, a pasted code fills the row, and six
+   digits submit without waiting for the button. The code is checked on the
+   SERVER — a client-side comparison would be decoration, not a gate. */
+const otpBoxes = Array.from(document.querySelectorAll("#otp .otp-box"));
+const otpValue = () => otpBoxes.map(b => b.value).join("");
+
+function otpClear(focus){
+  otpBoxes.forEach(b => { b.value = ""; b.classList.remove("filled"); });
+  if(focus) otpBoxes[0].focus();
+}
+
+function otpFill(digits){
+  otpBoxes.forEach((b, i) => {
+    b.value = digits[i] || "";
+    b.classList.toggle("filled", Boolean(b.value));
+  });
+  const nextEmpty = otpBoxes.findIndex(b => !b.value);
+  (nextEmpty === -1 ? otpBoxes[5] : otpBoxes[nextEmpty]).focus();
+  if(digits.length >= 6) tryUnlock();
+}
+
+otpBoxes.forEach((box, i) => {
+  box.addEventListener("input", () => {
+    // Keep digits only; a fast typist can land two characters in one box.
+    const digits = box.value.replace(/\D/g, "");
+    box.value = digits.slice(0, 1);
+    box.classList.toggle("filled", Boolean(box.value));
+    $("gateErr").textContent = "";
+    $("otp").classList.remove("bad");
+
+    if(digits.length > 1){ otpFill(otpValue().slice(0, i) + digits); return; }
+    if(box.value && i < 5) otpBoxes[i + 1].focus();
+    if(otpValue().length === 6) tryUnlock();
+  });
+
+  box.addEventListener("keydown", e => {
+    if(e.key === "Backspace" && !box.value && i > 0){
+      e.preventDefault();
+      otpBoxes[i - 1].value = "";
+      otpBoxes[i - 1].classList.remove("filled");
+      otpBoxes[i - 1].focus();
+    }
+    if(e.key === "ArrowLeft"  && i > 0){ e.preventDefault(); otpBoxes[i - 1].focus(); }
+    if(e.key === "ArrowRight" && i < 5){ e.preventDefault(); otpBoxes[i + 1].focus(); }
+    if(e.key === "Enter") tryUnlock();
+  });
+
+  box.addEventListener("paste", e => {
+    e.preventDefault();
+    const digits = (e.clipboardData.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+    if(digits) otpFill(digits);
+  });
+
+  box.addEventListener("focus", () => box.select());
+});
+
+let unlocking = false;
+async function tryUnlock(){
+  if(unlocking) return;
+  const code = otpValue();
+  if(code.length < 6){ $("gateErr").textContent = "Enter all six digits."; return; }
+
+  unlocking = true;
+  try{
+    const d = await api("/api/admin/unlock", { password: code });
+    S.password = code;
+    otpClear(false);
+    $("gateErr").textContent = "";
+    $("gate").hidden = true;
+    $("settings").hidden = false;
+    $("admin").classList.add("unlocked");
+    fillConnections(d.connections);
+  }catch(err){
+    $("otp").classList.add("bad");
+    $("gateErr").textContent = err.message === "Wrong password" ? "Incorrect code." : err.message;
+    setTimeout(() => { $("otp").classList.remove("bad"); otpClear(true); }, 420);
+  }finally{
+    unlocking = false;
+  }
+}
+$("pwBtn").addEventListener("click", tryUnlock);
+
+/* Rail-driven sections: the rail item and the pane section share a key, so
+   adding a section is markup only. */
+document.querySelectorAll(".rail-item[data-sec]").forEach(item => {
+  item.addEventListener("click", () => {
+    const key = item.dataset.sec;
+    document.querySelectorAll(".rail-item[data-sec]").forEach(i => i.classList.toggle("on", i === item));
+    document.querySelectorAll(".admin-pane .sec").forEach(sec =>
+      sec.classList.toggle("on", sec.id.toLowerCase() === "sec" + key));
+  });
+});
+
+/* ── mode ──
+   Everything advanced-only is shown or hidden from one place, so a new
+   advanced control needs the class and nothing else. */
+function setMode(mode, { paint = true } = {}){
+  S.mode = mode === "advanced" ? "advanced" : "basic";
+  const adv = S.mode === "advanced";
+
+  if(paint){
+    document.querySelectorAll(".mode[data-mode]").forEach(b =>
+      b.classList.toggle("on", b.dataset.mode === S.mode));
+    document.querySelectorAll(".adv-only").forEach(el => { el.hidden = !adv; });
+    $("advAdds").hidden = !adv;
+  }
+  $("fSrc").textContent = adv ? "Garage + Intrepid" : "Garage";
+
+  // Dropping to basic strands any host filter — there are no hosts to filter
+  // by, so the rows must come back rather than silently staying hidden.
+  if(!adv && S.host != null){ S.host = null; paintList(); }
+  paintHosts();
+}
+
+function fillConnections(c){
+  if(c.mode) setMode(c.mode);
+  if(c.droveThreshold != null){
+    setThreshold(c.droveThreshold);
+    // Whether the bar is this machine's choice or what the build shipped with
+    // is the first thing anyone checking it wants to know.
+    if(document.activeElement !== $("barIn")){
+      barNote(c.droveThresholdSet
+        ? `Set on this machine. "Default" restores what the build shipped with.`
+        : `The shipped default. Changing it here saves the choice to this machine.`);
+    }
+  }
+
+  // What advanced buys comes from the server so the panel and the report
+  // cannot describe it differently.
+  const tick = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+      stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
+  $("advList").innerHTML = (c.advancedAdds || [])
+    .map(a => `<li>${tick}<span>${esc(a)}</span></li>`).join("");
+
+  const ci = $("cIntrepid");
+  ci.className = "conn adv-only " + (c.intrepid.set ? (c.intrepid.looksOk ? "ok" : "bad") : "bad");
+  ci.hidden = S.mode !== "advanced";
+  ci.querySelector("span").textContent = c.intrepid.set
+    ? (c.intrepid.looksOk ? "cookie saved " + c.intrepid.hint : "saved, but no cogs-authorization found")
+    : "not set — advanced runs will fall back to basic";
+
+  // Garage is the one connection basic mode cannot run without, so a missing
+  // sign-in reads as a fault rather than as neutral status.
+  const cg = $("cGarage");
+  cg.className = "conn " + (c.garage.signedIn ? "ok" : "bad");
+  cg.querySelector("span").textContent = c.garage.detail;
+
+  const ct = $("cTesladex");
+  ct.className = "conn";
+  ct.querySelector("span").textContent = "delivered-vehicle access — press Test to check";
+
+  // Rail dot: red only when something is actually missing, so it means
+  // "attend to this" rather than decorating the rail permanently. Basic mode
+  // needs no cookie, so a missing one is not a fault there.
+  const intrepidOk = S.mode !== "advanced" || (c.intrepid.set && c.intrepid.looksOk);
+  $("railWarnConn").hidden = c.garage.signedIn && intrepidOk;
+}
+
+/* Switching sources re-runs whatever is on screen. The user asked for the
+   toggle to refresh the list, and it is the honest behaviour anyway: leaving
+   a basic list under an "advanced" label would be a lie about the data. */
+document.querySelectorAll(".mode[data-mode]").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    const want = btn.dataset.mode;
+    if(want === S.mode) return;
+
+    const before = S.mode;
+    setMode(want);
+    try{
+      const d = await api("/api/admin/mode", { password: S.password, mode: want });
+      fillConnections(d.connections);
+
+      if(d.needsCookie){
+        note("Advanced needs an Intrepid session — sign in on the Zo Projects Hub, "
+           + "or runs will fall back to basic.", true);
+        return;                       // nothing to refresh with; let them fix it first
+      }
+
+      if(S.rows.length && S.spec){
+        closeModal();
+        note(want === "advanced"
+          ? "Reloading with reference numbers and advisors…"
+          : "Reloading from Garage alone…");
+        runLoad(S.spec, null);
+      }
+    }catch(err){
+      setMode(before);                // the server said no; the UI must agree
+      note(err.message, true);
+    }
+  });
+});
+
+/* ── what counts as using FSD ──
+   Moving the bar re-judges the loaded report; it never re-measures it. The
+   rows and the stat strip recolour from the page's own copy of the number,
+   and the leaderboard comes back from the server so its percentages stay in
+   one place. */
+/* The window length is stated in the rows, the summary note and the
+   Measurement panel. All of them read S.windowHours, and the prose in the
+   panel gets it injected here, so "12" is written down in exactly one place —
+   config.json — and changing it there changes every mention. */
+function setWindow(h){
+  const n = Number(h);
+  if(!Number.isFinite(n) || n <= 0) return;
+  S.windowHours = n;
+  document.querySelectorAll(".win-h").forEach(el => { el.textContent = String(n); });
+}
+
+function setThreshold(v){
+  const n = Number(v);
+  if(!Number.isFinite(n) || n < 0) return;
+  S.droveThreshold = n;
+  const box = $("barIn");
+  // Leave a half-typed value alone; the field is only synced when it is not
+  // the thing being edited.
+  if(box && document.activeElement !== box) box.value = String(Number(n.toFixed(2)));
+}
+
+function barNote(msg, bad){
+  const el = $("barHint");
+  el.textContent = msg;
+  el.style.color = bad ? "var(--red)" : "";
+}
+
+async function saveThreshold(value){
+  const prev = S.droveThreshold;
+  try{
+    const d = await api("/api/admin/threshold", { password: S.password, droveThreshold: value });
+    setThreshold(d.droveThreshold);
+    if(d.connections) fillConnections(d.connections);
+
+    // Recolour immediately from the new bar, then let the server restate the
+    // counts it owns.
+    paintList();
+    await rescore();
+
+    barNote(value == null
+      ? `Back to the shipped default of ${barLabel()} mi.`
+      : `A car now needs ${barLabel()} mi on FSD to count.`);
+  }catch(err){
+    setThreshold(prev);
+    barNote(err.message, true);
+  }
+}
+
+/* Re-scores the loaded rows without re-running the report. Silent when there
+   is nothing loaded — the setting still saved, there is just nothing to
+   restate yet. */
+async function rescore(){
+  if(!S.rows.length) return;
+  try{
+    const d = await api("/api/rescore", { rows: S.rows, mode: S.mode });
+    // Only the per-host figures need the server: the stat strip is derived
+    // from the rows the page already holds, and paintList redoes it.
+    S.hosts    = d.hosts    || [];
+    S.advisors = d.advisors || [];
+    if(S.host != null && !S.hosts.some(h => h.host === S.host)) S.host = null;
+    paintHosts();
+    paintList();
+  }catch(err){
+    barNote("Saved, but the leaderboard could not be restated: " + err.message, true);
+  }
+}
+
+$("barSave").addEventListener("click", () => saveThreshold($("barIn").value));
+$("barReset").addEventListener("click", () => saveThreshold(null));
+$("barIn").addEventListener("keydown", e => { if(e.key === "Enter") $("barSave").click(); });
+
+
+$("testBtn").addEventListener("click", async () => {
+  const btn = $("testBtn");
+  btn.disabled = true; btn.textContent = "Testing";
+  try{
+    const d = await api("/api/admin/test", {
+      password: S.password,
+      trtId   : S.trtId || undefined
+    });
+    const rows = [["tesladex", $("cTesladex")], ["garage", $("cGarage")]];
+    // Intrepid is only a source in advanced mode, so a dead cookie is not a
+    // failure worth colouring red in basic.
+    if(S.mode === "advanced") rows.push(["intrepid", $("cIntrepid")]);
+
+    for(const [key, el] of rows){
+      if(!d[key]) continue;
+      el.className = "conn " + (key === "intrepid" ? "adv-only " : "") + (d[key].ok ? "ok" : "bad");
+      el.querySelector("span").textContent = d[key].detail;
+      el.querySelector("span").title = d[key].detail;
+    }
+  }catch(err){
+    note(err.message, true);
+  }finally{
+    btn.disabled = false; btn.textContent = "Test connections";
+  }
+});
+
+/* ───────────────────────────── maintenance ─────────────────────────────
+   These buttons existed in the markup but were never wired to anything, so
+   the whole section was decoration. Connected here while adding the cache
+   control beside them. */
+
+/* Local only — nothing to ask the server for. */
+$("clearStatsBtn").addEventListener("click", () => {
+  S.rows = [];
+  S.spec = null;
+  S.hosts = [];
+  S.host = null;
+  S.single = false;
+  S.listSub = null;
+  paintHosts();
+  $("list").innerHTML = "";
+  $("listHead").hidden = true;
+  $("empty").hidden = false;
+  $("sDelivered").textContent = "0";
+  $("sDrove").textContent = "0";
+  $("sTotal").innerHTML = '0<small>mi</small>';
+  clearNotes();
+  closeModal();
+});
+
+async function blockAction(btn, label, run){
+  const restore = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = label;
+  try{
+    const msg = await run();
+    btn.textContent = msg || "Done";
+    setTimeout(() => { btn.textContent = restore; btn.disabled = false; }, 1800);
+  }catch(err){
+    btn.textContent = err.message.slice(0, 40);
+    setTimeout(() => { btn.textContent = restore; btn.disabled = false; }, 2600);
+  }
+}
+
+$("refreshTrtBtn").addEventListener("click", () =>
+  blockAction($("refreshTrtBtn"), "Refreshing", async () => {
+    const d = await api("/api/admin/refresh-trt", { password: S.password });
+    return `${d.sites.toLocaleString()} sites cached`;
+  }));
+
+$("clearVinBtn").addEventListener("click", () =>
+  blockAction($("clearVinBtn"), "Clearing", async () => {
+    const d = await api("/api/admin/clear-vin-cache", { password: S.password });
+    return `${d.cleared.toLocaleString()} entries cleared`;
+  }));
+
+$("clearMeasureBtn").addEventListener("click", () =>
+  blockAction($("clearMeasureBtn"), "Clearing", async () => {
+    const d = await api("/api/admin/clear-measure-cache", { password: S.password });
+    return `${d.cleared.toLocaleString()} measurements cleared`;
+  }));
+
+/* Two-step, because it is the one button here with a cost — the second press
+   is the confirmation. Credentials are never touched either way. */
+let resetArmed = false;
+$("resetBtn").addEventListener("click", async () => {
+  const btn = $("resetBtn");
+
+  if(!resetArmed){
+    resetArmed = true;
+    btn.classList.add("armed");
+    btn.textContent = "Press again to reset";
+    setTimeout(() => {
+      if(!resetArmed) return;
+      resetArmed = false;
+      btn.classList.remove("armed");
+      btn.textContent = "Reset dashboard";
+    }, 4000);
+    return;
+  }
+
+  resetArmed = false;
+  btn.classList.remove("armed");
+  await blockAction(btn, "Resetting", async () => {
+    await api("/api/admin/reset", { password: S.password });
+    $("clearStatsBtn").click();
+    setTrt(null, null);
+    return "Reset";
+  });
+});
+
+$("lockBtn").addEventListener("click", () => {
+  S.password = "";
+  $("settings").hidden = true;
+  $("gate").hidden = false;
+  $("admin").classList.remove("unlocked");
+  otpClear(false);
+  closeModal();
+});
+
+/* ───────────────────────────── boot ───────────────────────────── */
+(async () => {
+  try{
+    const st = await api("/api/state");
+    window.__today = st.today;
+    $("fDate").value = st.today;
+    // Every VIN on the page links into this host; without it they render as
+    // plain text rather than as links to nowhere.
+    if(st.garageUrl) S.garageUrl = st.garageUrl;
+    if(st.vitalsDays) S.vitalsDays = st.vitalsDays;
+    if(st.windowHours) setWindow(st.windowHours);
+
+    // The centre picked last time. Restored without re-saving it, so a boot
+    // is not a write.
+    if(st.trtId) setTrt(st.trtId, st.trt);
+
+    // Reflect the saved mode before anything is loaded, so the footer and the
+    // panel agree with what a run would actually do.
+    setMode(st.mode || "basic");
+
+    // The bar before any run: it colours the first list and is written into
+    // the admin field, which is otherwise blank until someone unlocks.
+    if(st.connections.droveThreshold != null) setThreshold(st.connections.droveThreshold);
+
+    // Only advanced needs a cookie, so basic must not nag about one — the
+    // whole point of this rework is that it runs with nothing set up.
+    // Garage first: without it nothing runs at all, in either mode.
+    if(!st.connections.garage.signedIn){
+      note("Not signed in to Garage — open Admin › Sources and press Sign in. " +
+           "Nothing can be loaded until then.", true);
+    }else if(st.mode === "advanced" && !st.connections.intrepid.set){
+      note("Advanced mode is on but no Intrepid cookie is saved — runs will fall back " +
+           "to basic until one is added under Admin › Sources.", true);
+    }
+  }catch(err){
+    note("Could not reach the FSD Tracker server: " + err.message, true);
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "port": 3100,
+  "defaultAdminPassword": "226565",
+
+  "healthCheckMs": 300000,
+  "healthStrikes": 2,
+  "autoReconnect": true
+}

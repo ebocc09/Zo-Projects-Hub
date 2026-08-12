@@ -1,0 +1,1559 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Compiler</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════ ZO-1 ═══════════════════════════════
+   House style. Near-black ink, flat greys, one accent used sparingly.
+   Uppercase micro-labels track wide; display numerals track tight. The two
+   move in opposite directions and that contrast is the signature.        */
+
+:root{
+  --ink:#171A20; --ink-soft:#393C41; --ink-mute:#5C5E62;
+  --line:#D0D1D2; --line-soft:#E8E8E9;
+  --paper:#FFFFFF; --paper-alt:#F4F4F4;
+  --red:#E82127; --blue:#3E6AE1;
+  --grey-car:#9AA0A6; --amber:#F5B31B; --amber-lit:#FFDC72; --green:#12BB6A;
+  --r-sm:4px; --r-md:8px; --r-lg:18px;
+  --shadow:0 2px 10px rgba(0,0,0,.08);
+  --shadow-lg:0 8px 40px rgba(0,0,0,.16);
+  --nav-h:56px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  color:var(--ink); background:var(--paper);
+  font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,select{font-family:inherit;font-size:14px;color:inherit}
+a{color:var(--blue)}
+
+/* ── nav ── */
+.nav{
+  position:sticky;top:0;z-index:40;height:var(--nav-h);
+  display:flex;align-items:center;gap:18px;padding:0 22px;
+  background:var(--paper);border-bottom:1px solid var(--line-soft);
+}
+.mark{font-size:16px;font-weight:600;letter-spacing:.42em;text-transform:uppercase}
+.nav .sep{width:1px;height:20px;background:var(--line-soft)}
+.nav .app{font-size:14px;font-weight:500;color:var(--ink-soft)}
+.nav .spacer{flex:1}
+
+/* ── the admin gate ──
+   Six boxes rather than one password field, the same as the other boards.
+   The code is six digits, so a field that could hold anything invites a
+   password manager to fill it with something that is not one.
+
+   452px while locked — the house width for this gate on every board. Six
+   digits floating in a 760px panel reads as a different dialog from the one
+   people already know. It widens only once there is something wide to show. */
+#adminModal{width:452px;transition:width .28s cubic-bezier(.3,.9,.3,1)}
+#adminModal.unlocked{width:760px}
+.lock-ic{display:grid;place-items:center;width:44px;height:44px;margin:6px auto 14px;
+  border:1px solid var(--line-soft);border-radius:50%}
+.lock-ic svg{width:21px;height:21px;color:var(--ink-soft)}
+.gate-t{text-align:center;font-size:13px;color:var(--ink-mute);margin-bottom:18px}
+.otp{display:flex;gap:9px;justify-content:center;margin-bottom:2px}
+.otp-box{
+  width:46px;height:56px;padding:0;
+  border:1px solid var(--line);border-radius:var(--r-md);
+  background:var(--paper);
+  text-align:center;font-size:22px;font-weight:600;
+  font-variant-numeric:tabular-nums;
+  outline:none;transition:border-color .15s,box-shadow .15s,background .15s;
+  -webkit-text-security:disc;
+}
+.otp-box::-webkit-outer-spin-button,.otp-box::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.otp-box:focus{border-color:var(--ink);box-shadow:0 0 0 3px rgba(23,26,32,.10)}
+.otp-box.filled{background:var(--paper-alt);border-color:#A9ABAD}
+.otp.bad .otp-box{border-color:var(--red);background:#FDE7E8}
+.otp.bad{animation:otpShake .38s cubic-bezier(.36,.07,.19,.97)}
+@keyframes otpShake{
+  10%,90%{transform:translateX(-2px)} 20%,80%{transform:translateX(4px)}
+  30%,50%,70%{transform:translateX(-7px)} 40%,60%{transform:translateX(7px)}
+}
+.gate-err{margin-top:10px;font-size:12.5px;color:#A3161B;text-align:center;height:17px}
+@media (max-width:420px){ .otp{gap:6px} .otp-box{width:40px;height:50px;font-size:19px} }
+
+.trt-btn{
+  display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;
+  border:1px solid var(--line);border-radius:var(--r-sm);
+  font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  transition:border-color .2s,background .15s;
+}
+.trt-btn:hover{border-color:var(--ink);background:var(--paper-alt)}
+.trt-btn.unset{color:var(--ink-mute)}
+.icon-btn{
+  display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 10px;
+  border-radius:var(--r-sm);color:var(--ink-mute);
+  font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  transition:color .15s,background .15s;
+}
+.icon-btn:hover{color:var(--ink);background:var(--paper-alt)}
+
+/* ── hero ── */
+.hero{position:relative;background:var(--ink);color:#fff;overflow:hidden}
+.hero-bg{position:absolute;inset:0;opacity:.5;pointer-events:none}
+.hero-in{position:relative;max-width:840px;margin:0 auto;padding:64px 22px 58px;text-align:center}
+.hero h1{margin:0 0 12px;font-size:38px;font-weight:600;letter-spacing:-.02em}
+.hero p{margin:0 auto;max-width:520px;color:rgba(255,255,255,.68);font-size:15px}
+.hero b{color:#fff;font-weight:600}
+.tools{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:30px}
+
+.btn{
+  height:42px;padding:0 32px;border-radius:var(--r-sm);
+  font-size:12px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;
+  display:inline-flex;align-items:center;justify-content:center;gap:9px;
+  transition:background .15s,border-color .2s,color .15s;
+}
+.btn[disabled]{opacity:.4;pointer-events:none}
+.btn-primary{background:var(--paper);color:var(--ink)}
+.btn-primary:hover{background:#EDEDED}
+.btn-onink{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.32)}
+.btn-onink:hover{border-color:#fff;background:rgba(255,255,255,.08)}
+.btn-dark{background:var(--ink);color:#fff}
+.btn-dark:hover{background:#000}
+.btn-ghost{background:var(--paper);color:var(--ink);border:1px solid var(--line)}
+.btn-ghost:hover{border-color:var(--ink);background:var(--paper-alt)}
+.btn-danger{background:var(--paper);color:var(--red);border:1px solid rgba(232,33,39,.4)}
+.btn-danger:hover{background:#FDF3F3;border-color:var(--red)}
+
+/* ── stat strip ── */
+.stats{display:flex;background:var(--paper);border-bottom:1px solid var(--line-soft)}
+/* Written by paintStats, so it is empty until something has run. Without
+   this it collapses to a stray rule across the page. */
+.stats:empty{display:none}
+.stat{flex:1;padding:18px 22px;border-right:1px solid var(--line-soft)}
+.stat:last-child{border-right:none}
+.stat-k{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute)}
+.stat-v{margin-top:5px;font-size:22px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.stat-v small{font-size:12px;font-weight:600;color:var(--ink-mute);margin-left:3px;letter-spacing:0}
+
+main{max-width:1180px;margin:0 auto;padding:22px}
+
+/* ── notices ── */
+.note{
+  border:1px solid var(--line-soft);border-left:3px solid var(--amber);
+  border-radius:var(--r-md);padding:12px 16px;margin-bottom:18px;
+  font-size:13px;color:var(--ink-soft);background:var(--paper);
+}
+.note.err{border-left-color:var(--red)}
+
+/* ── progress ── */
+#prog{margin-bottom:18px}
+.prog-row{display:flex;align-items:center;gap:12px;font-size:11px;font-weight:600;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute);margin-bottom:8px}
+.bar{height:4px;background:var(--line-soft);border-radius:2px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--ink);border-radius:2px;
+  transition:width .7s cubic-bezier(.3,.9,.3,1)}
+
+/* ── list head ── */
+/* A class rule setting `display` beats the browser's own `[hidden]` rule, so
+   anything hidden by attribute has to say so again here or it never hides. */
+.list-head{display:flex;align-items:baseline;gap:14px;margin-bottom:14px;flex-wrap:wrap}
+.list-head[hidden],.list[hidden],.empty[hidden]{display:none}
+.list-head h2{margin:0;font-size:13px;font-weight:600;letter-spacing:.11em;text-transform:uppercase}
+.list-head #listSub{font-size:12.5px;color:var(--ink-mute);min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list-actions{margin-left:auto;display:flex;gap:8px;position:relative}
+.chip{
+  display:inline-flex;align-items:center;height:30px;padding:0 12px;
+  border:1px solid var(--line);border-radius:var(--r-sm);
+  font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-soft);transition:border-color .2s,background .15s,color .15s;
+}
+.chip:hover{border-color:var(--ink);color:var(--ink)}
+.chip.on{background:var(--ink);border-color:var(--ink);color:#fff}
+/* Same trap as .list-head above: an explicit `display` beats the browser's
+   own [hidden] rule, so the chips each tool does not use have to say it
+   again here or they never go away. */
+.chip[hidden]{display:none}
+
+/* ── rows ── */
+.list{display:flex;flex-direction:column;gap:10px}
+.veh{
+  display:grid;grid-template-columns:1fr auto;gap:20px;align-items:center;
+  padding:18px 20px;border:1px solid var(--line-soft);border-radius:var(--r-lg);
+  background:var(--paper);transition:border-color .2s,box-shadow .2s;
+  animation:rowIn .34s cubic-bezier(.2,.8,.3,1) both;
+}
+.veh:hover{box-shadow:var(--shadow)}
+/* State lives in the border, never a background fill. */
+.veh.sv{border-color:rgba(245,179,27,.55)}
+.veh.ct{border-color:rgba(232,33,39,.42)}
+.veh.lg{border-color:rgba(62,106,225,.42)}
+
+.vin-row{display:flex;align-items:baseline;gap:9px;min-width:0;flex-wrap:wrap}
+.vin{font-size:15px;font-weight:600;letter-spacing:.055em;font-variant-numeric:tabular-nums;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+a.vin{color:inherit;text-decoration:none;border-bottom:1px solid transparent}
+a.vin:hover{color:var(--blue);border-bottom-color:var(--blue)}
+.mdl{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute)}
+
+.veh-sub{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;
+  font-size:12px;color:var(--ink-mute)}
+.veh-sub .dot{width:3px;height:3px;border-radius:50%;background:var(--line);flex:none}
+
+.pill{
+  display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 9px;
+  border-radius:10px;font-size:10px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;flex:none;
+}
+.pill i{width:6px;height:6px;border-radius:50%;background:currentColor;display:block}
+.p-idle{background:#EEEFF0;color:#5C5E62}
+.p-work{background:#FFF4D6;color:#8A6200}
+.p-done{background:#DFF6EA;color:#0A7A45}
+.p-err {background:#FDE7E8;color:#A3161B}
+.p-info{background:#F1ECFC;color:#5B3DB1}
+
+.holds{display:flex;flex-direction:column;gap:6px;align-items:flex-end;text-align:right}
+.hold-line{font-size:12px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+.hold-line b{font-weight:600}
+a.svl{color:inherit;text-decoration:none;border-bottom:1px solid transparent}
+a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
+.hold-note{font-size:11.5px;color:var(--ink-mute);max-width:430px}
+
+.empty{padding:70px 22px;text-align:center;color:var(--ink-mute)}
+.empty h3{margin:0 0 6px;font-size:15px;font-weight:600;color:var(--ink)}
+.empty p{margin:0;font-size:13px}
+.empty svg{width:130px;height:auto;display:block;margin:0 auto 16px;opacity:.55}
+
+.foot{display:flex;gap:22px;flex-wrap:wrap;max-width:1180px;margin:0 auto;
+  padding:20px 22px 40px;font-size:11px;font-weight:600;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-mute);border-top:1px solid var(--line-soft)}
+
+/* ── overlays ── */
+.scrim{position:fixed;inset:0;background:rgba(23,26,32,.42);z-index:50;
+  opacity:0;pointer-events:none;transition:opacity .22s}
+.scrim.on{opacity:1;pointer-events:auto}
+.modal{
+  position:fixed;z-index:60;left:50%;top:50%;transform:translate(-50%,-48%);
+  width:520px;max-width:94vw;max-height:88vh;display:none;flex-direction:column;
+  background:var(--paper);border-radius:var(--r-md);box-shadow:var(--shadow-lg);
+}
+/* Its own entrance, not the row one: `rowIn` ends on `transform:none`, which
+   would wipe the centring translate and drop the dialog into the corner. */
+.modal.on{display:flex;animation:modalIn .28s cubic-bezier(.2,.8,.3,1) both}
+@keyframes modalIn{
+  from{opacity:0;transform:translate(-50%,-44%)}
+  to  {opacity:1;transform:translate(-50%,-48%)}
+}
+.modal.wide{width:760px}
+.modal-head{display:flex;align-items:center;gap:12px;padding:16px 20px;
+  border-bottom:1px solid var(--line-soft)}
+.modal-head h3{margin:0;font-size:13px;font-weight:600;letter-spacing:.11em;text-transform:uppercase}
+.modal-sub{font-size:12px;color:var(--ink-mute)}
+.btn-x{margin-left:auto;width:28px;height:28px;border-radius:var(--r-sm);color:var(--ink-mute);
+  display:grid;place-items:center;transition:background .15s,color .15s}
+.btn-x:hover{background:var(--paper-alt);color:var(--ink)}
+.btn-x svg{width:16px;height:16px}
+.modal-body{padding:20px;overflow:auto}
+.modal-foot{display:flex;gap:8px;justify-content:flex-end;padding:14px 20px;
+  border-top:1px solid var(--line-soft)}
+
+.field{margin-bottom:18px}
+.field:last-child{margin-bottom:0}
+.field label{display:block;margin-bottom:7px;font-size:10.5px;font-weight:600;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute)}
+.opt-lbl{font-weight:500;letter-spacing:.04em;text-transform:none;opacity:.75}
+.field input[type=text],.field input[type=password],.field textarea{
+  width:100%;height:42px;padding:0 12px;border:1px solid var(--line);
+  border-radius:var(--r-sm);background:var(--paper);outline:none;
+  transition:border-color .2s;
+}
+.field textarea{height:80px;padding:10px 12px;resize:vertical;font-size:12px}
+.field input:focus,.field textarea:focus{border-color:var(--ink)}
+.hint{margin-top:7px;font-size:11.5px;color:var(--ink-mute)}
+
+/* ── facet groups in the Service Visits menu ── */
+.facet{margin-bottom:20px}
+.facet:last-child{margin-bottom:0}
+.facet-head{display:flex;align-items:center;gap:10px;margin-bottom:9px}
+.facet-head span{font-size:10.5px;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-mute)}
+.facet-head button{font-size:10.5px;font-weight:600;letter-spacing:.06em;
+  color:var(--blue);margin-left:auto}
+.opts{display:flex;flex-wrap:wrap;gap:7px}
+.opt{
+  display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;
+  border:1px solid var(--line);border-radius:var(--r-sm);background:var(--paper);
+  font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--ink-soft);
+  transition:border-color .2s,background .15s,color .15s;
+}
+.opt:hover{border-color:var(--ink)}
+.opt.on{background:var(--ink);border-color:var(--ink);color:#fff}
+/* Nothing behind it to scan yet. Still clickable, and says why when pressed. */
+.opt.dead{opacity:.45}
+.opt.dead:hover{border-color:var(--line)}
+.opt small{font-weight:500;letter-spacing:0;opacity:.7;text-transform:none}
+
+.kinds{display:flex;flex-direction:column;gap:8px}
+.kind{display:flex;align-items:center;gap:11px;padding:11px 13px;
+  border:1px solid var(--line-soft);border-radius:var(--r-md);cursor:pointer;
+  transition:border-color .2s,background .15s}
+.kind:hover{border-color:var(--line)}
+.kind.on{border-color:var(--ink)}
+.kind .box{width:16px;height:16px;border:1px solid var(--line);border-radius:3px;
+  display:grid;place-items:center;flex:none;transition:background .15s,border-color .15s}
+.kind.on .box{background:var(--ink);border-color:var(--ink)}
+.kind .box svg{width:10px;height:10px;color:#fff;opacity:0}
+.kind.on .box svg{opacity:1}
+.kind .t{font-size:12.5px;font-weight:600}
+.kind .h{font-size:11.5px;color:var(--ink-mute)}
+
+.sitelist{margin-top:8px;border:1px solid var(--line-soft);border-radius:var(--r-md);
+  max-height:240px;overflow:auto}
+.site{display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;
+  border-bottom:1px solid var(--line-soft);font-size:13px}
+.site:last-child{border-bottom:none}
+.site:hover{background:var(--paper-alt)}
+.site b{font-weight:600}
+.site span{margin-left:auto;font-size:11px;font-weight:600;letter-spacing:.08em;
+  color:var(--ink-mute);font-variant-numeric:tabular-nums}
+
+/* ── admin ── */
+.panel{margin-bottom:22px}
+.panel h4{margin:0 0 4px;font-size:13px;font-weight:600;letter-spacing:.11em;text-transform:uppercase}
+.panel p{margin:0 0 12px;font-size:12.5px;color:var(--ink-mute)}
+.row{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line-soft);
+  font-size:13px}
+.row:last-child{border-bottom:none}
+.row .k{font-weight:600;min-width:120px}
+.row .v{color:var(--ink-mute);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.row .a{margin-left:auto;display:flex;gap:8px}
+.mini{height:32px;padding:0 14px;border-radius:var(--r-sm);border:1px solid var(--line);
+  font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+  transition:border-color .2s,background .15s}
+.mini:hover{border-color:var(--ink);background:var(--paper-alt)}
+.mini.dark{background:var(--ink);color:#fff;border-color:var(--ink)}
+.mini.dark:hover{background:#000}
+.mini.danger{color:var(--red);border-color:rgba(232,33,39,.4)}
+.mini.danger:hover{background:#FDF3F3;border-color:var(--red)}
+#adminBody{display:none}
+#admin.unlocked #adminBody{display:block}
+#admin.unlocked #gate{display:none}
+
+.spin{width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;
+  border-radius:50%;display:inline-block;animation:sp .7s linear infinite;vertical-align:-1px}
+@keyframes sp{to{transform:rotate(360deg)}}
+@keyframes rowIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+
+@media (max-width:720px){
+  .stats{flex-wrap:wrap}
+  .stat{min-width:50%;border-bottom:1px solid var(--line-soft)}
+  .veh{grid-template-columns:1fr}
+  .holds{align-items:flex-start;text-align:left}
+}
+
+/* ── where sign-ins went ──
+   The one place a board still mentions signing in. Not a warning: the normal
+   state is that the Hub already holds the session, so this reads as a pointer
+   rather than an error, and it stays put whether or not anything is missing. */
+.hub-note{margin-top:12px;padding:11px 13px;border-radius:var(--r-md);
+  border:1px solid var(--line-soft);background:var(--paper-alt);
+  font-size:12px;line-height:1.55;color:var(--ink-mute)}
+.hub-note b{font-weight:600;color:var(--ink-soft)}
+.hub-note a{display:inline-block;margin-top:6px;color:var(--blue);
+  text-decoration:none;border-bottom:1px solid transparent}
+.hub-note a:hover{border-bottom-color:currentColor}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="mark">Tesla</div>
+  <div class="sep"></div>
+  <div class="app">The Compiler</div>
+  <!-- Centre on the left beside the app name, admin on the right — the same
+       arrangement as every other board, so the muscle memory carries over. -->
+  <button class="trt-btn unset" id="trtBtn">
+    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+    </svg><span id="trtLabel">Set TRT</span>
+  </button>
+  <div class="spacer"></div>
+  <button class="icon-btn" id="adminBtn">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.36.4.66.73.86.3.18.64.28 1 .28H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </svg>Admin
+  </button>
+</nav>
+
+<section class="hero">
+  <!-- Flat vector only: a lattice that resolves into a column, which is what
+       the board does to a fleet. No bitmap could recolour with state. -->
+  <svg class="hero-bg" viewBox="0 0 1200 340" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <g stroke="#3E6AE1" stroke-width="1.1" fill="none" opacity=".5">
+      <path d="M60 300 L180 40 M140 300 L240 40 M220 300 L300 40 M300 300 L360 40
+               M380 300 L420 40 M460 300 L480 40 M540 300 L540 40 M620 300 L600 40
+               M700 300 L660 40 M780 300 L720 40 M860 300 L780 40 M940 300 L840 40
+               M1020 300 L900 40 M1100 300 L960 40"/>
+    </g>
+    <g stroke="#5C5E62" stroke-width="1" opacity=".45">
+      <path d="M0 90 H1200 M0 160 H1200 M0 230 H1200"/>
+    </g>
+    <g fill="#7FA1F7" opacity=".75">
+      <circle cx="180" cy="40" r="3"/><circle cx="360" cy="40" r="3"/>
+      <circle cx="540" cy="40" r="3"/><circle cx="720" cy="40" r="3"/>
+      <circle cx="900" cy="40" r="3"/>
+      <circle cx="300" cy="160" r="2.4"/><circle cx="600" cy="160" r="2.4"/>
+      <circle cx="840" cy="160" r="2.4"/>
+    </g>
+  </svg>
+  <div class="hero-in">
+    <h1>The Compiler</h1>
+    <p>One board over the systems that describe a vehicle. Garage says what a car
+       <b>is</b>; Intrepid says what is <b>wrong</b> with it.</p>
+    <div class="tools">
+      <button class="btn btn-primary" id="svBtn">Service Visits</button>
+      <button class="btn btn-primary" id="cogBtn">Cars on Ground</button>
+    </div>
+  </div>
+</section>
+
+<!-- Written by paintStats(): the two tools count different things, and a
+     fixed strip would leave one of them staring at four tiles reading zero. -->
+<div class="stats" id="stats"></div>
+
+<main>
+  <div id="prog" hidden></div>
+  <div id="notes"></div>
+
+  <div class="list-head" id="listHead" hidden>
+    <h2 id="listTitle">Vehicles</h2>
+    <span id="listSub"></span>
+    <div class="list-actions">
+      <button class="chip on" data-view="flagged" id="viewFlagged">Flagged only</button>
+      <button class="chip" data-view="all" id="viewAll">All scanned</button>
+      <!-- Cars on Ground has no clear/flagged split — every row is a car in
+           the status you asked for — so its view toggle is a sort instead. -->
+      <button class="chip on" id="sortDwell" hidden>Longest first</button>
+      <button class="chip" id="sortRecent" hidden>Newest first</button>
+      <button class="chip" id="exportBtn"
+              title="Download exactly what is on screen as an Excel workbook">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+             style="vertical-align:-1px;margin-right:6px">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>
+        </svg>Export
+      </button>
+    </div>
+  </div>
+
+  <div class="list" id="list"></div>
+
+  <div class="empty" id="empty">
+    <svg viewBox="0 0 160 110" aria-hidden="true">
+      <rect x="16" y="20" width="128" height="70" rx="10" fill="#171A20" opacity=".08"/>
+      <path d="M40 46 h34 M40 58 h56 M40 70 h24" stroke="#171A20" stroke-width="3"
+            stroke-linecap="round" opacity=".28"/>
+      <circle cx="118" cy="70" r="15" fill="none" stroke="#171A20" stroke-width="3" opacity=".3"/>
+      <path d="M129 81 l11 11" stroke="#171A20" stroke-width="3" stroke-linecap="round" opacity=".3"/>
+    </svg>
+    <h3>Nothing compiled yet</h3>
+    <p>Choose <b>Service Visits</b> to see what is holding cars up, or
+       <b>Cars on Ground</b> to see where they are in the receiving ladder.</p>
+  </div>
+</main>
+
+<footer class="foot">
+  <span>Garage index + Intrepid holds</span>
+  <span id="fTrt">TRT —</span>
+  <span id="fSrc">Not connected</span>
+  <span>The Compiler</span>
+</footer>
+
+<!-- ═════════════════════════ OVERLAYS ═════════════════════════ -->
+<div class="scrim" id="scrim"></div>
+
+<!-- Service Visits -->
+<div class="modal wide" id="svModal" role="dialog" aria-label="Service Visits">
+  <div class="modal-head"><h3>Service Visits</h3>
+    <span class="modal-sub" id="svCtx"></span>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body">
+    <!-- Sites first: it decides the population every facet below it narrows. -->
+    <div class="facet" id="svSites"></div>
+    <div class="field">
+      <label>Look for</label>
+      <div class="kinds" id="kinds"></div>
+      <div class="hint">Each one costs a call per vehicle, so leaving one off is a
+        real saving on a wide selection. Containment is batched five to a call.</div>
+    </div>
+    <div id="facets"></div>
+  </div>
+  <div class="modal-foot">
+    <span class="modal-sub" id="svCount" style="margin-right:auto"></span>
+    <button class="btn btn-ghost" data-close>Cancel</button>
+    <button class="btn btn-dark" id="runScan">Run scan</button>
+  </div>
+</div>
+
+<!-- Cars on Ground -->
+<div class="modal" id="cogModal" role="dialog" aria-label="Cars on Ground">
+  <div class="modal-head"><h3>Cars on Ground</h3>
+    <span class="modal-sub" id="cogCtx"></span>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body">
+    <div class="facet" id="cogStatuses">
+      <div class="facet-head"><span>COG status</span>
+        <button data-clear="cog">All</button></div>
+      <div class="opts" id="cogOpts"><span class="hint">Reading the ladder from Intrepid…</span></div>
+      <div class="hint">Intrepid's own receiving ladder, in its own order. The whole
+        centre is counted either way — this picks which cars get listed.</div>
+    </div>
+  </div>
+  <div class="modal-foot">
+    <span class="modal-sub" id="cogCount" style="margin-right:auto"></span>
+    <button class="btn btn-ghost" data-close>Cancel</button>
+    <button class="btn btn-dark" id="runCog">Run scan</button>
+  </div>
+</div>
+
+<!-- TRT -->
+<div class="modal" id="trtModal" role="dialog" aria-label="Set TRT">
+  <div class="modal-head"><h3>Set TRT</h3>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body">
+    <div class="field">
+      <label for="trtInput">Main site</label>
+      <input type="text" id="trtInput" autocomplete="off" spellcheck="false"
+             placeholder="Start typing — Cypress, Fremont, 17589…">
+      <div class="sitelist" id="siteList" hidden></div>
+    </div>
+    <div class="field">
+      <label for="offsiteInput">Offsite <span class="opt-lbl">optional</span></label>
+      <input type="text" id="offsiteInput" autocomplete="off" spellcheck="false"
+             placeholder="The overflow lot — leave empty if there isn't one">
+      <div class="sitelist" id="offsiteList" hidden></div>
+      <div class="hint" id="trtHint">The name search reads <b>Intrepid's</b> site directory,
+        and an offsite lot usually is not in it — <b>type the number</b> and it will save
+        fine. The two sites are what the <b>Sites</b> filter on Service Visits switches
+        between.</div>
+    </div>
+  </div>
+  <div class="modal-foot">
+    <button class="btn btn-ghost" data-close>Cancel</button>
+    <button class="btn btn-dark" id="saveTrt">Save</button>
+  </div>
+</div>
+
+<!-- Admin -->
+<div class="modal" id="adminModal" role="dialog" aria-label="Admin">
+  <div class="modal-head"><h3>Admin</h3>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body" id="admin">
+    <div id="gate">
+      <div class="lock-ic">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+      </div>
+      <div class="gate-t">Restricted area. Enter the 6-digit admin code.</div>
+      <div class="otp" id="otp">
+        <input class="otp-box" type="password" inputmode="numeric" autocomplete="one-time-code" maxlength="1" aria-label="Digit 1">
+        <input class="otp-box" type="password" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 2">
+        <input class="otp-box" type="password" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 3">
+        <input class="otp-box" type="password" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 4">
+        <input class="otp-box" type="password" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 5">
+        <input class="otp-box" type="password" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 6">
+      </div>
+      <div class="gate-err" id="gateErr"></div>
+      <button class="btn btn-dark" id="unlock" style="width:100%">Unlock</button>
+    </div>
+
+    <div id="adminBody">
+      <div class="panel">
+        <h4>Sources</h4>
+        <p>Both are required. A scan with one of them missing would answer the
+           question wrongly rather than refuse, so it refuses.</p>
+        <div class="row">
+          <div class="k">Garage</div>
+          <div class="v" id="aGarage">—</div>
+        </div>
+        <div class="row">
+          <div class="k">Intrepid</div>
+          <div class="v" id="aIntrepid">—</div>
+        </div>
+        <div class="hub-note">
+          Sign-ins live on the <b>Zo Projects Hub</b>. One session there covers every
+          board, including this one.
+          <a href="http://localhost:3100" target="_blank" rel="noopener">Open the Hub</a>
+        </div>
+
+      </div>
+
+      <div class="panel">
+        <h4>Checks</h4>
+        <p>Tesladex is tested separately from Garage: a live session is not the
+           same permission as reading the vehicle index.</p>
+        <div class="row"><div class="k">Intrepid</div><div class="v" id="tIntrepid">—</div></div>
+        <div class="row"><div class="k">Garage</div><div class="v" id="tGarage">—</div></div>
+        <div class="row"><div class="k">Tesladex</div><div class="v" id="tTesladex">—</div></div>
+        <button class="mini" id="runTests" style="margin-top:12px">Run checks</button>
+      </div>
+
+      <div class="panel">
+        <h4>Maintenance</h4>
+        <p>The site directory is ~1,850 records cached for a week. Reset forgets
+           the centre and both session cookies — everything this board stores.</p>
+        <div class="row">
+          <div class="k">Site directory</div><div class="v" id="mTrt">cached</div>
+          <div class="a"><button class="mini" id="refreshTrt">Refresh</button></div>
+        </div>
+        <div class="row">
+          <div class="k">Board</div><div class="v">Forget centre and both cookies</div>
+          <div class="a"><button class="mini danger" id="resetBoard">Reset</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+
+const S = {
+  trtId:null, trt:null, password:"", busy:false,
+  // The overflow lot, and which of the two the Service Visits scan covers.
+  // Onsite is the default: the same population the board scanned before this.
+  offsiteTrtId:null, offsiteTrt:null, sites:"onsite",
+  // `tool` is which of the two last ran. The list, the stats strip and the
+  // export all read it, because the two tools answer different questions and
+  // a row from one rendered by the other's code would be nonsense.
+  tool:"sv",
+  rows:[], summary:null, notes:[], reasons:{},
+  facets:null, kinds:[], garageUrl:null,
+  filters:{}, chosenKinds:["sv","containment","logistics"],
+  view:"flagged", listSub:"",
+  cogStatuses:null, cogChosen:[], cogSort:"dwell", cogTally:[], cogTotal:0, cogNoRecord:0
+};
+
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
+  c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" })[c]);
+
+/* A failure in someone else's browser is otherwise invisible. */
+window.addEventListener("error", e => {
+  fetch("/api/clientlog", { method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ level:"error", msg: String(e.message) + " @" + e.lineno }) }).catch(()=>{});
+});
+
+async function api(path, body){
+  const res = await fetch(path, body === undefined
+    ? undefined
+    : { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+  let data = {};
+  try { data = await res.json(); } catch { /* keep the status */ }
+  if(!res.ok){
+    const err = new Error(data.error || `Request failed (${res.status})`);
+    Object.assign(err, data);
+    throw err;
+  }
+  return data;
+}
+
+/* ── overlays ── */
+let openModalEl = null;
+function showModal(el){
+  if(openModalEl) openModalEl.classList.remove("on");
+  openModalEl = el; el.classList.add("on"); $("scrim").classList.add("on");
+}
+function hideModal(){
+  if(openModalEl) openModalEl.classList.remove("on");
+  openModalEl = null; $("scrim").classList.remove("on");
+}
+$("scrim").addEventListener("click", hideModal);
+document.addEventListener("click", e => {
+  if(e.target.closest("[data-close]")) hideModal();
+});
+document.addEventListener("keydown", e => { if(e.key === "Escape") hideModal(); });
+
+/* ── notices ── */
+function note(msg, bad){
+  $("notes").innerHTML = `<div class="note${bad ? " err" : ""}">${esc(msg)}</div>`;
+}
+const clearNotes = () => { $("notes").innerHTML = ""; };
+
+/* ── TRT ── */
+function setTrt(id, info){
+  S.trtId = id ? Number(id) : null;
+  S.trt = info || null;
+  const name = info && info.name ? info.name : null;
+  $("trtLabel").textContent = S.trtId ? (name || ("TRT " + S.trtId)) : "Set TRT";
+  $("trtBtn").classList.toggle("unset", !S.trtId);
+  $("fTrt").textContent = S.trtId ? (name ? `${name} · TRT ${S.trtId}` : "TRT " + S.trtId) : "TRT —";
+  const ctx = S.trtId ? (name || ("TRT " + S.trtId)) : "No centre set";
+  $("svCtx").textContent = ctx;
+  $("cogCtx").textContent = ctx;
+}
+
+/* ── the Sites filter ──
+   Three options, one chosen at a time, in the same .facet / .opt markup as
+   every other filter in this menu. Onsite is the centre in the nav; Offsite is
+   the second TRT set beside it.
+
+   Offsite and Onsite & Offsite render greyed only when no offsite TRT exists —
+   there is genuinely nothing for them to scan, and the hint underneath says
+   where to set one rather than leaving it a mystery. */
+const SITE_OPTS = [
+  { v: "onsite",  label: "Onsite" },
+  { v: "offsite", label: "Offsite" },
+  { v: "both",    label: "Onsite & Offsite" }
+];
+
+function paintSites(){
+  const box = $("svSites");
+  if(!box) return;
+  const off = S.offsiteTrtId;
+  const nameOf = t => t && t.name ? t.name : null;
+  const sub = {
+    onsite : nameOf(S.trt) || (S.trtId ? "TRT " + S.trtId : "not set"),
+    offsite: nameOf(S.offsiteTrt) || (off ? "TRT " + off : "not set"),
+    both   : off ? "both sites" : "not set"
+  };
+
+  box.innerHTML = `
+    <div class="facet-head"><span>Sites</span></div>
+    <div class="opts">${SITE_OPTS.map(o => {
+      const dead = o.v !== "onsite" && !off;
+      return `<button class="opt site-opt${S.sites === o.v ? " on" : ""}${dead ? " dead" : ""}"
+                data-sites="${o.v}">${esc(o.label)} <small>${esc(sub[o.v])}</small></button>`;
+    }).join("")}</div>
+    ${off ? "" : `<div class="hint">Set an <b>Offsite</b> TRT in the picker beside
+      “The Compiler” to enable the other two.</div>`}`;
+}
+
+$("svSites").addEventListener("click", e => {
+  const btn = e.target.closest(".site-opt");
+  if(!btn) return;
+  if(btn.classList.contains("dead")){
+    note("No offsite TRT set — add one in the TRT picker, top corner.");
+    return;
+  }
+  S.sites = btn.dataset.sites;
+  paintSites();
+});
+
+$("trtBtn").addEventListener("click", () => {
+  /* Both fields open showing what is already set. Opening blank and pressing
+     Save would read the empty offsite box as "clear it" and quietly drop the
+     lot — the save writes both fields every time, so both have to start from
+     the truth. */
+  const label = t => t && t.name ? t.name : "";
+  $("trtInput").value    = label(S.trt)        || (S.trtId ? String(S.trtId) : "");
+  $("offsiteInput").value = label(S.offsiteTrt) || (S.offsiteTrtId ? String(S.offsiteTrtId) : "");
+  picked.trtInput     = S.trtId ? { trtId: S.trtId, name: label(S.trt) } : null;
+  picked.offsiteInput = S.offsiteTrtId ? { trtId: S.offsiteTrtId, name: label(S.offsiteTrt) } : null;
+  $("siteList").hidden = true;
+  $("offsiteList").hidden = true;
+  $("trtHint").innerHTML = "The name search reads <b>Intrepid's</b> site directory, and an " +
+    "offsite lot usually is not in it — <b>type the number</b> and it will save fine. The " +
+    "two sites are what the <b>Sites</b> filter on Service Visits switches between.";
+  showModal($("trtModal"));
+  setTimeout(() => $("trtInput").focus(), 60);
+});
+
+/* The same type-ahead on both fields. One function, wired twice — the two
+   differ only in which element they write to and which pick they remember. */
+const picked = { trtInput: null, offsiteInput: null };
+
+function wireSiteSearch(inputId, listId){
+  let timer = null;
+  const input = $(inputId), list = $(listId);
+
+  input.addEventListener("input", () => {
+    picked[inputId] = null;
+    clearTimeout(timer);
+    const q = input.value.trim();
+    // A bare number is already an answer; nothing to look up.
+    if(/^\d+$/.test(q) || q.length < 2){ list.hidden = true; return; }
+    timer = setTimeout(async () => {
+      try{
+        const d = await api("/api/sites?q=" + encodeURIComponent(q));
+        if(!d.sites.length){ list.hidden = true; return; }
+        list.innerHTML = d.sites.map(s =>
+          `<div class="site" data-id="${s.trtId}" data-name="${esc(s.name)}">
+             <b>${esc(s.name)}</b><span>${s.trtId}</span></div>`).join("");
+        list.hidden = false;
+      }catch{ list.hidden = true; }
+    }, 180);
+  });
+
+  list.addEventListener("click", e => {
+    const el = e.target.closest(".site");
+    if(!el) return;
+    picked[inputId] = { trtId: Number(el.dataset.id), name: el.dataset.name };
+    input.value = el.dataset.name;
+    list.hidden = true;
+  });
+}
+wireSiteSearch("trtInput", "siteList");
+wireSiteSearch("offsiteInput", "offsiteList");
+
+// Whatever is in a field right now, as a TRT id: a picked site, a typed
+// number, or null for an empty field.
+function readSiteField(inputId){
+  const raw = $(inputId).value.trim();
+  if(picked[inputId]) return picked[inputId].trtId;
+  if(/^\d+$/.test(raw)) return Number(raw);
+  return raw === "" ? null : NaN;      // NaN = typed something that is not a site
+}
+
+$("saveTrt").addEventListener("click", async () => {
+  const main = readSiteField("trtInput");
+  const off  = readSiteField("offsiteInput");
+
+  if(Number.isNaN(main) || !main){
+    $("trtHint").textContent = "Pick a main site from the list, or type its number.";
+    return;
+  }
+  if(Number.isNaN(off)){
+    $("trtHint").textContent = "That offsite entry is not a site — pick one from the list, type a TRT number, or clear it.";
+    return;
+  }
+  if(off && off === main){
+    $("trtHint").textContent = "The offsite TRT has to be a different site from the main one.";
+    return;
+  }
+
+  try{
+    const d = await api("/api/trt", { trtId: main, offsiteTrtId: off });
+    setTrt(d.trtId, d.trt);
+    S.offsiteTrtId = d.offsiteTrtId;
+    S.offsiteTrt   = d.offsiteTrt;
+    paintSites();
+    hideModal();
+  }catch(err){ $("trtHint").textContent = err.message; }
+});
+
+/* ── the Service Visits menu ──
+   Built from what the server published rather than a copy kept here, so a
+   value the index stops using disappears in one place. */
+function paintMenu(){
+  $("kinds").innerHTML = S.kinds.map(k => `
+    <div class="kind${S.chosenKinds.includes(k.v) ? " on" : ""}" data-kind="${k.v}">
+      <div class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+      <div><div class="t">${esc(k.label)}</div><div class="h">${esc(k.hint)}</div></div>
+    </div>`).join("");
+
+  $("facets").innerHTML = Object.entries(S.facets).map(([key, f]) => `
+    <div class="facet" data-facet="${key}">
+      <div class="facet-head"><span>${esc(f.label)}</span>
+        <button data-clear="${key}">Any</button></div>
+      <div class="opts">${f.options.map(o => `
+        <button class="opt${(S.filters[key] || []).includes(o.v) ? " on" : ""}"
+                data-v="${esc(o.v)}">${esc(o.label)}</button>`).join("")}</div>
+      ${f.note ? `<div class="hint">${esc(f.note)}</div>` : ""}
+    </div>`).join("");
+
+  // Repainted with the menu, so a TRT changed in the picker shows here at once.
+  paintSites();
+
+  const chosen = Object.entries(S.filters).filter(([, v]) => v.length).length;
+  $("svCount").textContent = chosen
+    ? `${chosen} filter${chosen === 1 ? "" : "s"} set`
+    : "No filters — the whole centre";
+}
+
+$("kinds").addEventListener("click", e => {
+  const el = e.target.closest(".kind");
+  if(!el) return;
+  const k = el.dataset.kind;
+  S.chosenKinds = S.chosenKinds.includes(k)
+    ? S.chosenKinds.filter(x => x !== k)
+    : [...S.chosenKinds, k];
+  paintMenu();
+});
+
+$("facets").addEventListener("click", e => {
+  const clear = e.target.closest("[data-clear]");
+  if(clear){ S.filters[clear.dataset.clear] = []; paintMenu(); return; }
+  const opt = e.target.closest(".opt");
+  if(!opt) return;
+  const key = opt.closest(".facet").dataset.facet;
+  const v = opt.dataset.v;
+  const cur = S.filters[key] || [];
+  S.filters[key] = cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v];
+  paintMenu();
+});
+
+$("svBtn").addEventListener("click", () => {
+  if(!S.trtId){
+    note("Set a TRT first — the scan is scoped to one centre.");
+    $("trtInput").value = "";
+    showModal($("trtModal"));
+    setTimeout(() => $("trtInput").focus(), 60);
+    return;
+  }
+  S.tool = "sv";
+  paintMenu();
+  showModal($("svModal"));
+});
+
+/* ── the Cars on Ground menu ──
+   The ladder is read from Intrepid the first time the menu opens rather than
+   at boot: a board that will not paint because Intrepid is down is worse than
+   one whose second tool says so when you reach for it. */
+function paintCogMenu(){
+  if(!S.cogStatuses){
+    $("cogOpts").innerHTML = `<span class="hint">Reading the ladder from Intrepid…</span>`;
+    $("cogCount").textContent = "";
+    return;
+  }
+  $("cogOpts").innerHTML = S.cogStatuses.map(s => `
+    <button class="opt${S.cogChosen.includes(s.id) ? " on" : ""}"
+            data-id="${s.id}">${esc(s.name)}</button>`).join("");
+  $("cogCount").textContent = S.cogChosen.length
+    ? `${S.cogChosen.length} status${S.cogChosen.length === 1 ? "" : "es"} listed`
+    : "Every status — the whole centre";
+}
+
+$("cogStatuses").addEventListener("click", e => {
+  if(e.target.closest("[data-clear]")){ S.cogChosen = []; paintCogMenu(); return; }
+  const opt = e.target.closest(".opt");
+  if(!opt) return;
+  const id = Number(opt.dataset.id);
+  S.cogChosen = S.cogChosen.includes(id)
+    ? S.cogChosen.filter(x => x !== id)
+    : [...S.cogChosen, id];
+  paintCogMenu();
+});
+
+$("cogBtn").addEventListener("click", async () => {
+  if(!S.trtId){
+    note("Set a TRT first — the scan is scoped to one centre.");
+    $("trtInput").value = "";
+    showModal($("trtModal"));
+    setTimeout(() => $("trtInput").focus(), 60);
+    return;
+  }
+  S.tool = "cog";
+  paintCogMenu();
+  showModal($("cogModal"));
+
+  if(!S.cogStatuses){
+    try{
+      const d = await api("/api/cog/statuses");
+      S.cogStatuses = d.statuses || [];
+      /* Pre-selected because it is the question the tool exists to answer.
+         Matched on Intrepid's own string rather than on a hardcoded id or on
+         the house nickname: the id is stable today, and "VRI Pending" is
+         ours to change. */
+      const pending = S.cogStatuses.find(s => /receiving inspection pending/i.test(s.apiName));
+      if(pending && !S.cogChosen.length) S.cogChosen = [pending.id];
+      paintCogMenu();
+    }catch(err){
+      $("cogOpts").innerHTML = `<span class="hint">${esc(err.message)}</span>`;
+    }
+  }
+});
+
+$("runCog").addEventListener("click", async () => {
+  if(S.busy) return;
+  S.busy = true;
+  const btn = $("runCog");
+  const restore = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<i class="spin"></i>Scanning';
+  clearNotes(); progWatch();
+
+  try{
+    const data = await api("/api/cog/scan", { trtId: S.trtId, statuses: S.cogChosen });
+    renderCog(data);
+    hideModal();
+  }catch(err){
+    note(err.needsCookie
+      ? err.message + "  Open Admin › Sources and connect Intrepid again."
+      : err.message, true);
+    hideModal();
+  }finally{
+    S.busy = false; progHide();
+    btn.disabled = false; btn.innerHTML = restore;
+  }
+});
+
+/* ── progress ── */
+let progTimer = null;
+function progWatch(){
+  $("prog").hidden = false;
+  $("prog").innerHTML = `<div class="prog-row"><span id="pPhase">Starting</span>
+    <span id="pCount" style="margin-left:auto"></span></div>
+    <div class="bar"><i id="pBar" style="width:6%"></i></div>`;
+  clearInterval(progTimer);
+  progTimer = setInterval(async () => {
+    try{
+      const d = await api("/api/progress");
+      if(!d.running) return;
+      const label = { starting:"Starting", enumerate:"Reading the index",
+                      title:"Title status", containment:"Containment", holds:"Service visits",
+                      statuses:"Reading the ladder", inventory:"Cars on ground",
+                      cog:"COG status" }[d.phase] || d.phase;
+      $("pPhase").textContent = label + " · " + d.elapsed + "s";
+      if(d.phase === "inventory" || d.phase === "statuses"){
+        $("pCount").textContent = "";
+        $("pBar").style.width = d.phase === "statuses" ? "6%" : "25%";
+      }else if(d.phase === "enumerate"){
+        $("pCount").textContent = `${d.got || 0}${d.total ? " / " + d.total : ""}`;
+        $("pBar").style.width = "12%";
+      }else if(d.done != null && d.total){
+        $("pCount").textContent = `${d.done} / ${d.total}`;
+        const base = d.phase === "containment" ? 15 : 35;
+        const span = d.phase === "containment" ? 20 : 63;
+        $("pBar").style.width = (base + span * (d.done / d.total)).toFixed(1) + "%";
+      }
+    }catch{ /* transient */ }
+  }, 700);
+}
+function progHide(){ clearInterval(progTimer); $("prog").hidden = true; }
+
+/* ── run ── */
+$("runScan").addEventListener("click", async () => {
+  if(S.busy) return;
+  if(!S.chosenKinds.length){ $("svCount").textContent = "Pick at least one thing to look for"; return; }
+
+  S.busy = true;
+  const btn = $("runScan");
+  const restore = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<i class="spin"></i>Scanning';
+  clearNotes(); progWatch();
+
+  try{
+    const data = await api("/api/scan", {
+      trtId: S.trtId, sites: S.sites, filters: S.filters, kinds: S.chosenKinds
+    });
+    render(data);
+    hideModal();
+  }catch(err){
+    note(err.needsCookie
+      ? err.message + "  Open Admin › Sources and connect Intrepid again."
+      : (err.needsAuth ? err.message + "  Open Admin › Sources and sign in to Garage."
+                       : err.message), true);
+    hideModal();
+  }finally{
+    S.busy = false; progHide();
+    btn.disabled = false; btn.innerHTML = restore;
+  }
+});
+
+/* ── rows ── */
+/* The row reads the same words the filter offered. The index stores
+   `StandardServiceLoaner` and `customer-vehicle`; showing those raw would
+   make the list and the menu look like two different vocabularies, so both
+   sides resolve through the facet definitions the server published. */
+function labelFor(facetKey, value){
+  if(!value) return "";
+  const f = S.facets && S.facets[facetKey];
+  const hit = f && f.options.find(o => o.v === value);
+  return hit ? hit.label : value;
+}
+
+const fmtDate = s => {
+  if(!s) return "";
+  const d = new Date(s);
+  return isNaN(d) ? String(s).slice(0, 10) : d.toLocaleDateString();
+};
+
+function vinLink(r){
+  const plain = `<div class="vin">${esc(r.vin)}</div>`;
+  if(!S.garageUrl) return plain;
+  return `<a class="vin" target="_blank" rel="noreferrer"
+    href="${esc(S.garageUrl)}/vehicles/${encodeURIComponent(r.vin)}/vitals"
+    title="${esc(r.vin)} — open this car's vitals in Garage">${esc(r.vin)}</a>`;
+}
+
+// The Service App keys this page on the visit id alone. That is the whole
+// reason the link is possible: `svId` is already on the row. The page a human
+// lands on from search — /product-details/<accountId>/<vin>/service-visit/<id>
+// — needs an account id that is in neither Garage nor Intrepid, so it is out.
+const SCA_VISIT_URL =
+  "https://serviceapp.tesla.com/service/service-visit-actions/active-service-visit-actions/";
+
+function svLink(v){
+  const label = esc(v.id);
+  if(!v.svId) return `<b>${label}</b>`;
+  return `<b><a class="svl" target="_blank" rel="noreferrer"
+    href="${SCA_VISIT_URL}${encodeURIComponent(v.svId)}"
+    title="${label} — open this visit in the Service App">${label}</a></b>`;
+}
+
+function rowHtml(r){
+  const cls = r.campaigns.length ? "ct" : (r.visits.length ? "sv" : (r.logistics.length ? "lg" : ""));
+
+  const pills = [];
+  if(r.visits.length)    pills.push(`<span class="pill p-work"><i></i>SV</span>`);
+  if(r.campaigns.length) pills.push(`<span class="pill p-err"><i></i>Containment</span>`);
+  if(r.logistics.length) pills.push(`<span class="pill p-info"><i></i>Logistics</span>`);
+  if(!pills.length)      pills.push(`<span class="pill p-done">Clear</span>`);
+
+  // Only present when the title facet was used — it is a fetched field, not
+  // an indexed one, so a scan that did not ask for it has nothing to show.
+  if(r.title) pills.push(`<span class="pill p-info">${esc(labelFor("title", r.title))}</span>`);
+
+  const bits = [
+    r.delivered ? "Delivered" : "Undelivered",
+    labelFor("vehicle_type", r.type),
+    labelFor("delivery_stage", r.stage),
+    labelFor("vehicle_category", r.category),
+    labelFor("fleet_status", r.fleetStatus)
+  ].filter(Boolean);
+
+  const lines = [];
+  for(const v of r.visits){
+    lines.push(`<div class="hold-line">${svLink(v)}${
+      v.opened ? " · opened " + esc(fmtDate(v.opened)) : ""}${
+      v.due ? " · due " + esc(fmtDate(v.due)) : ""}</div>`);
+  }
+  for(const c of r.campaigns){
+    lines.push(`<div class="hold-line"><b>${esc(c.title)}</b></div>` +
+      (c.action ? `<div class="hold-note">${esc(c.action)}</div>` : ""));
+  }
+  for(const h of r.logistics){
+    const why = S.reasons[h.reasonId] || ("reason " + h.reasonId);
+    lines.push(`<div class="hold-line"><b>${esc(why)}</b></div>` +
+      (h.note ? `<div class="hold-note">${esc(h.note)}</div>` : ""));
+  }
+
+  return `<div class="veh ${cls}">
+    <div>
+      <div class="vin-row">${vinLink(r)}
+        <span class="mdl">${esc(labelFor("model", r.model))}</span>
+        ${pills.join("")}
+      </div>
+      <div class="veh-sub">${bits.map(b => esc(b)).join(' <span class="dot"></span> ')}</div>
+    </div>
+    <div class="holds">${lines.join("") || '<div class="hold-line" style="color:var(--ink-mute)">No holds</div>'}</div>
+  </div>`;
+}
+
+/* ── a car on ground ──
+   Dwell is the point of the row, so it is the display numeral on the right
+   where the hold list sits on a Service Visits row. Everything else is
+   context for it: how long, since when, and what the lot says about the car.
+
+   The border earns its colour from dwell rather than from status, because a
+   car pending inspection for an hour and one pending for two years are the
+   same status and completely different problems. */
+const DWELL_WEEK  = 7 * 86400;
+const DWELL_MONTH = 30 * 86400;
+
+function cogRowHtml(r){
+  const sec = r.dwellSec;
+  const cls = sec == null ? "" : (sec >= DWELL_MONTH ? "ct" : (sec >= DWELL_WEEK ? "sv" : ""));
+
+  const pills = [`<span class="pill p-info"><i></i>${esc(r.status)}</span>`];
+  if(sec != null && sec >= DWELL_MONTH) pills.push(`<span class="pill p-err">Standing</span>`);
+  if(r.hold) pills.push(`<span class="pill p-work">${esc(r.hold)}</span>`);
+  /* Counted the same as any other car in this status — Intrepid shows it
+     that way — but the row says where the status came from. */
+  if(r.inferred) pills.push(`<span class="pill p-idle"
+    title="No COG record on this car. Intrepid defaults that to this status.">No COG record</span>`);
+
+  const bits = [
+    r.type,
+    r.bay ? "Bay " + r.bay : "",
+    r.logistics,
+    r.soc == null ? "" : r.soc + "% charge",
+    r.rn,
+    r.color
+  ].filter(Boolean);
+
+  const arrived = r.arrived
+    ? `<div class="hold-line" style="color:var(--ink-mute)">arrived ${esc(fmtDate(r.arrived))}</div>`
+    : `<div class="hold-line" style="color:var(--ink-mute)">no arrival on record</div>`;
+
+  return `<div class="veh ${cls}">
+    <div>
+      <div class="vin-row">${vinLink(r)}
+        <span class="mdl">${esc(String(r.model || "").toUpperCase())}</span>
+        ${pills.join("")}
+      </div>
+      <div class="veh-sub">${bits.map(b => esc(b)).join(' <span class="dot"></span> ')}</div>
+    </div>
+    <div class="holds">
+      <div class="hold-line" style="font-size:19px;font-weight:600;letter-spacing:-.01em;color:var(--ink)">
+        ${esc(r.dwell || "—")}</div>
+      ${arrived}
+    </div>
+  </div>`;
+}
+
+function visibleRows(){
+  if(S.tool === "cog"){
+    /* Sorted here rather than re-scanned: the server hands back longest-first
+       and the other order is the same rows read the other way up. */
+    return S.cogSort === "recent" ? [...S.rows].reverse() : S.rows;
+  }
+  return S.view === "all"
+    ? S.rows
+    : S.rows.filter(r => r.visits.length || r.campaigns.length || r.logistics.length);
+}
+
+function paintList(){
+  const cog  = S.tool === "cog";
+  const rows = visibleRows();
+  $("empty").hidden = rows.length > 0 || S.rows.length > 0;
+  $("list").innerHTML = rows.map(cog ? cogRowHtml : rowHtml).join("");
+
+  for(const id of ["viewFlagged", "viewAll"]) $(id).hidden = cog;
+  for(const id of ["sortDwell", "sortRecent"]) $(id).hidden = !cog;
+  $("viewFlagged").classList.toggle("on", S.view === "flagged");
+  $("viewAll").classList.toggle("on", S.view === "all");
+  $("sortDwell").classList.toggle("on", S.cogSort === "dwell");
+  $("sortRecent").classList.toggle("on", S.cogSort === "recent");
+
+  $("listSub").textContent = S.listSub + (rows.length ? ` · showing ${rows.length}` : "");
+  if(!rows.length && S.rows.length){
+    $("list").innerHTML = `<div class="empty"><h3>Nothing flagged</h3>
+      <p>All ${S.rows.length} vehicles in this selection came back clear.</p></div>`;
+  }
+}
+
+$("viewFlagged").addEventListener("click", () => { S.view = "flagged"; paintList(); });
+$("viewAll").addEventListener("click", () => { S.view = "all"; paintList(); });
+$("sortDwell").addEventListener("click", () => { S.cogSort = "dwell"; paintList(); });
+$("sortRecent").addEventListener("click", () => { S.cogSort = "recent"; paintList(); });
+
+/* The two tools count different things, so the strip is written rather than
+   filled in: four tiles reading zero because the other tool wrote them is
+   worse than no tiles at all. */
+function paintStats(tiles){
+  $("stats").innerHTML = tiles.map(t => `
+    <div class="stat"><div class="stat-k">${esc(t.k)}</div>
+      <div class="stat-v">${esc(t.v)}${t.small ? `<small>${esc(t.small)}</small>` : ""}</div>
+    </div>`).join("");
+}
+
+/* ── export ──
+   Sends the rows already on screen rather than asking for a fresh scan: the
+   file matches the page exactly and costs nothing. Re-scanning would also
+   return something different — service visits open and close while you read.
+
+   "On screen" includes the Flagged only / All scanned toggle, which is why
+   the view lands in the filename. Exporting 17 rows when someone believed
+   they had 67 is a nasty surprise; a file called `…-flagged-…` is not.
+
+   Labels are resolved here, not on the server: the page already turns
+   `service-loaner` into "Service loaner" for the rows, and the spreadsheet
+   should read in the same words as the screen it came from. */
+$("exportBtn").addEventListener("click", async () => {
+  const rows = visibleRows();
+  if(!rows.length){ note("Nothing on screen to export.", true); return; }
+
+  const btn = $("exportBtn");
+  const restore = btn.innerHTML;   // innerHTML, not textContent — it carries an SVG
+  btn.disabled = true;
+  btn.textContent = "Exporting";
+
+  try{
+    const site = (S.trt && S.trt.name ? S.trt.name : "trt" + S.trtId).replace(/\s+/g, "");
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    /* The view is in the filename for the same reason on both tools: a file
+       holding 5 rows when someone believed they had 700 is a nasty surprise,
+       and a name saying which slice it is prevents it. On Cars on Ground the
+       slice is the status, so that is what the name carries. */
+    const payload = S.tool === "cog"
+      ? { kind : "cog",
+          label: `compiler-cars-on-ground-${site}-${
+            (S.cogChosen.length ? S.cogTally.filter(t => S.cogChosen.includes(t.id))
+                                    .map(t => t.name).join("-")
+                                : "all-statuses").replace(/\s+/g, "") }-${stamp}`,
+          rows }
+      : { label: `compiler-service-visits-${site}-${S.view}-${stamp}`,
+          rows : rows.map(r => ({
+            ...r,
+            modelLabel   : labelFor("model", r.model),
+            typeLabel    : labelFor("vehicle_type", r.type),
+            categoryLabel: labelFor("vehicle_category", r.category),
+            titleLabel   : r.title ? labelFor("title", r.title) : ""
+          })) };
+
+    const res = await fetch("/api/export", {
+      method : "POST",
+      headers: { "Content-Type": "application/json" },
+      body   : JSON.stringify(payload)
+    });
+    if(!res.ok){
+      let msg = `HTTP ${res.status}`;
+      try { msg = (await res.json()).error || msg; } catch {}
+      throw new Error(msg);
+    }
+
+    const blob = await res.blob();
+    const cd   = res.headers.get("Content-Disposition") || "";
+    const hit  = cd.match(/filename="([^"]+)"/);
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url;
+    a.download = hit ? hit[1] : "compiler-export.xlsx";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Revoked late: Safari cancels the download if the URL dies too early.
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }catch(err){
+    note("Export failed: " + err.message, true);
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = restore;
+  }
+});
+
+function render(data){
+  S.tool = "sv";
+  S.rows = data.rows || [];
+  S.reasons = data.reasons || {};
+  S.summary = data.summary;
+  const s = data.summary;
+
+  paintStats([
+    { k: "Scanned",        v: s.scanned.toLocaleString() },
+    { k: "Flagged",        v: s.flagged.toLocaleString(), small: s.scanned ? s.rate + "%" : "" },
+    { k: "Service visits", v: s.serviceVisits.toLocaleString() },
+    { k: "Containment",    v: s.containment.toLocaleString() },
+    { k: "Clear",          v: s.clear.toLocaleString() }
+  ]);
+
+  const site = (data.trt && data.trt.name) ? data.trt.name : "TRT " + data.trtId;
+  const chosen = Object.entries(data.filters || {}).filter(([, v]) => v.length).length;
+  S.listSub = `${site} · ${data.scanned.toLocaleString()} of ${data.total.toLocaleString()} matched` +
+    (chosen ? ` · ${chosen} filter${chosen === 1 ? "" : "s"}` : "");
+
+  $("listTitle").textContent = "Vehicles";
+  $("listHead").hidden = false;
+  $("empty").hidden = true;
+  S.view = "flagged";
+  paintList();
+
+  const msgs = [...(data.notes || [])];
+  if(msgs.length) note(msgs.join("  ")); else clearNotes();
+}
+
+function renderCog(data){
+  S.tool = "cog";
+  S.rows = data.rows || [];
+  S.cogTally = data.tally || [];
+  S.cogTotal = data.total || 0;
+  S.cogNoRecord = data.noRecord || 0;
+  S.cogSort = "dwell";
+
+  const rows = S.rows;
+  const withDwell = rows.filter(r => r.dwellSec != null);
+  const longest = withDwell.length ? withDwell[0].dwellSec : null;   // server sorts longest-first
+  const median = withDwell.length
+    ? withDwell[Math.floor(withDwell.length / 2)].dwellSec
+    : null;
+  const over30 = withDwell.filter(r => r.dwellSec >= DWELL_MONTH).length;
+
+  /* Days, not the pretty label: these tiles are read side by side and a
+     column of mixed units does not compare. */
+  const days = sec => sec == null ? "—" : Math.floor(sec / 86400).toLocaleString() + "d";
+
+  paintStats([
+    { k: "On ground", v: S.cogTotal.toLocaleString() },
+    { k: "Listed",    v: rows.length.toLocaleString(),
+      small: S.cogTotal ? Math.round(rows.length / S.cogTotal * 100) + "%" : "" },
+    { k: "Longest",   v: days(longest) },
+    { k: "Median",    v: days(median) },
+    { k: "Over 30d",  v: over30.toLocaleString() }
+  ]);
+
+  const site = (data.trt && data.trt.name) ? data.trt.name : "TRT " + data.trtId;
+  const picked = (data.statusIds || []).length
+    ? S.cogTally.filter(t => data.statusIds.includes(t.id)).map(t => t.name).join(" + ")
+    : "every status";
+  S.listSub = `${site} · ${picked} · ${S.cogTotal.toLocaleString()} on ground`;
+
+  $("listTitle").textContent = "Cars on Ground";
+  $("listHead").hidden = false;
+  $("empty").hidden = true;
+  paintList();
+
+  /* An empty result is the common case on a healthy lot and should read as an
+     answer, not as a broken tool — so the ladder is spelled out underneath. */
+  const msgs = [...(data.notes || [])];
+  if(!rows.length && S.cogTotal){
+    $("list").innerHTML = `<div class="empty"><h3>No cars in that status</h3>
+      <p>All ${S.cogTotal.toLocaleString()} cars on ground at ${esc(site)} are elsewhere
+         on the ladder.</p></div>`;
+    msgs.unshift("On ground: " + S.cogTally.map(t => `${t.count} ${t.name}`).join(" · ") + ".");
+  }
+  if(msgs.length) note(msgs.join("  ")); else clearNotes();
+}
+
+/* ── admin ── */
+$("adminBtn").addEventListener("click", () => {
+  showModal($("adminModal"));
+  if(!$("admin").classList.contains("unlocked")) setTimeout(() => otpBoxes[0].focus(), 60);
+});
+
+/* ── the six-digit gate ──
+   Same behaviour as the other boards: type and it advances, backspace on an
+   empty box steps back, a pasted code fills all six, and the sixth digit
+   submits without anyone reaching for the button. */
+const otpBoxes = Array.from(document.querySelectorAll("#otp .otp-box"));
+const otpValue = () => otpBoxes.map(b => b.value).join("");
+
+function otpClear(focus){
+  otpBoxes.forEach(b => { b.value = ""; b.classList.remove("filled"); });
+  $("otp").classList.remove("bad");
+  if(focus) otpBoxes[0].focus();
+}
+
+function otpFill(digits){
+  otpBoxes.forEach((b, i) => {
+    b.value = digits[i] || "";
+    b.classList.toggle("filled", Boolean(b.value));
+  });
+  const nextEmpty = otpBoxes.findIndex(b => !b.value);
+  (nextEmpty === -1 ? otpBoxes[5] : otpBoxes[nextEmpty]).focus();
+  if(otpValue().length === 6) tryUnlock();
+}
+
+otpBoxes.forEach((box, i) => {
+  box.addEventListener("input", () => {
+    // Digits only; a fast typist can land two characters in one box.
+    const digits = box.value.replace(/\D/g, "");
+    box.value = digits.slice(0, 1);
+    box.classList.toggle("filled", Boolean(box.value));
+    $("gateErr").textContent = "";
+    $("otp").classList.remove("bad");
+
+    if(digits.length > 1){ otpFill(otpValue().slice(0, i) + digits); return; }
+    if(box.value && i < 5) otpBoxes[i + 1].focus();
+    if(otpValue().length === 6) tryUnlock();
+  });
+
+  box.addEventListener("keydown", e => {
+    if(e.key === "Backspace" && !box.value && i > 0){
+      e.preventDefault();
+      otpBoxes[i - 1].value = "";
+      otpBoxes[i - 1].classList.remove("filled");
+      otpBoxes[i - 1].focus();
+    }
+    if(e.key === "ArrowLeft"  && i > 0){ e.preventDefault(); otpBoxes[i - 1].focus(); }
+    if(e.key === "ArrowRight" && i < 5){ e.preventDefault(); otpBoxes[i + 1].focus(); }
+    if(e.key === "Enter") tryUnlock();
+  });
+
+  box.addEventListener("paste", e => {
+    e.preventDefault();
+    const digits = (e.clipboardData.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+    if(digits) otpFill(digits);
+  });
+
+  box.addEventListener("focus", () => box.select());
+});
+
+let unlocking = false;
+async function tryUnlock(){
+  if(unlocking) return;
+  const code = otpValue();
+  if(code.length < 6){ $("gateErr").textContent = "Enter all six digits."; return; }
+
+  unlocking = true;
+  try{
+    const d = await api("/api/admin/unlock", { password: code });
+    S.password = code;
+    otpClear(false);
+    $("gateErr").textContent = "";
+    $("admin").classList.add("unlocked");
+    $("adminModal").classList.add("unlocked");
+    paintConnections(d.connections);
+  }catch(err){
+    $("otp").classList.add("bad");
+    $("gateErr").textContent = err.message === "Wrong password" ? "Incorrect code." : err.message;
+    setTimeout(() => otpClear(true), 420);
+  }finally{
+    unlocking = false;
+  }
+}
+$("unlock").addEventListener("click", tryUnlock);
+
+function paintConnections(c){
+  if(!c) return;
+  const say = (s, expect) => s.set
+    ? `${s.detail} ${s.hint}` + (s.looksOk ? "" : ` — does not look like ${expect}`)
+    : "not connected";
+  $("aGarage").textContent   = say(c.garage,   "a Garage session cookie");
+  $("aIntrepid").textContent = say(c.intrepid, "a cogs cookie");
+  // Both required, so the footer says which of the two is missing rather than
+  // a single word that could mean either.
+  $("fSrc").textContent = c.garage.set && c.intrepid.set
+    ? "Garage + Intrepid"
+    : (!c.garage.set && !c.intrepid.set ? "No sources connected"
+      : (c.garage.set ? "Garage · no Intrepid" : "Intrepid · no Garage"));
+}
+
+async function admin(path, extra, btn){
+  const restore = btn ? btn.textContent : null;
+  if(btn){ btn.disabled = true; btn.textContent = "Working"; }
+  try{
+    return await api(path, { password: S.password, ...(extra || {}) });
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = restore; }
+  }
+}
+
+
+$("runTests").addEventListener("click", async e => {
+  for(const id of ["tIntrepid","tGarage","tTesladex"]) $(id).textContent = "checking…";
+  const d = await admin("/api/admin/test", { trtId: S.trtId }, e.target);
+  const show = (id, r) => {
+    $(id).textContent = (r.ok ? "ok · " : "failed · ") + r.detail;
+    $(id).style.color = r.ok ? "var(--ink-mute)" : "var(--red)";
+  };
+  show("tIntrepid", d.intrepid); show("tGarage", d.garage); show("tTesladex", d.tesladex);
+});
+
+$("refreshTrt").addEventListener("click", async e => {
+  const d = await admin("/api/admin/refresh-trt", {}, e.target);
+  $("mTrt").textContent = `${d.sites.toLocaleString()} sites cached`;
+});
+
+$("resetBoard").addEventListener("click", async e => {
+  const d = await admin("/api/admin/reset", {}, e.target);
+  paintConnections(d.connections);
+  setTrt(null, null);
+});
+
+/* ── boot ── */
+(async () => {
+  try{
+    const st = await api("/api/state");
+    S.facets = st.facets;
+    S.kinds = st.kinds;
+    S.garageUrl = st.garageUrl;
+    for(const k of Object.keys(st.facets)) S.filters[k] = [];
+    // The obvious default: the question is almost always about cars that have
+    // not gone out yet, and it is one click to widen.
+    S.filters.delivery = ["undelivered"];
+    if(st.trtId) setTrt(st.trtId, st.trt);
+    S.offsiteTrtId = st.offsiteTrtId || null;
+    S.offsiteTrt   = st.offsiteTrt || null;
+    paintSites();
+    paintConnections(st.connections);
+  }catch(err){
+    note("Could not reach the server: " + err.message, true);
+  }
+})();
+</script>
+</body>
+</html>

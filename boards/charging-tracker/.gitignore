@@ -1,0 +1,16 @@
+# Credentials and secrets — per-user, never commit these.
+# One token/client pair per Garage environment: .tokens.json is production,
+# .tokens.eng.json is engineering. The globs cover any future environment.
+.tokens.json
+.tokens.*.json
+.client.json
+.client.*.json
+.teams.json
+.garage.json
+
+node_modules/
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

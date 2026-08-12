@@ -1,0 +1,8 @@
+{
+  "name": "zo-projects-hub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Central board for every Zo Projects dashboard. Sign in once, launch anything.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" }
+}

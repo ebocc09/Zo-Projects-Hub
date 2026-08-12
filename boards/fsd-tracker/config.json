@@ -1,0 +1,19 @@
+{
+  "port": 3120,
+  "trtId": null,
+
+  "intrepidApi": "https://intrepidapi.tesla.com/cogs/api/cogs",
+
+  "garageUrl": "https://garage.vn.teslamotors.com",
+  "mcpProtocolVersion": "2025-06-18",
+
+  "droveThreshold": 1,
+  "windowHours": 12,
+
+  "lookbackHours": 168,
+  "concurrency": 8,
+  "scopeConcurrency": 8,
+  "outputDir": "~/Desktop",
+
+  "defaultAdminPassword": "226565"
+}

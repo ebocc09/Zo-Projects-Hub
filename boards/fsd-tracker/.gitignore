@@ -1,0 +1,39 @@
+# Credentials and local state — per-user, never commit these.
+# .connections.json holds the live Intrepid session cookie and, on a machine
+# with no Charging Tracker checkout, a pasted Garage token pair.
+.connections.json
+.admin.json
+.tokens.json
+.tokens.*.json
+.client.json
+.client.*.json
+
+# Cached TRT -> site-name directory, rebuilt on demand.
+.trt-cache.json
+
+# Cached VIN -> delivering-centre lookups. Facts about past handoffs, so it
+# never goes stale, but it is machine-local and can be rebuilt from Garage.
+.vin-trt-cache.json
+
+# Settled post-delivery measurements — a car whose 12-hour window has closed
+# can never return a different number, so it is never asked about again.
+.measure-cache.json
+
+# Cached AD username -> staff display name. Harvested from Intrepid and
+# Garage; names of real people, so it stays out of the repo.
+.staff-cache.json
+
+# The launcher's scratch file for reading the port out of config.json. Deleted
+# immediately, so it only exists if a start was interrupted mid-line.
+.port.tmp
+
+# Generated reports
+*.csv
+*.xlsx
+
+node_modules/
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

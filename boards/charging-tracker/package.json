@@ -1,0 +1,15 @@
+{
+  "name": "charging-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Supercharging dashboard tracking USOE per VIN against a target charge level, backed by Garage.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "comment": "Node 18 runs the dashboard. The one-click Garage sign-in needs 20+ for the global WebSocket, and degrades to the paste box below it.",
+  "dependencies": {}
+}

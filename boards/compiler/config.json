@@ -1,0 +1,8 @@
+{
+  "port": 3131,
+  "trtId": null,
+  "intrepidApi": "https://intrepidapi.tesla.com/cogs/api/cogs",
+  "garageUrl": "https://garage.vn.teslamotors.com",
+  "concurrency": 6,
+  "defaultAdminPassword": "226565"
+}

@@ -1,0 +1,9 @@
+{
+  "name": "dvp-scorecard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Attributes delivery survey scores to whoever finished the car — a prep-team cleanliness leaderboard.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}

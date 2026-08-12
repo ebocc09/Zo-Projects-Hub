@@ -1,0 +1,14 @@
+{
+  "name": "fsd-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FSD miles driven by customers after taking delivery, joining Intrepid delivery appointments to Garage vehicle telemetry.",
+  "main": "fsd-tracker.js",
+  "scripts": {
+    "start": "node fsd-tracker.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {}
+}

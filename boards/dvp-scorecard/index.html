@@ -1,0 +1,1365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DVP Scorecard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#171A20; --ink-soft:#393C41; --ink-mute:#5C5E62;
+  --line:#D0D1D2; --line-soft:#E8E8E9;
+  --paper:#FFFFFF; --paper-alt:#F4F4F4;
+  --red:#E82127; --blue:#3E6AE1;
+  --grey-car:#9AA0A6; --amber:#F5B31B; --green:#12BB6A;
+  --r-sm:4px; --r-md:8px; --r-lg:18px;
+  --shadow:0 2px 10px rgba(0,0,0,.08);
+  --shadow-lg:0 8px 40px rgba(0,0,0,.16);
+  --nav-h:56px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  color:var(--ink);background:var(--paper);font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input{font-family:inherit;font-size:14px;color:inherit}
+
+/* nav */
+.nav{position:sticky;top:0;z-index:50;height:var(--nav-h);background:var(--paper);
+  border-bottom:1px solid var(--line-soft);display:flex;align-items:center;gap:18px;padding:0 22px}
+.wordmark{font-size:16px;font-weight:600;letter-spacing:.42em}
+.nav-div{width:1px;height:22px;background:var(--line-soft)}
+.nav-title{font-size:13px;font-weight:600;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-soft)}
+.nav-spacer{flex:1}
+.nav-btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 13px;border-radius:var(--r-sm);
+  font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-soft);
+  border:1px solid var(--line-soft);transition:border-color .2s,background .15s}
+.nav-btn:hover{border-color:var(--ink);background:var(--paper-alt);color:var(--ink)}
+.nav-btn svg{width:13px;height:13px}
+.nav-btn b{font-weight:700;letter-spacing:.04em;color:var(--ink)}
+/* Centre picker — beside the title, same control as the FSD Tracker's. */
+.trt-btn{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;
+  border:1px solid var(--line);border-radius:var(--r-sm);
+  font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-soft);transition:border-color .2s,background .15s;max-width:340px}
+.trt-btn:hover{border-color:var(--ink);background:var(--paper-alt);color:var(--ink)}
+.trt-btn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trt-btn b{font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:.04em}
+.trt-btn svg{flex:none}
+
+/* Type-ahead results. Sits inline under the field rather than floating, so it
+   cannot be clipped by the dialog and needs no positioning logic. */
+.sitelist{margin-top:8px;border:1px solid var(--line-soft);border-radius:var(--r-md);
+  max-height:236px;overflow-y:auto}
+.site{display:flex;align-items:baseline;gap:10px;width:100%;padding:9px 12px;text-align:left;
+  border-bottom:1px solid var(--line-soft);transition:background .15s}
+.site:last-child{border-bottom:none}
+.site:hover,.site.cur{background:var(--paper-alt)}
+.site-n{font-size:13px;font-weight:500;color:var(--ink);flex:1;min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.site-c{font-size:11.5px;color:var(--ink-mute);flex:none}
+.site-id{font-size:11.5px;font-weight:600;letter-spacing:.04em;
+  font-variant-numeric:tabular-nums;color:var(--blue);flex:none}
+.site-none{padding:11px 12px;font-size:12.5px;color:var(--ink-mute)}
+
+/* hero */
+.hero{background:var(--ink);color:#fff;position:relative;overflow:hidden}
+.hero-art{position:absolute;inset:0;width:100%;height:100%;opacity:.5;pointer-events:none}
+.hero-inner{position:relative;max-width:840px;margin:0 auto;padding:30px 22px 26px;text-align:center}
+.hero h1{margin:0 0 6px;font-size:30px;font-weight:600;letter-spacing:-.02em}
+.hero p{margin:0 auto;max-width:540px;font-size:14px;color:rgba(255,255,255,.68);line-height:1.55}
+
+/* dropzone */
+.drop{max-width:620px;margin:22px auto 0;background:var(--paper);border-radius:var(--r-md);
+  box-shadow:var(--shadow-lg);padding:8px}
+.drop-in{border:1.5px dashed var(--line);border-radius:var(--r-sm);padding:26px 20px;text-align:center;
+  transition:border-color .2s,background .15s}
+.drop.drag .drop-in{border-color:var(--blue);background:#F5F8FF}
+.drop-ic{width:34px;height:34px;margin:0 auto 10px;color:var(--ink-mute)}
+.drop-t{font-size:14px;font-weight:600;color:var(--ink)}
+.drop-s{font-size:12px;color:var(--ink-mute);margin-top:4px}
+.drop-s b{color:var(--ink-soft)}
+.drop-btn{margin-top:14px;height:42px;padding:0 28px;border-radius:var(--r-sm);background:var(--ink);color:#fff;
+  font-size:12px;font-weight:600;letter-spacing:.13em;text-transform:uppercase}
+.drop-btn:hover{background:#000}
+
+/* stat strip */
+.stats{display:flex;background:var(--paper);border-bottom:1px solid var(--line-soft)}
+.stat{flex:1;padding:14px 20px;border-right:1px solid var(--line-soft)}
+/* The one tile that opens something. Marked so it does not look like the
+   others, which are read-only figures. */
+.stat.click{cursor:pointer;transition:background .15s}
+.stat.click:hover{background:var(--bg-soft,rgba(0,0,0,.03))}
+.stat:last-child{border-right:none}
+.stat-k{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute)}
+.stat-v{font-size:22px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:3px}
+.stat-v small{font-size:12px;font-weight:500;color:var(--ink-mute);letter-spacing:0}
+
+main{max-width:1440px;margin:0 auto;padding:22px}
+
+.note{border:1px solid var(--line-soft);border-radius:var(--r-md);padding:11px 14px;margin-bottom:14px;
+  font-size:12.5px;color:var(--ink-soft);background:var(--paper-alt)}
+.note.bad{border-color:rgba(232,33,39,.4);background:#FDE7E8;color:#A3161B}
+
+/* progress */
+.prog{margin:0 0 14px;padding:14px 16px;border:1px solid var(--line-soft);border-radius:var(--r-md);
+  background:var(--paper);box-shadow:var(--shadow)}
+.prog-top{display:flex;align-items:baseline;gap:10px;margin-bottom:9px}
+.prog-t{font-size:13px;font-weight:600}
+.prog-c{margin-left:auto;font-size:11.5px;color:var(--ink-mute);font-variant-numeric:tabular-nums}
+.prog-bar{height:4px;border-radius:2px;background:var(--line-soft);overflow:hidden}
+.prog-fill{height:100%;background:var(--blue);border-radius:2px;transition:width .3s cubic-bezier(.3,.9,.3,1);width:0}
+.prog-fill.indet{width:34%!important;animation:sweep 1.15s ease-in-out infinite}
+@keyframes sweep{0%{margin-left:-34%}100%{margin-left:100%}}
+
+/* list head */
+.list-head{display:flex;align-items:center;gap:12px;margin:0 0 14px}
+.list-head h2{margin:0;font-size:13px;font-weight:600;letter-spacing:.11em;text-transform:uppercase}
+.list-head .sub{font-size:12px;color:var(--ink-mute)}
+.list-actions{margin-left:auto}
+.chip{display:inline-flex;align-items:center;height:32px;padding:0 13px;border-radius:var(--r-sm);
+  font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-soft);
+  border:1px solid var(--line);background:var(--paper);transition:border-color .2s,background .15s}
+.chip:hover{border-color:var(--ink);background:var(--paper-alt);color:var(--ink)}
+
+/* controls row */
+.controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 0 14px;margin-bottom:4px;
+  border-bottom:1px solid var(--line-soft)}
+.ctl-k{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute)}
+.ctl-hint{font-size:11.5px;color:var(--ink-mute);margin-left:4px}
+/* Date range — ZO-1 control height and radius, same as the chips beside it. */
+.controls.range{border-bottom:none;padding-bottom:0;margin-bottom:0;padding-top:12px}
+.dt{height:32px;padding:0 10px;border:1px solid var(--line);border-radius:var(--r-sm);
+  background:var(--paper);color:var(--ink);font-size:12.5px;font-variant-numeric:tabular-nums;
+  transition:border-color .2s}
+.dt:hover{border-color:var(--ink-mute)}
+.dt:focus{outline:none;border-color:var(--blue)}
+.ctl-dash{font-size:11.5px;color:var(--ink-mute)}
+/* Narrowed to a subset of the file's dates — say so, quietly but visibly. */
+.range.on .ctl-k{color:var(--ink)}
+#rangeHint b{color:var(--ink-soft);font-weight:600}
+/* Selected filter: a bordered chip with a leading dot, not a solid ink slab.
+   ZO-1's own rule — never a saturated fill with white text for state. */
+.chip.on{background:var(--paper-alt);color:var(--ink);border-color:var(--ink);font-weight:700}
+.chip.on::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ink);
+  margin-right:7px;flex:none}
+
+/* the explainer — the ranking is adjusted, so it has to say so */
+.rank-note{font-size:11.5px;color:var(--ink-mute);line-height:1.5;margin:12px 0 14px}
+.rank-note b{color:var(--ink-soft);font-weight:600}
+
+/* ══════════════════════ scorecard table ══════════════════════
+   Modelled on the real internal delivery scorecard: column-group bands, a dark
+   header, a benchmark average row, and per-cell conditional tinting. Rendered
+   entirely in ZO-1 — the header is --ink (not the reference's navy), labels are
+   uppercase micro-labels, figures are tabular, and the tints use ZO-1's status
+   formula (pale tint + deep readable text, never a saturated fill). */
+
+.sc-wrap{border:1px solid var(--line-soft);border-radius:var(--r-lg);overflow:hidden;background:var(--paper)}
+/* No horizontal scroll by design — the column set is small enough to fit, and
+   fixed layout makes the percentage widths hold. */
+table.sc{border-collapse:separate;border-spacing:0;width:100%;table-layout:fixed;font-size:13px}
+
+/* group band above the column heads */
+.sc thead tr.grp th{
+  background:var(--paper-alt);color:var(--ink-mute);
+  font-size:10px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;
+  padding:9px 10px;text-align:center;border-bottom:1px solid var(--line-soft);
+  border-left:1px solid var(--line-soft);white-space:nowrap;
+}
+.sc thead tr.grp th.blank{background:var(--paper);border-left:none}
+/* the ranked band is the one that decides order — mark it, don't decorate it */
+.sc thead tr.grp th.ranked{background:#EEF2FD;color:#2A46A8}
+
+.sc thead tr.col th{
+  background:var(--ink);color:#fff;
+  font-size:10px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+  padding:10px 10px;text-align:center;vertical-align:bottom;line-height:1.3;
+  border-left:1px solid rgba(255,255,255,.09);white-space:normal;min-width:64px;
+  position:sticky;top:0;z-index:3;
+}
+.sc thead tr.col th.lead{text-align:left}
+
+/* benchmark row — the centre's own average, the thing every cell is judged against */
+.sc tr.avg td{
+  background:var(--paper-alt);font-weight:600;color:var(--ink-soft);
+  border-bottom:1px solid var(--line);padding:9px 10px;text-align:center;
+  font-variant-numeric:tabular-nums;
+}
+.sc tr.avg td.lead{text-align:right;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute)}
+
+.sc tbody td{
+  padding:8px 10px;border-bottom:1px solid var(--line-soft);text-align:center;
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+.sc tbody tr:hover td{background:#FAFAFA}
+.sc tbody tr:hover td.tint-good{background:#D6F2E4}
+.sc tbody tr:hover td.tint-bad{background:#FBDDDE}
+
+/* identity columns — no longer sticky, because nothing scrolls sideways */
+.sc .rk{width:6%;text-align:center;color:var(--ink-mute);font-weight:600;
+  font-variant-numeric:tabular-nums;letter-spacing:.04em}
+.sc td.lead3{color:var(--ink)}
+.sc .lead{width:22%;text-align:left}
+.sc tr.avg td.lead{text-align:left;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute)}
+
+.sc .who{color:var(--blue);font-weight:600;cursor:pointer;letter-spacing:.02em;font-size:14px}
+.sc .who:hover{text-decoration:underline}
+.sc .thin{color:var(--ink-mute);font-weight:400;font-size:10px;letter-spacing:.06em;text-transform:uppercase}
+
+/* Every figure on the board is a display numeral — same size, weight and
+   tracking, per ZO-1. Sizing only the ranked pair made the counts beside them
+   look like a different, lesser class of number when they are the same kind of
+   measurement; the ranked band is already marked by its own header colour and
+   the group band above it, so it does not need to borrow type scale as well. */
+.sc td.num{font-size:17px;font-weight:600;letter-spacing:-.01em}
+.sc tr.avg td.num{font-size:15px}
+
+/* Contribution is a composite, so it can show its working. Styled as a value
+   that happens to be pressable — a dotted underline, not a button that
+   competes with the number. */
+.calc{font:inherit;color:inherit;padding:0;border-bottom:1px dashed var(--line);
+  cursor:pointer;font-variant-numeric:tabular-nums}
+.calc:hover{border-bottom-color:var(--ink);background:transparent}
+
+/* ── the working ── */
+.calc-eq{display:flex;align-items:baseline;justify-content:center;gap:10px;
+  padding:16px 0 18px;font-variant-numeric:tabular-nums}
+.calc-eq .n{font-size:32px;font-weight:600;letter-spacing:-.025em}
+.calc-eq .op{font-size:20px;color:var(--ink-mute)}
+.calc-eq .r{font-size:32px;font-weight:600;letter-spacing:-.025em;color:var(--blue)}
+.calc-line{display:flex;align-items:center;gap:10px;padding:9px 0;
+  border-bottom:1px solid var(--line-soft);font-size:13px}
+.calc-line .lbl{flex:1;color:var(--ink-soft)}
+.calc-line .v{font-weight:600;font-variant-numeric:tabular-nums}
+.calc-line.total{border-bottom:none;border-top:2px solid var(--line);margin-top:2px;padding-top:11px}
+.calc-line.total .lbl{color:var(--ink);font-weight:600}
+.calc-line.total .v{font-size:17px;color:var(--blue)}
+.calc-sub{font-size:11.5px;color:var(--ink-mute);line-height:1.55;margin-top:14px}
+.calc-miss{margin-top:14px}
+.calc-miss .h{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-mute);margin-bottom:7px}
+.calc-miss .m{display:flex;gap:10px;align-items:center;padding:7px 0;
+  border-bottom:1px solid var(--line-soft);font-size:12.5px}
+.calc-miss .m .vin{font-variant-numeric:tabular-nums;letter-spacing:.03em;flex:1}
+.calc-miss .m .rn{color:var(--blue);font-weight:600;font-size:11px}
+.calc-miss .m .sc{font-weight:600;color:#A3161B;font-variant-numeric:tabular-nums}
+
+/* ── productivity panel ──
+   A compact table, not a second scorecard: no tinting, no benchmark row. It
+   answers "who did the most work", which is a different question from the
+   board behind it, and it should not look like a rival ranking of the same
+   thing. */
+.pr{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;table-layout:fixed}
+.pr th{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-mute);text-align:center;padding:0 6px 8px;border-bottom:1px solid var(--line);
+  vertical-align:bottom;line-height:1.3}
+.pr th.l{text-align:left}
+.pr th.t{color:var(--ink)}
+.pr td{padding:8px 6px;text-align:center;border-bottom:1px solid var(--line-soft);
+  font-variant-numeric:tabular-nums}
+.pr tbody tr:hover td{background:#FAFAFA}
+.pr .rk{width:8%;color:var(--ink-mute);font-weight:600}
+.pr .nm{width:26%;text-align:left;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pr .z{color:var(--line)}
+/* The rate beside a catch count. Recedes so the count still reads first —
+   it is context for the number, not a second number competing with it. */
+small.rate{font-size:11px;font-weight:500;color:var(--ink-mute);letter-spacing:0}
+/* The total is the point of the panel, so it is the one display numeral. */
+.pr .tot{width:17%;font-size:16px;font-weight:600;letter-spacing:-.01em;
+  border-left:1px solid var(--line-soft)}
+.pr th.tot{border-left:1px solid var(--line-soft)}
+/* Faults caught sits in this table for context but does NOT feed the Total —
+   the inspection is already counted as a VRI. Set apart so the eye does not
+   read it as one of the addends. */
+.pr th.info,.pr td.info{color:var(--ink-mute);font-style:italic}
+/* A share bar under each total — the ranking is easier to read as length than
+   as four-digit numbers a reader has to compare in their head. */
+.pr .bar{display:block;height:3px;border-radius:2px;background:var(--ink);margin:5px auto 0;min-width:2px}
+.pr .q.neg{color:#A3161B}
+.pr-foot{font-size:11.5px;color:var(--ink-mute);line-height:1.55;margin-top:14px}
+.pr-foot b{color:var(--ink-soft);font-weight:600}
+.sc thead th.hero{background:#2A46A8}
+
+/* conditional tints — ZO-1 status-pill formula */
+.tint-good{background:#DFF6EA;color:#0A7A45}
+.tint-bad{background:#FDE7E8;color:#A3161B}
+.tint-none{color:var(--ink-mute)}
+/* the sample size that rides beside a percentage, as "100% | 7" */
+.sc .n{color:var(--ink-mute);font-weight:400}
+.sc td.rankcell{font-weight:600}
+.sc td.divider{border-left:2px solid var(--line)}
+.sc thead th.divider{border-left:2px solid var(--line)}
+
+.empty{text-align:center;padding:60px 20px;color:var(--ink-mute)}
+.empty h3{margin:0 0 6px;font-size:15px;font-weight:600;color:var(--ink-soft)}
+.empty p{margin:0;font-size:13px}
+
+/* scrim + modal */
+.scrim{position:fixed;inset:0;background:rgba(23,26,32,.42);opacity:0;pointer-events:none;transition:opacity .22s;z-index:80}
+.scrim.on{opacity:1;pointer-events:auto}
+.modal{position:fixed;z-index:90;left:50%;top:50%;transform:translate(-50%,-48%) scale(.98);
+  width:460px;max-width:92vw;max-height:88vh;background:var(--paper);border-radius:var(--r-md);
+  box-shadow:var(--shadow-lg);opacity:0;pointer-events:none;display:flex;flex-direction:column;overflow:hidden;
+  transition:opacity .22s,transform .22s cubic-bezier(.2,.8,.3,1)}
+.modal.on{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
+.modal.wide{width:640px}
+/* 452px — the house width for the admin gate on every board. Six digits
+   floating in a 460px panel is close enough to read as a near-miss rather
+   than as the same dialog. Nothing here widens on unlock: the settings
+   panel is one connection row and two buttons. */
+#admin{width:452px}
+.modal-head{padding:18px 20px;border-bottom:1px solid var(--line-soft);display:flex;align-items:center;flex:none}
+.modal-head h3{margin:0;font-size:13px;font-weight:600;letter-spacing:.11em;text-transform:uppercase}
+.modal-head .msub{margin-left:12px;font-size:11.5px;color:var(--ink-mute)}
+.modal-body{padding:20px;overflow-y:auto}
+.btn-x{margin-left:auto;width:30px;height:30px;display:grid;place-items:center;border-radius:var(--r-sm);color:var(--ink-mute)}
+.btn-x:hover{background:var(--paper-alt);color:var(--ink)}
+.btn-x svg{width:16px;height:16px}
+
+.field{margin-bottom:18px}
+.field label{display:block;font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-mute);margin-bottom:6px}
+.field input[type=text],.field input[type=password]{width:100%;height:42px;padding:0 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--paper)}
+.field input:focus{outline:none;border-color:var(--ink)}
+.hint{font-size:11.5px;color:var(--ink-mute);margin-top:6px;line-height:1.5}
+.btn{height:42px;padding:0 28px;border-radius:var(--r-sm);font-size:12px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;transition:background .15s,border-color .2s}
+.btn-dark{background:var(--ink);color:#fff}.btn-dark:hover{background:#000}
+.btn-ghost{background:var(--paper);border:1px solid var(--line)}.btn-ghost:hover{border-color:var(--ink);background:var(--paper-alt)}
+.modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:0 20px 20px}
+.btn:disabled{opacity:.4;cursor:default}
+
+.conn{display:flex;align-items:center;gap:9px;padding:11px 13px;border:1px solid var(--line-soft);border-radius:var(--r-md);margin-bottom:10px;font-size:12.5px}
+.conn .dot{width:8px;height:8px;border-radius:50%;background:var(--grey-car);flex:none}
+.conn.ok .dot{background:var(--green)}.conn.bad .dot{background:var(--red)}
+.conn b{font-weight:600}.conn span{margin-left:auto;color:var(--ink-mute)}
+.connect-note{margin-top:10px;padding:11px 13px;border-radius:var(--r-md);font-size:12px;line-height:1.5;border:1px solid var(--line);background:var(--paper-alt);color:var(--ink-soft)}
+.connect-note.ok{border-color:rgba(18,187,106,.45);background:#EAF9F1}
+.connect-note.bad{border-color:rgba(232,33,39,.4);background:#FDE7E8;color:#A3161B}
+.connect-note .step{display:block;margin-top:6px}
+.sec-title{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute);margin:18px 0 10px}
+
+/* otp */
+.otp{display:flex;gap:8px;justify-content:center;margin:8px 0 14px}
+.otp-box{width:44px;height:52px;text-align:center;font-size:20px;font-weight:600;border:1px solid var(--line);border-radius:var(--r-sm)}
+.otp-box:focus{outline:none;border-color:var(--ink)}
+.otp.bad .otp-box{border-color:var(--red);animation:shake .4s}
+@keyframes shake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+.gate-t{text-align:center;font-size:12.5px;color:var(--ink-mute);margin-bottom:12px}
+.gate-err{text-align:center;font-size:12px;color:var(--red);min-height:16px;margin-bottom:8px}
+
+/* drill-down car rows */
+.car{display:grid;grid-template-columns:1fr 78px;gap:12px;align-items:center;padding:9px 2px;border-bottom:1px solid var(--line-soft);font-size:12.5px}
+.car .vin{font-variant-numeric:tabular-nums;letter-spacing:.03em}
+.car .rn{font-size:11px;color:var(--blue);font-weight:600}
+.car .sc{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+/* "no survey" is an absence, not a score — it recedes rather than competing
+   with the figures above it. */
+.car .sc.none{font-weight:400;font-size:11px;color:var(--ink-mute);letter-spacing:.04em}
+.carhead{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-mute);padding:16px 0 7px;border-bottom:1px solid var(--line)}
+.carhead:first-child{padding-top:2px}
+.carhead span{display:block;margin-top:5px;font-size:11.5px;font-weight:400;
+  letter-spacing:0;text-transform:none;line-height:1.5}
+.car .sc.low{color:var(--amber)}
+
+/* ── where sign-ins went ──
+   The one place a board still mentions signing in. Not a warning: the normal
+   state is that the Hub already holds the session, so this reads as a pointer
+   rather than an error, and it stays put whether or not anything is missing. */
+.hub-note{margin-top:12px;padding:11px 13px;border-radius:var(--r-md);
+  border:1px solid var(--line-soft);background:var(--paper-alt);
+  font-size:12px;line-height:1.55;color:var(--ink-mute)}
+.hub-note b{font-weight:600;color:var(--ink-soft)}
+.hub-note a{display:inline-block;margin-top:6px;color:var(--blue);
+  text-decoration:none;border-bottom:1px solid transparent}
+.hub-note a:hover{border-bottom-color:currentColor}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wordmark">TESLA</div>
+  <div class="nav-div"></div>
+  <div class="nav-title">DVP Scorecard</div>
+
+  <!-- The centre sits beside the title, not out on the right rail: it names
+       what the whole board is about, so it belongs with the name of the page.
+       Same placement and control as the FSD Tracker. -->
+  <button class="trt-btn" id="trtBtn" title="Change the delivery centre this dashboard reads">
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-5.5-7-11a7 7 0 1 1 14 0c0 5.5-7 11-7 11Z"/><circle cx="12" cy="10" r="2.6"/></svg>
+    <span id="trtCaption">Enter TRT</span><b id="trtLabel"></b>
+  </button>
+
+  <div class="nav-spacer"></div>
+  <button class="nav-btn" id="adminBtn">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    Admin
+  </button>
+</nav>
+
+<section class="hero">
+  <svg class="hero-art" viewBox="0 0 1440 240" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <g stroke="#fff" stroke-opacity=".07" stroke-width="2"><path d="M-40 240 L520 -20"/><path d="M1480 240 L920 -20"/></g>
+    <g stroke="#fff" stroke-opacity=".05" stroke-width="1.5" stroke-dasharray="26 22"><path d="M0 80 H1440"/><path d="M0 160 H1440"/></g>
+  </svg>
+  <div class="hero-inner">
+    <h1>DVP Scorecard</h1>
+    <p>Upload a delivery survey export. Each cleanliness score is credited to whoever
+       put that car into <b>Finished Goods</b> — a leaderboard of who sends out the
+       cleanest cars.</p>
+    <div class="drop" id="drop">
+      <div class="drop-in">
+        <svg class="drop-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5-5 5 5"/><path d="M12 5v12"/></svg>
+        <div class="drop-t">Drop the xlsx here</div>
+        <div class="drop-s">or <b>click to choose a file</b> · needs a Reference Number and a score column</div>
+        <button class="drop-btn" id="pickBtn">Choose file</button>
+        <input type="file" id="file" accept=".xlsx" hidden>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="stats" id="stats" hidden>
+  <div class="stat"><div class="stat-k">Deliveries in window</div><div class="stat-v" id="sAll">0</div></div>
+  <div class="stat"><div class="stat-k">Cars surveyed</div><div class="stat-v" id="sCars">0</div></div>
+  <div class="stat"><div class="stat-k">Team</div><div class="stat-v" id="sPeople">0</div></div>
+  <div class="stat"><div class="stat-k">Mean cleanliness</div><div class="stat-v" id="sMean">0<small>%</small></div></div>
+  <div class="stat"><div class="stat-k">Cars washed</div><div class="stat-v" id="sWash">0</div></div>
+  <div class="stat"><div class="stat-k">VRIs completed</div><div class="stat-v" id="sVri">0</div></div>
+  <div class="stat click" id="sCaughtTile" title="Show every car that failed its inspection"><div class="stat-k">Faults caught at VRI</div><div class="stat-v" id="sCaught">0</div></div>
+  <div class="stat click" id="sPostVriTile" title="Show every car that passed, then went to service before delivery"><div class="stat-k">Tickets post-VRI</div><div class="stat-v" id="sPostVri">0</div></div>
+</div>
+
+<main>
+  <div id="prog" hidden></div>
+  <div id="notes"></div>
+  <div class="list-head" id="listHead" hidden>
+    <h2>Cleanest → dirtiest</h2>
+    <span class="sub" id="listSub"></span>
+    <div class="list-actions">
+      <button class="chip" id="prodBtn" title="Total work across all three stages">Productivity</button>
+      <button class="chip" id="exportBtn">Export</button>
+    </div>
+  </div>
+
+  <!-- Controls sit in one row above the data. -->
+  <div class="controls" id="controls" hidden>
+    <span class="ctl-k">Rank by</span>
+    <button class="chip on" data-sort="contribution">Contribution score</button>
+    <button class="chip" data-sort="weighted">Cleanliness</button>
+    <button class="chip" data-sort="cars">Deliveries</button>
+    <button class="chip" data-sort="washed">Efficient mover</button>
+    <button class="chip" data-sort="vri">VRI</button>
+    <button class="chip" data-sort="caught">Faults caught</button>
+    <button class="chip" data-sort="missed">Tickets post-VRI</button>
+    <span class="ctl-hint" id="hiddenCount"></span>
+  </div>
+
+  <!-- Date range. Its own row: it re-derives the whole board, which is a
+       different kind of action from reordering the rows already on it. -->
+  <div class="controls range" id="rangeBar" hidden>
+    <span class="ctl-k">Dates</span>
+    <input type="date" id="from" class="dt" aria-label="From date">
+    <span class="ctl-dash">to</span>
+    <input type="date" id="to" class="dt" aria-label="To date">
+    <button class="chip" id="applyRange">Apply</button>
+    <button class="chip" id="resetRange" hidden>Show all dates</button>
+    <span class="ctl-hint" id="rangeHint"></span>
+  </div>
+
+  <div id="rankNote" class="rank-note" hidden></div>
+  <div class="sc-wrap" id="boardWrap" hidden><table class="sc" id="board"></table></div>
+  <div class="empty" id="empty">
+    <h3>Nothing loaded yet</h3>
+    <p>Upload a survey export above to build the scorecard.</p>
+  </div>
+</main>
+
+<!-- overlays -->
+<div class="scrim" id="scrim"></div>
+
+<!-- TRT -->
+<div class="modal" id="trtModal" role="dialog" aria-label="Enter TRT">
+  <div class="modal-head"><h3>Enter TRT</h3><button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+  <div class="modal-body">
+    <div class="field">
+      <label for="trtIn">Site name or TRT ID</label>
+      <input type="text" id="trtIn" autocomplete="off" spellcheck="false"
+             placeholder="Start typing — Houston, Fremont, 17589…">
+      <div class="sitelist" id="siteList" hidden></div>
+      <div class="hint" id="trtHint">Nobody remembers TRT numbers. Type a site name and pick from
+        the list; the number comes along with it. The centre is remembered until you change it —
+        the appointment lookup is per centre.</div>
+    </div>
+  </div>
+  <div class="modal-foot">
+    <button class="btn btn-ghost" data-close>Cancel</button>
+    <button class="btn btn-dark" id="trtSave">Use this TRT</button>
+  </div>
+</div>
+
+<!-- Admin -->
+<div class="modal" id="admin" role="dialog" aria-label="Admin">
+  <div class="modal-head"><h3>Admin</h3><button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+  <div class="modal-body" id="gate">
+    <div class="gate-t">Enter the 6-digit admin code.</div>
+    <div class="otp" id="otp">
+      <input class="otp-box" type="password" inputmode="numeric" maxlength="1" autocomplete="one-time-code">
+      <input class="otp-box" type="password" inputmode="numeric" maxlength="1">
+      <input class="otp-box" type="password" inputmode="numeric" maxlength="1">
+      <input class="otp-box" type="password" inputmode="numeric" maxlength="1">
+      <input class="otp-box" type="password" inputmode="numeric" maxlength="1">
+      <input class="otp-box" type="password" inputmode="numeric" maxlength="1">
+    </div>
+    <div class="gate-err" id="gateErr"></div>
+    <button class="btn btn-dark" id="pwBtn" style="width:100%">Unlock</button>
+  </div>
+  <div class="modal-body" id="settings" hidden>
+    <div class="conn" id="cIntrepid"><i class="dot"></i><b>Intrepid</b><span>—</span></div>
+    <button class="btn btn-ghost" id="testBtn" style="width:100%">Test connection</button>
+    <div class="hub-note">
+      Sign-ins live on the <b>Zo Projects Hub</b>. One session there covers every
+      board, including this one.
+      <a href="http://localhost:3100" target="_blank" rel="noopener">Open the Hub</a>
+    </div>
+    <div class="connect-note" id="connectNote" hidden></div>
+  </div>
+</div>
+
+<!-- productivity: total work, reported apart from the cleanliness ranking -->
+<div class="modal wide" id="prod" role="dialog" aria-label="Productivity">
+  <div class="modal-head"><h3>Productivity</h3><span class="msub" id="prodSub"></span>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+  <div class="modal-body" id="prodBody"></div>
+</div>
+
+<!-- contribution working -->
+<div class="modal" id="calc" role="dialog" aria-label="Contribution score working">
+  <div class="modal-head"><h3 id="calcName">Contribution score</h3><button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+  <div class="modal-body" id="calcBody"></div>
+</div>
+
+<!-- person drill-down -->
+<div class="modal wide" id="caught" role="dialog" aria-label="Faults caught at VRI">
+  <div class="modal-head"><h3 id="caughtName">Faults caught at VRI</h3><span class="msub" id="caughtSub"></span><button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+  <div class="modal-body" id="caughtBody"></div>
+  <div class="modal-foot"><button class="btn" id="caughtCopy">Copy VINs</button></div>
+</div>
+
+<div class="modal wide" id="person" role="dialog" aria-label="Person detail">
+  <div class="modal-head"><h3 id="personName">Person</h3><span class="msub" id="personSub"></span><button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+  <div class="modal-body" id="personCars"></div>
+</div>
+
+<script>
+"use strict";
+const S = { trtId:null, password:"", people:[], rows:[], sub:"", busy:false,
+            rank:null, sort:"contribution", trtInfo:null,
+            // Full span of the uploaded file, so "Show all dates" has something
+            // to go back to and the pickers can be bounded to real data.
+            allDates:[], from:null, to:null };
+const $ = id => document.getElementById(id);
+const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+async function api(path, body){
+  const res = await fetch(path, body===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  let d={}; try{ d=await res.json(); }catch{}
+  if(!res.ok) throw Object.assign(new Error(d.error||("HTTP "+res.status)), d);
+  return d;
+}
+function note(msg, bad){ $("notes").innerHTML = msg?`<div class="note${bad?" bad":""}">${esc(msg)}</div>`:""; }
+
+/* modals */
+let openEl=null;
+function openModal(el){ closeModal(); openEl=el; el.classList.add("on"); $("scrim").classList.add("on"); }
+function closeModal(){ if(openEl){openEl.classList.remove("on");openEl=null;} $("scrim").classList.remove("on"); }
+$("scrim").addEventListener("click", closeModal);
+document.querySelectorAll("[data-close]").forEach(b=>b.addEventListener("click", closeModal));
+document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeModal(); });
+
+/* reporting beacon — invisible JS errors on someone else's machine otherwise */
+function report(level,msg){ try{ fetch("/api/clientlog",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({level,msg:String(msg).slice(0,400)}),keepalive:true}).catch(()=>{});}catch{} }
+window.addEventListener("error", e=>report("error", e.message+" @"+e.lineno));
+
+/* ── TRT ──
+   Ported from the FSD Tracker so both dashboards pick a centre the same way:
+   type a site name, pick from the list, the number comes along with it. A bare
+   number still works and is resolved to its name afterwards. */
+function setTrt(id, info){
+  S.trtId = id || null;
+  S.trtInfo = info || null;
+  const btn=$("trtBtn");
+  if(!S.trtId){
+    $("trtCaption").textContent="Enter TRT";
+    $("trtLabel").textContent="";
+    btn.title="Choose the delivery centre this dashboard reads";
+    return;
+  }
+  if(info && info.name){
+    // The name IS the label — the number is detail, and lives in the tooltip.
+    $("trtCaption").textContent=info.name;
+    $("trtLabel").textContent="";
+    btn.title=`TRT ${S.trtId}`+(info.full?` — ${info.full}`:"");
+  }else{
+    $("trtCaption").textContent="TRT";
+    $("trtLabel").textContent=String(S.trtId);
+    btn.title=`TRT ${S.trtId} — no site name found in the location directory`;
+  }
+}
+
+/* A TRT restored from disk, or typed as a bare number, arrives without a name;
+   fetch it in the background so the button does not stay anonymous. Guarded on
+   the id still being current, since the user can change centre mid-flight. */
+async function resolveTrt(id){
+  try{
+    const d=await api("/api/trt?id="+encodeURIComponent(id));
+    if(String(S.trtId)===String(id)) setTrt(id, d.info);
+  }catch{}
+}
+
+let siteHits=[], siteCur=-1, siteTimer=null, siteSeq=0;
+function clearSites(){ siteHits=[]; siteCur=-1; $("siteList").hidden=true; $("siteList").innerHTML=""; }
+
+function paintSites(){
+  const list=$("siteList");
+  if(!siteHits.length){
+    list.innerHTML=`<div class="site-none">No site matches that.</div>`;
+    list.hidden=false; return;
+  }
+  list.innerHTML=siteHits.map((s,i)=>`
+    <button class="site${i===siteCur?" cur":""}" data-i="${i}">
+      <span class="site-n">${esc(s.name)}</span>
+      ${s.city?`<span class="site-c">${esc(s.city)}${s.province?", "+esc(s.province):""}</span>`:""}
+      <span class="site-id">${s.trtId}</span>
+    </button>`).join("");
+  list.hidden=false;
+  list.querySelectorAll(".site").forEach(el=>
+    el.addEventListener("click",()=>chooseSite(siteHits[Number(el.dataset.i)])));
+}
+
+async function querySites(q){
+  const mine=++siteSeq;
+  try{
+    const d=await api("/api/sites?q="+encodeURIComponent(q));
+    if(mine!==siteSeq) return;            // a newer keystroke already won
+    siteHits=d.sites||[];
+    siteCur=siteHits.length?0:-1;
+    paintSites();
+  }catch{ clearSites(); }
+}
+
+$("trtIn").addEventListener("input", ()=>{
+  const q=$("trtIn").value.trim();
+  clearTimeout(siteTimer);
+  if(q.length<2){ clearSites(); return; }
+  siteTimer=setTimeout(()=>querySites(q),140);
+});
+
+$("trtIn").addEventListener("keydown", e=>{
+  if(!siteHits.length) return;
+  if(e.key==="ArrowDown"){ e.preventDefault(); siteCur=Math.min(siteCur+1,siteHits.length-1); paintSites(); }
+  if(e.key==="ArrowUp"  ){ e.preventDefault(); siteCur=Math.max(siteCur-1,0); paintSites(); }
+  if(e.key==="Enter" && siteCur>=0){ e.preventDefault(); chooseSite(siteHits[siteCur]); }
+});
+
+async function chooseSite(site){
+  if(!site) return;
+  clearSites();
+  setTrt(site.trtId, site);
+  closeModal();
+  try{ await api("/api/trt",{trtId:site.trtId}); }catch(err){ note(err.message,true); return; }
+  note(`${site.name}${site.city?" · "+site.city+(site.province?", "+site.province:""):""}`+
+       ` — TRT ${site.trtId}. This is now the default and will be here next time.`);
+}
+
+$("trtBtn").addEventListener("click", ()=>{
+  $("trtIn").value=""; clearSites();
+  openModal($("trtModal"));
+  setTimeout(()=>$("trtIn").focus(),60);
+});
+
+$("trtSave").addEventListener("click", async ()=>{
+  const v=$("trtIn").value.trim();
+  // A name typed with a list showing: take the highlighted row, so the button
+  // does the same thing Enter would.
+  if(!/^\d+$/.test(v)){
+    if(siteHits.length) return chooseSite(siteHits[siteCur>=0?siteCur:0]);
+    note("Type a site name and pick from the list, or enter a numeric TRT.", true);
+    return;
+  }
+  const btn=$("trtSave");
+  btn.disabled=true; btn.textContent="Looking up";
+  try{
+    await api("/api/trt",{trtId:v});
+    clearSites(); closeModal();
+    let info=null;
+    try{ info=(await api("/api/trt?id="+encodeURIComponent(v))).info; }catch{}
+    setTrt(Number(v), info);
+    note(info && info.name ? `${info.name} — TRT ${v}. This is now the default.`
+                           : "Centre set to TRT "+v+".");
+  }catch(err){ note(err.message,true); }
+  finally{ btn.disabled=false; btn.textContent="Use this TRT"; }
+});
+
+/* ── upload + compile ── */
+$("pickBtn").addEventListener("click", e=>{ e.preventDefault(); $("file").click(); });
+$("file").addEventListener("change", ()=>{ if($("file").files[0]) upload($("file").files[0]); });
+const drop=$("drop");
+["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("drag");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("drag");}));
+drop.addEventListener("drop", e=>{ const f=e.dataTransfer.files[0]; if(f) upload(f); });
+
+const PHASE={
+  starting:{t:"Starting",s:""},
+  appointments:{t:"Reading appointments",s:"Pulling every RN and VIN for the delivery dates in your file."},
+  status:{t:"Reading vehicle status logs",s:"Every delivery in the window — who finished each car, and who moved it through the wash."}
+};
+let progTimer=null;
+function progPaint(p){
+  const m=PHASE[p.phase]||{t:"Working",s:""};
+  const known=p.total>0&&p.done!=null;
+  const pct=known?Math.min(100,Math.round(p.done/p.total*100)):0;
+  $("prog").innerHTML=`<div class="prog"><div class="prog-top"><span class="prog-t">${esc(m.t)}</span>
+    <span class="prog-c">${known?p.done+" / "+p.total:""}</span></div>
+    <div class="prog-bar"><div class="prog-fill${known?"":" indet"}" style="width:${pct}%"></div></div>
+    ${m.s?`<div class="hint" style="margin-top:8px">${esc(m.s)}</div>`:""}</div>`;
+  $("prog").hidden=false;
+}
+function progWatch(){ progPaint({phase:"starting"}); clearInterval(progTimer);
+  progTimer=setInterval(async()=>{ try{ const p=await api("/api/progress"); if(p.running) progPaint(p);}catch{} },1000); }
+function progStop(){ clearInterval(progTimer); $("prog").hidden=true; $("prog").innerHTML=""; }
+
+async function upload(file){
+  if(S.busy) return;
+  if(!S.trtId){ note("Choose the delivery centre first — the button beside the title.");
+                 $("trtIn").value=""; clearSites(); openModal($("trtModal"));
+                 setTimeout(()=>$("trtIn").focus(),60); return; }
+  if(!/\.xlsx$/i.test(file.name)){ note("That isn't an .xlsx file.",true); return; }
+  S.busy=true; note(""); progWatch();
+  try{
+    const buf=await file.arrayBuffer();
+    const res=await fetch("/api/compile?trt="+encodeURIComponent(S.trtId),{method:"POST",headers:{"Content-Type":"application/octet-stream"},body:buf});
+    const data=await res.json();
+    if(!res.ok) throw Object.assign(new Error(data.error||("HTTP "+res.status)),data);
+    render(data);
+  }catch(err){
+    note(err.needsCookie?err.message+"  Sign in to Intrepid on the Zo Projects Hub.":err.message, true);
+    if(err.needsTrt){ openModal($("trtModal")); }
+  }finally{ S.busy=false; progStop(); }
+}
+
+/* ── ranking ──
+   The comparators mirror lib.js byPerson() exactly. Sorting client-side keeps
+   the toggle instant — there is nothing to recompute server-side
+   because every person already carries both their raw and adjusted score. */
+const CMP = {
+  weighted     :(a,b)=>(b.adjusted??-1)-(a.adjusted??-1)||b.cars-a.cars,
+  contribution :(a,b)=>(b.contribution??-1)-(a.contribution??-1)||(b.adjusted??-1)-(a.adjusted??-1),
+  cars         :(a,b)=>b.cars-a.cars||(b.adjusted??-1)-(a.adjusted??-1),
+  washed       :(a,b)=>(b.washed??-1)-(a.washed??-1)||b.cars-a.cars,
+  vri          :(a,b)=>(b.vri??-1)-(a.vri??-1)||b.cars-a.cars,
+  caught       :(a,b)=>(b.caught??-1)-(a.caught??-1)||(b.vri??-1)-(a.vri??-1),
+  // Worst rate first — see SORTS.missed in lib.js for why this one inverts.
+  missed       :(a,b)=>(b.vri?b.missedPer100:-1)-(a.vri?a.missedPer100:-1)||(b.missed??-1)-(a.missed??-1)
+};
+/* Everyone is shown. Thin samples are marked rather than hidden — the weighted
+   score already stops them topping the board, so filtering them out would only
+   remove information. */
+const visible = () => S.people.slice().sort(CMP[S.sort]||CMP.weighted);
+
+document.querySelectorAll("[data-sort]").forEach(b=>b.addEventListener("click",()=>{
+  S.sort=b.dataset.sort;
+  document.querySelectorAll("[data-sort]").forEach(x=>x.classList.toggle("on",x===b));
+  paintBoard();
+}));
+
+/* ── render ── */
+function render(data){
+  S.people=data.people||[]; S.rows=data.rows||[]; S.rank=data.rank||null;
+  S.store=data.store||("TRT "+data.trtId);
+  const st=data.stats||{};
+  // A fresh compile establishes the full span; a range response only narrows
+  // within it, so allDates is set once and then left alone.
+  if(data.allDates) S.allDates = data.allDates;
+  else if(data.dates && data.dates.length && !S.allDates.length) S.allDates = data.dates;
+  S.from = data.from || null; S.to = data.to || null;
+  paintRange();
+  const meanAll = S.rows.length ? Math.round(S.rows.reduce((a,r)=>a+(r.score||0),0)/S.rows.filter(r=>r.score!=null).length*10)/10 : 0;
+  $("sAll").textContent=(st.cars||0).toLocaleString();
+  $("sCars").textContent=st.attributed||0;
+  $("sPeople").textContent=S.people.length;
+  $("sMean").innerHTML=(isFinite(meanAll)?meanAll:0)+'<small>%</small>';
+  $("sWash").textContent=(st.washed||0).toLocaleString();
+  $("sVri").textContent=(st.vri||0).toLocaleString();
+  $("sCaught").textContent=(st.vriFailed||0).toLocaleString();
+  /* Count then rate, the same way round as the column and as the faults-caught
+     tile beside it. Denominator is inspected cars, matching the per-person
+     rate exactly, so the tile and the column can be reconciled by hand. */
+  const insp=S.rows.filter(r=>r.vriBy).length;
+  const pvPct=insp?((st.postVri||0)/insp*100).toFixed(1):"0";
+  $("sPostVri").innerHTML=(st.postVri||0).toLocaleString()+`<small> · ${pvPct}%</small>`;
+  $("stats").hidden=false;
+
+  S.sub = `TRT ${data.trtId} · ${st.dates} date(s) · ${st.attributed} of ${st.scored} scored cars credited`;
+  $("listSub").textContent=S.sub;
+  $("listHead").hidden=false;
+  $("controls").hidden=false;
+  paintBoard();
+
+  const msgs=[...(data.notices||[])];
+  note(msgs.join("  "));
+}
+
+/* ── date range ──
+   The board is re-derived server-side from rows already compiled, so narrowing
+   costs one round trip and no Intrepid traffic. */
+function paintRange(){
+  const all=S.allDates, first=all[0]||"", last=all[all.length-1]||"";
+  $("rangeBar").hidden = all.length<2;      // one date cannot be narrowed
+  for(const id of ["from","to"]){ $(id).min=first; $(id).max=last; }
+  $("from").value = S.from || "";
+  $("to").value   = S.to   || "";
+  const narrowed = !!(S.from || S.to);
+  $("rangeBar").classList.toggle("on", narrowed);
+  $("resetRange").hidden = !narrowed;
+  $("rangeHint").innerHTML = narrowed
+    ? `Showing <b>${S.from || first}</b> to <b>${S.to || last}</b> — ${S.rows.length.toLocaleString()} cars`
+    : `Whole file: <b>${first}</b> to <b>${last}</b>`;
+}
+
+async function applyRange(from, to){
+  if(S.busy) return;
+  S.busy=true;
+  try{
+    const q=new URLSearchParams();
+    if(from) q.set("from",from);
+    if(to)   q.set("to",to);
+    const data=await api("/api/range?"+q.toString());
+    if(!data.people.length)
+      note("No deliveries in that date range — the board is showing it empty.", true);
+    else note("");
+    render(data);
+  }catch(err){
+    // The compile lives in server memory; a restart loses it and the only
+    // honest answer is to say so rather than silently showing a stale board.
+    note(err.needsUpload ? "The server restarted since that file was uploaded — upload it again to filter by date."
+                         : err.message, true);
+  }finally{ S.busy=false; }
+}
+
+$("applyRange").addEventListener("click",()=>applyRange($("from").value,$("to").value));
+$("resetRange").addEventListener("click",()=>applyRange("",""));
+// Enter in either picker applies, so the pair behaves like one control.
+for(const id of ["from","to"])
+  $(id).addEventListener("keydown",e=>{ if(e.key==="Enter") applyRange($("from").value,$("to").value); });
+
+/* ── the scorecard table ──
+   Columns are declared once, as data, so adding a metric later is one entry
+   here rather than edits in four places. Each carries how to render itself and
+   which direction is "good", which is all the conditional tinting needs.
+
+/* Only what we measure today. Each entry carries its own accessor, formatter,
+   width and which direction counts as good, so adding a metric later is one
+   line — but nothing is reserved for data we do not have yet, because an empty
+   column reads as broken.
+
+     grp      which band it sits under
+     w        percentage width, so the table fills the viewport with no scroll
+     sortKey  ties the column to its sort — this is what drives the tinting,
+              since only the column being ranked by is coloured
+     good     +1 higher is better, -1 lower is better, 0 never tinted
+     avg      how to derive the benchmark cell (else the column mean)          */
+const COLS = [
+  // Benchmark is the per-person average, NOT the centre total. The total would
+  // read as a target every individual falls short of and tint the whole column
+  // red; the average is the thing a person is actually above or below. The
+  // total is already on the stat strip above.
+  { key:"cars",     grp:"q", label:"Combined<br>Deliveries", w:"12%", sortKey:"cars", skipZero:true,
+    get:p=>p.cars, fmt:v=>blank(v) ? "" : Math.round(v), good:1 },
+  // fmt is called for body rows WITH the person and for the benchmark row
+  // WITHOUT one, so anything reading from `p` has to tolerate its absence.
+  /* The RAW mean — the score the customers actually gave. Eighteen cars all at
+     100% is a 100% record and must read as one; showing the shrunk ranking
+     score here made a true 100 look like 99.5, which is the internal weighting
+     leaking into a column that claims to report a measurement.
+
+     The weighting still decides the ORDER — it just no longer rewrites the
+     number. Where the two differ, the tooltip says so. */
+  { key:"mean", grp:"r", label:"Cleanliness<br>CSAT", w:"13%", sortKey:"weighted",
+    get:p=>p.mean,
+    // No sample size here — the Deliveries column already carries the count.
+    fmt:(v,p)=> blank(v) ? ""
+      : (p ? `<span title="Measured ${pct(v,1)} · weighted to ${p.adjusted} for ranking">${pct(v,1)}</span>`
+           : pct(v,1)),
+    good:1, hero:true },
+  /* Spotless cars delivered, less one per miss — see lib.js byPerson(). Quality
+     only; total work across all three stages is a separate question, answered
+     by the Productivity panel rather than mixed in here.
+     Clickable, because a composite score people are ranked by should be able
+     to show its own working rather than being taken on trust. */
+  { key:"contribution", grp:"r", label:"Contribution<br>Score", w:"13%", sortKey:"contribution",
+    get:p=>p.contribution,
+    fmt:(v,p)=> v==null ? ""
+      : (p ? `<button class="calc" data-calc="${esc(p.email)}" title="Show the working">${Math.round(v)}</button>`
+           : Math.round(v)),
+    good:1, hero:true },
+  /* Cars moved into In Wash, across every delivery in the window rather than
+     only the surveyed ones. Kept out of the contribution score on purpose: it measures
+     throughput, not whether the car came back clean. */
+  { key:"washed", grp:"i", label:"Efficient Mover<br>cars washed", w:"9%", sortKey:"washed", skipZero:true,
+    get:p=>p.washed, fmt:v=>blank(v) ? "" : Math.round(v), good:1, divider:true },
+  /* VRI — the receiving inspection, cleared when the car lands at the centre,
+     days before any of the above. Counted on the same basis as the wash and
+     likewise excluded from the contribution score: it is upstream work, and nothing
+     about it predicts how the car looked on handover. */
+  { key:"vri", grp:"i", label:"Completed<br>Inspections (VRI)", w:"9%", sortKey:"vri", skipZero:true,
+    get:p=>p.vri, fmt:v=>blank(v) ? "" : Math.round(v), good:1 },
+  /* Faults found at receiving — a car that did not pass its VRI. Credited, not
+     penalised: the inspection catching damage on arrival is the inspection
+     doing its job, and the alternative is the fault reaching the customer.
+     Shown with its rate, because three catches out of six and three out of
+     ninety are not the same claim and the count alone cannot tell them apart. */
+  { key:"caught", grp:"i", label:"Faults caught<br>at VRI", w:"8%", sortKey:"caught", skipZero:true,
+    get:p=>p.caught,
+    /* Clickable: a count of faults is only actionable if you can get to the
+       cars it came from, so it opens the VIN list rather than asserting a
+       number. Same reasoning as the contribution score's working. */
+    fmt:(v,p)=> blank(v) ? ""
+      : (p ? `<button class="calc" data-caught="${esc(p.email)}" title="${v} of ${p.vri} inspections — ${p.caughtPer100}% · show the cars">${Math.round(v)}<small class="rate"> · ${p.caughtPer100}%</small></button>`
+           : Math.round(v)),
+    good:1 },
+  /* Cars this person PASSED that went to service before delivery anyway — a
+     fault the inspection did not catch. The only column where a low number is
+     the good one, hence good:-1.
+
+     Count first with the rate beside it, matching the faults-caught cell — the
+     two are a pair and reading them side by side should not mean switching
+     units halfway across the row.
+
+     The value behind it is still the RATE, not the count: that is what the
+     tint and the sort use, because ranking a bad outcome by raw count would
+     put whoever inspects the most at the top regardless of how well they do it.
+
+     Zero is rendered rather than blanked: on this metric a clean zero is the
+     result, not an absence, and hiding it would make the busiest inspectors
+     look like the only ones with a number. */
+  { key:"missed", grp:"i", label:"Tickets<br>post-VRI", w:"8%", sortKey:"missed",
+    get:p=>p.vri ? p.missedPer100 : null,
+    fmt:(v,p)=> v==null ? ""
+      : (p ? `<button class="calc" data-missed="${esc(p.email)}" title="${p.missed} of ${p.vri} cars they passed went to service before delivery · show the cars">${p.missed}<small class="rate"> · ${v}%</small></button>`
+           : v + "%"),
+    good:-1 }
+];
+
+/* Nothing to show: no value, or a zero count. Both render as an empty cell —
+   the reference scorecard does the same, and a lone "0" or "—" sitting beside
+   tinted figures reads as a broken cell rather than an absence. The tint still
+   applies, so the gap is visibly below average rather than blank and neutral. */
+const blank = v => v == null || v === 0;
+const GROUPS = { q:{label:"Qualifiers",n:0}, r:{label:"Ranked Metric",n:0,ranked:true},
+                 i:{label:"Indicators",n:0} };
+
+const pct = (v,d)=> v==null?"—":(d?Number(v).toFixed(d):Math.round(v))+"%";
+/* The reference writes "100% | 7" — the score with its sample size beside it,
+   so nobody reads a rate without knowing how many cars it came from. */
+const span = n => n==null?"":` <span class="n">| ${n}</span>`;
+
+function paintBoard(){
+  const list=visible();
+  const hidden=S.people.length-list.length;
+  $("hiddenCount").textContent = hidden ? `${hidden} hidden` : "";
+  $("empty").hidden = list.length>0;
+  $("boardWrap").hidden = list.length===0;
+  if(!list.length){ $("board").innerHTML=""; $("rankNote").hidden=true; return; }
+
+  // Benchmarks: the centre's own average per column, which every cell is
+  // judged against — the reference's "Market Average" row.
+  const bench={};
+  for(const c of COLS){
+    if(c.noAvg) continue;
+    bench[c.key] = c.avg ? c.avg(list)
+      : (()=>{ const v=list.map(p=>c.get(p)).filter(x=>x!=null && !(c.skipZero && x===0));
+               return v.length ? v.reduce((a,x)=>a+x,0)/v.length : null; })();
+  }
+
+  for(const g of Object.keys(GROUPS)) GROUPS[g].n = COLS.filter(c=>c.grp===g).length;
+
+  const grpRow = `<tr class="grp">
+    <th class="blank" colspan="2"></th>
+    ${Object.entries(GROUPS).map(([k,g])=>
+      `<th colspan="${g.n}" class="${g.ranked?"ranked":""}${k==="i"?" divider":""}">${g.label}</th>`).join("")}
+  </tr>`;
+
+  const colRow = `<tr class="col">
+    <th class="rk">#</th><th class="lead">Staff Name</th>
+    ${COLS.map(c=>`<th style="width:${c.w}" class="${c.hero?"hero":""}${c.divider?" divider":""}">${c.label}</th>`).join("")}
+  </tr>`;
+
+  const avgRow = `<tr class="avg">
+    <td class="rk"></td><td class="lead">Centre Average</td>
+    ${COLS.map(c=>{
+      const v=bench[c.key];
+      // Pass a stand-in person so a formatter that reads per-row detail (a
+      // sample size, say) renders nothing here rather than throwing.
+      return `<td class="num${c.divider?" divider":""}">${v==null?"":c.fmt(Number(Number(v).toFixed(1)),null)}</td>`;
+    }).join("")}
+  </tr>`;
+
+  const body = list.map((p,i)=>`<tr data-e="${esc(p.email)}">
+    <td class="rk${i<3?" lead3":""}">${i+1}</td>
+    <td class="lead"><span class="who">${esc(p.handle)}</span>${p.scored>0&&!p.qualified?' <span class="thin">thin</span>':""}</td>
+    ${COLS.map(c=>{
+      const v=c.get(p,i);
+      // Every metric cell is tinted against the centre average. Leaving the
+      // unsorted column plain made it read as switched-off rather than
+      // neutral, so both stay coloured and the tints simply follow the rows
+      // as the sort reorders them.
+      /* Absent or zero counts as below average and tints red — otherwise the
+         cell renders plain and reads as a rendering fault sitting between two
+         coloured ones. No metric cell is ever left untinted. */
+      let tint="";
+      if(c.good){
+        if(v==null || v===0) tint="tint-bad";
+        else if(bench[c.key]!=null)
+          tint = (c.good>0 ? v>=bench[c.key] : v<=bench[c.key]) ? "tint-good" : "tint-bad";
+      }
+      return `<td class="num ${tint}${c.divider?" divider":""}">${c.fmt(v,p)}</td>`;
+    }).join("")}
+  </tr>`).join("");
+
+  $("board").innerHTML = `<thead>${grpRow}${colRow}</thead><tbody>${avgRow}${body}</tbody>`;
+  $("board").querySelectorAll("tbody tr[data-e]").forEach(tr=>
+    tr.querySelector(".who").addEventListener("click",()=>showPersonByEmail(tr.dataset.e)));
+  /* Bound on the data attribute, not on .calc — the faults-caught cell borrows
+     that class for its styling, and a class-based selector would hand it to
+     showCalc with an undefined email. */
+  $("board").querySelectorAll("[data-calc]").forEach(b=>
+    b.addEventListener("click",e=>{ e.stopPropagation(); showCalc(b.dataset.calc); }));
+  $("board").querySelectorAll("[data-caught]").forEach(b=>
+    b.addEventListener("click",e=>{ e.stopPropagation(); showCaught(b.dataset.caught); }));
+  $("board").querySelectorAll("[data-missed]").forEach(b=>
+    b.addEventListener("click",e=>{ e.stopPropagation(); showMissed(b.dataset.missed); }));
+
+  // Say plainly what the ranking is doing, with this run's real numbers.
+  const r=S.rank, weighted=S.sort==="weighted";
+  $("rankNote").hidden=false;
+  const NOTE = {
+    weighted: r ? `Ranked on <b>weighted cleanliness</b> — the percentages shown are the real
+       measured scores, but the ORDER pulls each toward the centre average (<b>${r.teamMean}%</b>)
+       in proportion to how few cars the person did, so a handful of perfect cars cannot outrank
+       a large clean run. Hover a score to see its weighted value. The figure beside it is how
+       many cars it came from.` : "",
+    contribution: `Ranked on <b>contribution score</b> — spotless cars delivered, less one for each car
+       that came back marked. Volume and quality in a single count, so doing a lot well beats
+       doing slightly more of it badly: 47 cars with 2 misses scores 43 and outranks 48 cars
+       with 4. Cleanliness only — washes and inspections are counted under <b>Productivity</b>.`,
+    washed: `Ranked on <b>cars washed</b> — how many vehicles this person moved into In Wash,
+       counted across every delivery in the window, not just the surveyed ones. Throughput only;
+       it is deliberately kept out of the contribution score, which is about how the cars came back.`,
+    cars: `Ranked on <b>deliveries</b> — raw volume only, which says nothing about how the cars
+       went out. The contribution score is the same question with quality included.`,
+    vri: `Ranked on <b>completed VRIs</b> — receiving inspections signed off as the cars landed at
+       the centre, counted across every delivery in the window. Upstream of prep and days before
+       handover, so like the wash count it stays out of the contribution score.`,
+    caught: `Ranked on <b>faults caught at VRI</b> — cars this person inspected that did not pass and
+       went straight into service. This is a <b>credit</b>: damage found on arrival is the inspection
+       working, and the alternative is the fault travelling all the way to the customer. Read it
+       against the VRI count beside it — the percentage is catches per inspection, and a high rate on
+       a handful of cars is not the same as a high rate on ninety. It is kept out of the productivity
+       total on purpose: the inspection is already counted there, and paying for it twice would flatter
+       whoever happens to receive the most damaged freight.`,
+    missed: `Ranked on <b>tickets after a passing VRI</b> — cars this person inspected and passed that
+       went to service anyway before they were delivered. <b>Worst at the top</b>, the only sort on this
+       board that runs that way, and on the rate rather than the count so the busiest inspector does not
+       automatically lead it. Anything opened after handover is the customer's visit and is excluded.
+       Read it as a prompt, not a verdict: the gap between inspection and ticket runs from the same day
+       to eight months, and a car that stood on the lot half a year can pick up a fault nobody could
+       have seen at receiving. Click a figure for the VINs and their gaps.`
+  };
+  $("rankNote").innerHTML = (NOTE[S.sort] || "") +
+    ` Cells are tinted against the centre average. Click a name for their cars.`;
+}
+
+function showPersonByEmail(email){
+  const i=S.people.findIndex(p=>p.email===email);
+  if(i>=0) showPerson(i);
+}
+
+/* 1st, 2nd, 3rd, 4th… — the teens are the exception that catches people out. */
+function ordinal(n){
+  const t=n%100;
+  if(t>=11&&t<=13) return n+"th";
+  return n+({1:"st",2:"nd",3:"rd"}[n%10]||"th");
+}
+
+/* ── productivity ──
+   Total work done, across all three stages a car passes through. Kept in its
+   own panel rather than on the board: it answers a different question, and the
+   movement stages carry four times the volume of the surveyed ones, so mixing
+   them into the ranking would bury cleanliness entirely. */
+function showProd(){
+  const list=S.people.slice().sort((a,b)=>
+    (b.productivity??-1)-(a.productivity??-1) || (b.contribution??-1)-(a.contribution??-1));
+  const mult=(S.rank&&S.rank.surveyMult)||1;
+  const top=list.length?Math.max(1,list[0].productivity||1):1;
+  const sum=k=>list.reduce((a,p)=>a+(p[k]||0),0);
+
+  $("prodSub").textContent=`${list.length} people · ${S.store||""}`;
+  // A zero here is a job this person simply does not do, so it recedes rather
+  // than sitting at full weight beside the counts that matter.
+  const n=(v,cls="")=>`<td class="${cls}${v?"":" z"}">${v?Math.round(v):"·"}</td>`;
+  $("prodBody").innerHTML=`
+    <table class="pr">
+      <thead><tr>
+        <th class="rk"></th><th class="l nm">Staff Name</th>
+        <th>VRI<br>completed</th><th class="info">Faults<br>caught</th><th>Cars<br>washed</th><th>Cars<br>finished</th>
+        <th>Survey<br>quality</th><th class="t tot">Total</th>
+      </tr></thead>
+      <tbody>
+        ${list.map((p,i)=>`<tr>
+          <td class="rk">${i+1}</td>
+          <td class="nm">${esc(p.handle)}</td>
+          ${n(p.vri)}${n(p.caught,"info")}${n(p.washed)}${n(p.finished)}
+          ${p.scored?`<td class="q${p.quality<0?" neg":""}">${p.quality>=0?"+":"−"}${Math.abs(p.quality)}</td>`
+                    :`<td class="z">·</td>`}
+          <td class="tot">${p.productivity}
+            <span class="bar" style="width:${Math.round((p.productivity||0)/top*100)}%"></span></td>
+        </tr>`).join("")}
+      </tbody>
+      <tfoot><tr>
+        <td class="rk"></td><td class="nm">Centre total</td>
+        ${n(sum("vri"))}${n(sum("caught"),"info")}${n(sum("washed"))}${n(sum("finished"))}
+        <td class="q">${sum("quality")>=0?"+":"−"}${Math.abs(sum("quality"))}</td>
+        <td class="tot">${sum("productivity")}</td>
+      </tr></tfoot>
+    </table>
+    <div class="pr-foot">Every car needs three things done to it — <b>received</b>, <b>washed</b>,
+      <b>finished</b> — and each is worth one point. That is not an arbitrary split: every car passes
+      each stage exactly once, so the three come to the same total across the centre, and weighting
+      them equally is the neutral position.
+      <br><br>Survey quality is added on top. Only about one delivered car in <b>${mult}</b> comes back
+      with a customer survey, so each one stands for roughly that many cars — a spotless score counts
+      <b>+${mult}</b> and a marked one <b>−${mult}</b>. A dot means that person does not do that job.
+      <br><br><i>Faults caught</i> is shown for context and <b>does not feed the total</b> — the
+      inspection it came from is already counted under VRI, and paying for it twice would reward
+      whoever happened to receive the most damaged freight. It is a credit all the same: a car stopped
+      at receiving is a fault that did not reach the customer.
+      <br><br>This is <b>separate from the Contribution Score</b> on the board behind, which is
+      cleanliness only. Nothing here changes it.</div>`;
+  openModal($("prod"));
+}
+$("prodBtn").addEventListener("click", showProd);
+
+/* ── the working behind a contribution score ──
+   People are ranked on this number, so it has to be able to justify itself in
+   a conversation: the arithmetic, the cars behind it, and where it landed. */
+function showCalc(email){
+  const p=S.people.find(x=>x.email===email); if(!p) return;
+  const ranked=visible();
+  const place=ranked.findIndex(x=>x.email===email)+1;
+  const misses=S.rows.filter(r=>r.finishedBy===email && r.score!=null && r.score<100)
+                     .sort((a,b)=>a.score-b.score);
+
+  $("calcName").textContent=p.handle+" · Contribution score";
+  $("calcBody").innerHTML=`
+    <div class="calc-eq">
+      <span class="n">${p.clean}</span><span class="op">−</span>
+      <span class="n">${p.dirty}</span><span class="op">=</span>
+      <span class="r">${p.contribution}</span>
+    </div>
+    <div class="calc-line"><span class="lbl">Cars finished and surveyed</span><span class="v">${p.scored}</span></div>
+    <div class="calc-line"><span class="lbl">Came back spotless (100%)</span><span class="v">+${p.clean}</span></div>
+    <div class="calc-line"><span class="lbl">Came back marked (below 100%)</span><span class="v">−${p.dirty}</span></div>
+    <div class="calc-line total"><span class="lbl">Contribution score</span><span class="v">${p.contribution}</span></div>
+    ${misses.length?`<div class="calc-miss"><div class="h">The ${misses.length} marked car${misses.length===1?"":"s"}</div>
+      ${misses.map(m=>`<div class="m"><span class="vin">${esc(m.vin)}</span>
+        <span class="rn">${esc(m.rn)}</span><span class="sc">${m.score}%</span></div>`).join("")}</div>`:""}
+    <div class="calc-sub">Every car this person put into <b>Finished Goods</b> that came back with a
+      customer survey counts once. One point for each that came back spotless, one point off for each
+      the customer marked down — however far down, since a miss is a miss. That is
+      <b>${p.clean} − ${p.dirty} = ${p.contribution}</b>, which places them <b>${ordinal(place)}</b>
+      of ${ranked.length} on this board.
+      <br><br>Measured cleanliness is <b>${pct(p.mean,1)}</b> across those ${p.scored} cars. The score
+      is deliberately a count rather than that percentage, so doing a lot of work well outranks doing
+      a little of it perfectly.
+      <br><br>This is <b>cleanliness only</b>. Washes and inspections are real work but a different
+      question, and they are counted separately under <b>Productivity</b>${p.productivity!=null?`, where
+      this person scores <b>${p.productivity}</b>`:""}.</div>`;
+  openModal($("calc"));
+}
+
+/* Every car this person marked Finished Goods — but only a fifth of them ever
+   come back with a survey, so the list is split rather than merged.
+
+   Merging them buried the point: null sorted as 0, so opening cowilkinson led
+   with 122 blank-scored VINs before the first real number, and the total
+   matched no column on the board. Scored cars now come first, worst first,
+   which is the reason to open this panel at all; the rest are behind their own
+   labelled heading that says plainly why they have no score. */
+function showPerson(i){
+  const p=S.people[i]; if(!p) return;
+  const all    = S.rows.filter(r=>r.finishedBy===p.email);
+  const rated  = all.filter(c=>c.score!=null).sort((a,b)=>a.score-b.score);
+  const norate = all.filter(c=>c.score==null);
+
+  $("personName").textContent=p.handle;
+  $("personSub").textContent = rated.length
+    ? `${all.length} cars finished · ${rated.length} surveyed · mean ${p.mean}% · worst ${p.worst}%`
+    : `${all.length} cars finished · none surveyed`;
+
+  const car = c => `<div class="car">
+    <div><span class="vin">${esc(c.vin)}</span> &nbsp; <span class="rn">${esc(c.rn)}</span> ${c.model?'· '+esc(c.model):''}</div>
+    <div class="sc ${c.score==null?"none":(c.score<100?"low":"")}">${c.score==null?"no survey":c.score+"%"}</div></div>`;
+
+  $("personCars").innerHTML =
+      (rated.length  ? `<div class="carhead">Surveyed — ${rated.length} ${rated.length===1?"car":"cars"}</div>`
+                       + rated.map(car).join("") : "")
+    + (norate.length ? `<div class="carhead">Not surveyed — ${norate.length} ${norate.length===1?"car":"cars"}
+         <span>the customer never returned a cleanliness score, so these count toward nobody's</span></div>`
+                       + norate.map(car).join("") : "");
+  openModal($("person"));
+}
+
+/* ── faults caught at VRI ──
+   The cars behind the count. Called with an inspector's username, or with no
+   argument for every catch in the window.
+
+   The rows are matched on `vriBy`, not on who wrote the In Service entry: a
+   catch is credited to whoever signed the inspection, which is how lib.js
+   counts it. Matching on anything else here would put a different number on
+   screen from the one in the column that opened it. */
+let caughtVins = [];
+
+/* One modal, two questions — the cars an inspection stopped, and the cars it
+   let through. Kept as a single renderer because the two lists differ only in
+   which rows they select and what the date beside each car means; two copies
+   would drift the moment one gained a column. */
+const VIN_LISTS = {
+  caught: {
+    title: "faults caught", allTitle: "Faults caught at VRI",
+    pick : (r, email) => r.vriFailed && (!email || r.vriBy === email),
+    sub  : (p, n) => `${n} of ${p.vri} inspections · ${p.caughtPer100}%`,
+    when : c => c.vriAt, sv: c => c.serviceVisitId, lag: () => null,
+    head : `Did not pass receiving inspection
+            <span>each went straight into service — the service visit id is beside the date</span>`,
+    none : `No failed inspections in this window
+            <span>at roughly one car in a hundred, a short window will often have none</span>`
+  },
+  missed: {
+    title: "tickets post-VRI", allTitle: "Tickets after a passing VRI",
+    pick : (r, email) => r.ticketPostVri && (!email || r.vriBy === email),
+    sub  : (p, n) => `${n} of ${p.vri} cars they passed · ${p.missedPer100}%`,
+    when : c => c.ticketAt, sv: c => c.ticketSv, lag: c => c.ticketLagDays,
+    head : `Passed the inspection, then went to service before delivery
+            <span>the gap after each date is how long after the VRI the ticket was opened —
+            a long gap is a car that stood on the lot, not necessarily a miss</span>`,
+    none : `No post-VRI tickets in this window`
+  }
+};
+
+function showVinList(kind, email){
+  const L = VIN_LISTS[kind]; if(!L) return;
+  const hits = S.rows.filter(r => L.pick(r, email))
+    .sort((a,b) => String(L.when(b)||"").localeCompare(String(L.when(a)||"")));
+  caughtVins = hits.map(h => h.vin);
+
+  const person = email ? S.people.find(p => p.email === email) : null;
+  $("caughtName").textContent = person ? `${person.handle} — ${L.title}` : L.allTitle;
+  $("caughtSub").textContent = person ? L.sub(person, hits.length)
+                                      : `${hits.length} across ${S.rows.length} cars in the window`;
+
+  const day = s => { const d = new Date(String(s||"").replace(/Z$/,"")); return isNaN(d) ? "" : String(s).slice(0,10); };
+  const lagLabel = v => v == null ? "" : (v < 1 ? " · same day" : ` · +${Math.round(v)}d`);
+  const row = c => `<div class="car">
+    <div><span class="vin">${esc(c.vin)}</span> &nbsp; <span class="rn">${esc(c.rn)}</span> ${c.model?"· "+esc(c.model):""}
+      ${email?"":`<span class="rn">· ${esc(c.vriBy||"—")}</span>`}</div>
+    <div class="sc none">${day(L.when(c))}${lagLabel(L.lag(c))}${L.sv(c)?` · SV ${L.sv(c)}`:""}</div></div>`;
+
+  $("caughtBody").innerHTML = hits.length
+    ? `<div class="carhead">${L.head}</div>` + hits.map(row).join("")
+    : `<div class="carhead">${L.none}</div>`;
+  openModal($("caught"));
+}
+const showCaught = email => showVinList("caught", email);
+const showMissed = email => showVinList("missed", email);
+$("caughtCopy").addEventListener("click", async () => {
+  if(!caughtVins.length) return note("No VINs to copy.", true);
+  try { await navigator.clipboard.writeText(caughtVins.join("\n"));
+        note(`${caughtVins.length} VIN(s) copied.`); }
+  catch { note("Could not reach the clipboard.", true); }
+});
+// The stat tile is the way to the whole list, the column cell to one person's.
+// Bound to the tile's own id rather than sCaught.parentElement — a binding that
+// depends on the markup nesting breaks the moment the tile is restyled.
+$("sCaughtTile").addEventListener("click", () => { if(S.rows.length) showCaught(null); });
+$("sPostVriTile").addEventListener("click", () => { if(S.rows.length) showMissed(null); });
+
+/* ── export ── */
+$("exportBtn").addEventListener("click", async ()=>{
+  // Export exactly what is on screen — same sort, same min-cars filter.
+  const list=visible();
+  if(!list.length){ note("Nothing to export.",true); return; }
+  try{
+    const res=await fetch("/api/export",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({label:"trt"+S.trtId+"-"+S.sort,people:list})});
+    if(!res.ok) throw new Error("export failed");
+    const blob=await res.blob(); const cd=res.headers.get("Content-Disposition")||"";
+    const name=(cd.match(/filename="([^"]+)"/)||[])[1]||"dvp.xlsx";
+    const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  }catch(err){ note("Export failed: "+err.message,true); }
+});
+
+/* ── admin ── */
+$("adminBtn").addEventListener("click", ()=>{ openModal($("admin")); if(!S.password) setTimeout(()=>otp[0].focus(),60); });
+const otp=Array.from(document.querySelectorAll("#otp .otp-box"));
+const otpVal=()=>otp.map(b=>b.value).join("");
+otp.forEach((b,i)=>{
+  b.addEventListener("input",()=>{ b.value=b.value.replace(/\D/g,"").slice(0,1); $("gateErr").textContent=""; $("otp").classList.remove("bad");
+    if(b.value&&i<5) otp[i+1].focus(); if(otpVal().length===6) unlock(); });
+  b.addEventListener("keydown",e=>{ if(e.key==="Backspace"&&!b.value&&i>0){otp[i-1].value="";otp[i-1].focus();} });
+  b.addEventListener("focus",()=>b.select());
+});
+$("pwBtn").addEventListener("click", unlock);
+let unlocking=false;
+async function unlock(){
+  if(unlocking) return; const code=otpVal();
+  if(code.length<6){ $("gateErr").textContent="Enter all six digits."; return; }
+  unlocking=true;
+  try{
+    const d=await api("/api/admin/unlock",{password:code});
+    S.password=code; $("gate").hidden=true; $("settings").hidden=false; fillConn(d.connections);
+  }catch(err){ $("otp").classList.add("bad"); $("gateErr").textContent=err.message==="Wrong password"?"Incorrect code.":err.message;
+    setTimeout(()=>{$("otp").classList.remove("bad");otp.forEach(b=>b.value="");otp[0].focus();},420); }
+  finally{ unlocking=false; }
+}
+function fillConn(c){
+  const ci=$("cIntrepid");
+  ci.className="conn "+(c.intrepid.set?(c.intrepid.looksOk?"ok":"bad"):"bad");
+  ci.querySelector("span").textContent=c.intrepid.set?(c.intrepid.looksOk?"connected "+c.intrepid.hint:"saved, malformed"):"not connected";
+}
+function cNote(msg,kind){ const el=$("connectNote"); el.className="connect-note"+(kind?" "+kind:""); el.innerHTML=msg; el.hidden=false; }
+$("testBtn").addEventListener("click", async ()=>{
+  const b=$("testBtn"); b.disabled=true; b.textContent="Testing…";
+  try{ const d=await api("/api/admin/test",{password:S.password,trtId:S.trtId||undefined});
+    const ci=$("cIntrepid"); ci.className="conn "+(d.intrepid.ok?"ok":"bad"); ci.querySelector("span").textContent=d.intrepid.detail;
+  }catch(err){ cNote(err.message,"bad"); } finally{ b.disabled=false; b.textContent="Test connection"; }
+});
+
+/* ── boot ── */
+(async()=>{
+  try{
+    const st=await api("/api/state");
+    // Restored from disk as a bare number; the name arrives a moment later.
+    if(st.trtId){ setTrt(st.trtId); resolveTrt(st.trtId); }
+    if(!st.connections.intrepid.set) note("Not connected to Intrepid — sign in on the Zo Projects Hub before uploading.");
+    else if(!st.trtId) note("Choose your delivery centre — the button beside the title — then upload an export.");
+  }catch(err){ note("Could not reach the server: "+err.message,true); }
+})();
+</script>
+</body>
+</html>

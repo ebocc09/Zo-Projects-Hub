@@ -1,0 +1,8 @@
+{
+  "name": "the-compiler",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A board of tools over Garage and Intrepid. Starts with Service Visits.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" }
+}

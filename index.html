@@ -1,0 +1,2439 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zo Projects Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════ ZO-1 ═══════════════════════════════ */
+:root{
+  --ink:#171A20; --ink-soft:#393C41; --ink-mute:#5C5E62;
+  --line:#D0D1D2; --line-soft:#E8E8E9;
+  --paper:#FFFFFF; --paper-alt:#F4F4F4;
+  --red:#E82127; --blue:#3E6AE1;
+  --grey-car:#9AA0A6; --amber:#F5B31B; --green:#12BB6A;
+  --r-sm:4px; --r-md:8px; --r-lg:18px;
+  --shadow:0 2px 10px rgba(0,0,0,.08);
+  --shadow-lg:0 8px 40px rgba(0,0,0,.16);
+  --nav-h:56px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  color:var(--ink);background:var(--paper);font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,textarea{font-family:inherit;font-size:14px;color:inherit}
+
+.nav{position:sticky;top:0;z-index:40;height:var(--nav-h);display:flex;align-items:center;
+  gap:18px;padding:0 22px;background:var(--paper);border-bottom:1px solid var(--line-soft)}
+.mark{font-size:16px;font-weight:600;letter-spacing:.42em;text-transform:uppercase}
+.nav .sep{width:1px;height:20px;background:var(--line-soft)}
+.nav .app{font-size:14px;font-weight:500;color:var(--ink-soft)}
+.nav .spacer{flex:1}
+.icon-btn{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 10px;
+  border-radius:var(--r-sm);color:var(--ink-mute);font-size:11px;font-weight:600;
+  letter-spacing:.1em;text-transform:uppercase;transition:color .15s,background .15s}
+.icon-btn:hover{color:var(--ink);background:var(--paper-alt)}
+
+/* ── hero ──
+   The banner is Yhwach's eyes opening out of the dark: a field of pale
+   teardrops scattered across black, every one of them looking at you. It is
+   the one piece of the estate allowed to be theatrical, so these rules run
+   longer than anything else in this sheet.
+
+   `meet` rather than `slice` on the artwork. Slice crops whatever it likes off
+   the edges at whatever width the window happens to be, and the eyes that get
+   cropped are the ones deliberately placed to bleed off the top. Meet keeps
+   the composition intact and lets the ink show at the sides, which on a black
+   banner is not a gap — it is the dark the eyes are opening out of. */
+.hero{position:relative;background:#07080C;color:#fff;overflow:hidden}
+.hero-bg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.hero-in{position:relative;max-width:840px;margin:0 auto;padding:88px 22px 80px;text-align:center}
+.hero h1{margin:0 0 12px;font-size:38px;font-weight:600;letter-spacing:-.02em;
+  text-shadow:0 2px 24px #07080C,0 0 54px #07080C,0 0 90px rgba(7,8,12,.9)}
+.hero p{margin:0 auto;max-width:540px;color:rgba(255,255,255,.74);font-size:15px;
+  text-shadow:0 1px 16px #07080C,0 0 40px #07080C}
+.hero b{color:#fff;font-weight:600}
+
+/* Open and shut are two states rather than one round-trip animation, because
+   the pod is rebuilt at a new cell, shape and size in between. Splitting them
+   means the swap happens on a plain timeout between two animations instead of
+   having to land on a keyframe percentage.
+
+   On the first load each pod opens on its own delay, so the field wakes in a
+   ragged wave instead of snapping open in formation; `both` holds the shut
+   frame through that delay, otherwise every pod flashes open before its turn.
+   Script zeroes --d after the first open — a relocation should come back
+   immediately, not sit dark for another second.
+
+   Both states fade as they squash rather than only squashing. Flattened to a
+   sliver a pod is a bright cream line, and since pods are rotated it comes out
+   as a stray diagonal streak that reads as a rendering fault. Taking opacity
+   down with the scale sinks it into the black instead — which is also what
+   hides the swap. */
+.lid{transform-box:fill-box;transform-origin:center;animation-delay:var(--d,0s);
+  animation-fill-mode:both}
+.lid.open{animation-name:podOpen;animation-duration:.62s;
+  animation-timing-function:cubic-bezier(.16,.9,.28,1)}
+.lid.shut{animation-name:podShut;animation-duration:.34s;
+  animation-timing-function:cubic-bezier(.5,0,.75,.2)}
+@keyframes podOpen{0%{transform:scaleY(.02);opacity:0}40%{opacity:1}68%{transform:scaleY(1.06)}100%{transform:scaleY(1);opacity:1}}
+@keyframes podShut{0%{transform:scaleY(1);opacity:1}100%{transform:scaleY(.02);opacity:0}}
+
+/* The pulse. The pale of an eye floods with a colour and the bloom around it
+   catches the same one. Both read --pulse, which JS rerolls per fire, so a
+   colour never repeats across two eyes at once by accident. */
+.wash {fill:var(--pulse,#3E6AE1);opacity:0}
+.bloom{fill:var(--pulse,#3E6AE1);opacity:0}
+.fire .wash {animation:washFire 1.25s cubic-bezier(.12,.85,.3,1) both}
+.fire .bloom{animation:bloomFire 1.25s cubic-bezier(.12,.85,.3,1) both}
+/* .6 rather than full: the bone tone still shows through, so an eye reads as
+   lit up in a colour rather than repainted in it. At .85 the warm hues were
+   fine and the magenta looked like a highlighter. */
+@keyframes washFire {0%{opacity:0}13%{opacity:.5}100%{opacity:0}}
+@keyframes bloomFire{0%{opacity:0}13%{opacity:.42}100%{opacity:0}}
+
+/* Dark, not pale. In the reference the strands run to pure black right up
+   against a pod and only pick up again further out — a pale glow around each
+   one is a video-game bloom and reads instantly as the wrong medium. */
+.halo{fill:#06070B;opacity:.8}
+
+/* Theatre is optional. Open, lit, and completely still. */
+@media (prefers-reduced-motion:reduce){
+  .lid,.lid.open,.lid.shut,.fire .wash,.fire .bloom{animation:none}
+}
+
+/* ── stat strip ── */
+.stats{display:flex;background:var(--paper);border-bottom:1px solid var(--line-soft)}
+.stat{flex:1;padding:18px 22px;border-right:1px solid var(--line-soft)}
+.stat:last-child{border-right:none}
+.stat-k{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute)}
+.stat-v{margin-top:5px;font-size:22px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+
+/* Two columns: connections on the left, boards on the right. They used to be a
+   row of pills under the hero title, which put four permanently-visible status
+   chips in the middle of the one place on the page that should read as a
+   title. As a column they are scannable, they can carry the full state text
+   instead of an abbreviation, and they stay in view while the grid scrolls. */
+main{max-width:1180px;margin:0 auto;padding:22px;
+  display:grid;grid-template-columns:236px minmax(0,1fr);gap:28px;align-items:start}
+.side{position:sticky;top:calc(var(--nav-h) + 22px)}
+.side-h{display:flex;align-items:baseline;gap:8px;margin:0 0 12px}
+.side-h h2{margin:0;font-size:13px;font-weight:600;letter-spacing:.11em;text-transform:uppercase}
+.side-h span{font-size:12px;color:var(--ink-mute);margin-left:auto;font-variant-numeric:tabular-nums}
+.creds{display:flex;flex-direction:column;gap:8px}
+/* Same bordered dot-name-state card the boards use for a credential — the rail
+   in Admin and this column are now describing the same thing the same way. */
+.cred{display:flex;align-items:center;gap:9px;padding:10px 12px;
+  border:1px solid var(--line-soft);border-radius:var(--r-md);
+  font-size:12.5px;background:var(--paper);transition:border-color .2s;
+  animation:rowIn .34s cubic-bezier(.2,.8,.3,1) both}
+.cred i{width:8px;height:8px;border-radius:50%;background:var(--grey-car);flex:none;transition:background .2s}
+.cred b{font-weight:600;flex:none}
+.cred .st{margin-left:auto;font-size:10px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-mute)}
+.cred.on  i{background:var(--green)}
+.cred.off i{background:var(--red)}
+.cred.off{border-color:rgba(232,33,39,.35)}
+.cred.off .st{color:#A3161B}
+.side-foot{margin-top:14px;font-size:11px;line-height:1.55;color:var(--ink-mute)}
+
+/* Below two comfortable board columns the rail costs more than it gives, so it
+   goes back to being a block above the grid. */
+@media (max-width:900px){
+  main{grid-template-columns:1fr;gap:22px}
+  .side{position:static}
+}
+
+.sec-h{display:flex;align-items:baseline;gap:14px;margin:0 0 14px}
+.sec-h h2{margin:0;font-size:13px;font-weight:600;letter-spacing:.11em;text-transform:uppercase}
+.sec-h span{font-size:12.5px;color:var(--ink-mute)}
+
+/* ── board tiles ── */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
+.board{
+  border:1px solid var(--line-soft);border-radius:var(--r-lg);padding:20px;
+  background:var(--paper);transition:border-color .2s,box-shadow .2s;
+  display:flex;flex-direction:column;gap:12px;
+  animation:rowIn .34s cubic-bezier(.2,.8,.3,1) both;
+}
+.board:hover{box-shadow:var(--shadow)}
+.board.running{border-color:rgba(18,187,106,.5)}
+.board.missing{border-color:rgba(232,33,39,.35)}
+.board-top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.serial{font-size:11px;font-weight:700;letter-spacing:.12em;color:var(--ink-mute);
+  font-variant-numeric:tabular-nums}
+.board h3{margin:0;font-size:16px;font-weight:600;letter-spacing:-.005em}
+.board p{margin:0;font-size:13px;color:var(--ink-mute);flex:1}
+.board-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;
+  font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-mute)}
+.pill{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 9px;border-radius:10px;
+  font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.pill i{width:6px;height:6px;border-radius:50%;background:currentColor;display:block}
+.p-run{background:#DFF6EA;color:#0A7A45}
+.p-off{background:#EEEFF0;color:#5C5E62}
+.p-err{background:#FDE7E8;color:#A3161B}
+.p-tag{background:#F1ECFC;color:#5B3DB1}
+.board-act{display:flex;gap:8px;flex-wrap:wrap}
+
+.btn{height:42px;padding:0 26px;border-radius:var(--r-sm);font-size:12px;font-weight:600;
+  letter-spacing:.13em;text-transform:uppercase;display:inline-flex;align-items:center;
+  justify-content:center;gap:9px;transition:background .15s,border-color .2s,color .15s}
+.btn[disabled]{opacity:.4;pointer-events:none}
+.btn-dark{background:var(--ink);color:#fff}
+.btn-dark:hover{background:#000}
+.btn-ghost{background:var(--paper);color:var(--ink);border:1px solid var(--line)}
+.btn-ghost:hover{border-color:var(--ink);background:var(--paper-alt)}
+.mini{height:34px;padding:0 14px;border-radius:var(--r-sm);border:1px solid var(--line);
+  font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+  transition:border-color .2s,background .15s}
+.mini:hover{border-color:var(--ink);background:var(--paper-alt)}
+.mini.dark{background:var(--ink);color:#fff;border-color:var(--ink)}
+.mini.dark:hover{background:#000}
+.mini.danger{color:var(--red);border-color:rgba(232,33,39,.4)}
+.mini.danger:hover{background:#FDF3F3;border-color:var(--red)}
+/* An external board's Open is a real link, not a button — middle-click and
+   copy-link-address should both work on something that goes somewhere else. */
+a.mini{display:inline-flex;align-items:center;text-decoration:none}
+a.mini.dark{color:#fff}
+.mini.copied{border-color:var(--green);color:#0A7A45;background:#EAF9F1}
+.board-meta .where{margin-left:auto;text-transform:none;letter-spacing:0;
+  font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:55%}
+
+.note{border:1px solid var(--line-soft);border-left:3px solid var(--amber);border-radius:var(--r-md);
+  padding:12px 16px;margin-bottom:18px;font-size:13px;color:var(--ink-soft)}
+.note.err{border-left-color:var(--red)}
+
+.foot{display:flex;gap:22px;flex-wrap:wrap;max-width:1180px;margin:0 auto;padding:20px 22px 40px;
+  font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-mute);border-top:1px solid var(--line-soft)}
+
+/* ── overlays ── */
+.scrim{position:fixed;inset:0;background:rgba(23,26,32,.42);z-index:50;opacity:0;
+  pointer-events:none;transition:opacity .22s}
+.scrim.on{opacity:1;pointer-events:auto}
+.modal{position:fixed;z-index:60;left:50%;top:50%;transform:translate(-50%,-48%);
+  width:640px;max-width:94vw;max-height:88vh;display:none;flex-direction:column;
+  background:var(--paper);border-radius:var(--r-md);box-shadow:var(--shadow-lg)}
+.modal.on{display:flex;animation:modalIn .28s cubic-bezier(.2,.8,.3,1) both}
+@keyframes modalIn{from{opacity:0;transform:translate(-50%,-44%)}to{opacity:1;transform:translate(-50%,-48%)}}
+@keyframes rowIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+.modal-head{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line-soft)}
+.modal-head h3{margin:0;font-size:13px;font-weight:600;letter-spacing:.11em;text-transform:uppercase}
+.btn-x{margin-left:auto;width:28px;height:28px;border-radius:var(--r-sm);color:var(--ink-mute);
+  display:grid;place-items:center;transition:background .15s,color .15s}
+.btn-x:hover{background:var(--paper-alt);color:var(--ink)}
+.btn-x svg{width:16px;height:16px}
+.modal-body{padding:20px;overflow:auto}
+
+/* ── updates ── */
+.upd{margin-top:14px;padding-top:14px;border-top:1px solid var(--line-soft)}
+.upd-say{margin-top:8px;font-size:11px;line-height:1.5;color:var(--ink-mute)}
+.upd-act{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}
+#updModal{width:520px}
+.upd-grp{
+  display:flex;align-items:baseline;gap:10px;padding:10px 0;
+  border-bottom:1px solid var(--line-soft);
+}
+.upd-grp:last-child{border-bottom:0}
+.upd-grp .serial{font-size:11px;font-weight:700;letter-spacing:.12em;color:var(--ink-mute)}
+.upd-grp .nm{font-size:13.5px;font-weight:600}
+.upd-grp .ct{margin-left:auto;font-size:12px;color:var(--ink-mute);font-variant-numeric:tabular-nums}
+.upd-grp.hub .nm{color:var(--ink-soft)}
+.upd-note{
+  margin-top:12px;padding:10px 12px;border-radius:var(--r-sm);
+  background:#FFF8E6;color:#7A5A00;font-size:12px;line-height:1.5;
+}
+.upd-files{margin-top:4px;font-size:11px;color:var(--ink-mute);line-height:1.6;
+  word-break:break-all}
+
+/* The publish review list. Capped and scrolling — a first publish is seventy
+   files and an unbounded list would push the button off the panel. */
+.pub-list{
+  margin-top:10px;max-height:210px;overflow:auto;
+  border:1px solid var(--line-soft);border-radius:var(--r-sm);
+  padding:10px 12px;font-size:11.5px;line-height:1.7;color:var(--ink-soft);
+}
+.pub-list b{font-weight:600;color:var(--ink)}
+.pub-list .add{color:var(--green)}
+.pub-list .chg{color:var(--blue)}
+.pub-list .del{color:var(--red)}
+
+/* ── QR handoff ──
+   Plain white behind the code and a wide quiet zone around it, whatever the
+   rest of the page is doing: a QR tinted by a panel colour or butted against
+   an edge is one a camera hunts for and often never finds. The canvas is sized
+   to a whole number of pixels per module and pixelated on purpose — smoothing
+   a QR softens exactly the edges the decoder is looking for. */
+#qrModal{width:360px}
+#qrModal .modal-body{padding:22px;text-align:center}
+.qr-canvas{display:block;margin:0 auto;background:#fff;border-radius:2px;
+  image-rendering:pixelated;image-rendering:crisp-edges}
+.qr-where{margin-top:14px;font-size:11px;font-weight:700;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-mute)}
+.qr-hint{margin-top:6px;font-size:13px;line-height:1.5;color:var(--ink-soft)}
+.qr-foot{margin-top:18px;display:flex;align-items:center;gap:10px}
+.qr-count{font-size:12px;color:var(--ink-mute);font-variant-numeric:tabular-nums}
+.qr-err{font-size:13px;line-height:1.5;color:var(--red);text-align:left}
+
+/* ── admin gate ──
+   452px while locked — the house width for this gate on every board. Six
+   digits floating in a 640px panel reads as a different dialog from the one
+   people already know. It widens only once there is something wide to show. */
+/* The modal grows into the workspace once unlocked. min-height:0 on the flex
+   column matters for the same reason it does inside the grid below: without
+   it the pane refuses to shrink and pushes its scrollbar onto the page. */
+#adminModal{width:452px;transition:width .28s cubic-bezier(.3,.9,.3,1),
+                                   height .28s cubic-bezier(.3,.9,.3,1);
+  overflow:hidden;min-height:0}
+#adminModal.unlocked{width:1040px;height:min(86vh,780px)}
+.lock-ic{display:grid;place-items:center;width:44px;height:44px;margin:6px auto 14px;
+  border:1px solid var(--line-soft);border-radius:50%}
+.lock-ic svg{width:21px;height:21px;color:var(--ink-soft)}
+.gate-t{text-align:center;font-size:13px;color:var(--ink-mute);margin-bottom:18px}
+.otp{display:flex;gap:9px;justify-content:center}
+.otp-box{width:46px;height:56px;padding:0;border:1px solid var(--line);border-radius:var(--r-md);
+  background:var(--paper);text-align:center;font-size:22px;font-weight:600;
+  font-variant-numeric:tabular-nums;outline:none;-webkit-text-security:disc;
+  transition:border-color .15s,box-shadow .15s,background .15s}
+.otp-box::-webkit-outer-spin-button,.otp-box::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.otp-box:focus{border-color:var(--ink);box-shadow:0 0 0 3px rgba(23,26,32,.10)}
+.otp-box.filled{background:var(--paper-alt);border-color:#A9ABAD}
+.otp.bad .otp-box{border-color:var(--red);background:#FDE7E8}
+.otp.bad{animation:otpShake .38s cubic-bezier(.36,.07,.19,.97)}
+@keyframes otpShake{10%,90%{transform:translateX(-2px)}20%,80%{transform:translateX(4px)}
+  30%,50%,70%{transform:translateX(-7px)}40%,60%{transform:translateX(7px)}}
+.gate-err{margin-top:10px;font-size:12.5px;color:#A3161B;text-align:center;height:17px}
+/* ── Admin workspace: section rail beside a scrolling pane ──
+   The same structure as ZO-001 and ZO-002. min-height:0 on both grid tracks
+   matters: a grid item defaults to min-height:auto, refuses to shrink below
+   its content, and pushes the scrollbar onto the page instead of the pane. */
+.admin{display:grid;grid-template-columns:218px 1fr;min-height:0;flex:1}
+.admin[hidden]{display:none}
+.admin-rail{
+  display:flex;flex-direction:column;
+  border-right:1px solid var(--line-soft);
+  background:var(--paper-alt);
+  padding:10px 0;overflow-y:auto;min-height:0;
+}
+.rail-item{
+  position:relative;display:flex;align-items:center;gap:10px;
+  width:100%;padding:10px 16px;text-align:left;
+  font-size:12.5px;font-weight:500;color:var(--ink-soft);
+  transition:background .15s,color .15s;
+}
+.rail-item svg{width:16px;height:16px;flex:none;opacity:.62}
+.rail-item:hover{background:rgba(23,26,32,.05);color:var(--ink)}
+.rail-item.on{background:var(--paper);color:var(--ink);font-weight:600}
+.rail-item.on svg{opacity:1}
+.rail-item.on::before{
+  content:"";position:absolute;left:0;top:6px;bottom:6px;width:2px;background:var(--ink);
+}
+/* A section carrying something worth noticing from the rail — here, a
+   credential that is not connected. */
+.rail-item .warn{
+  width:6px;height:6px;border-radius:50%;background:var(--red);
+  margin-left:auto;flex:none;
+}
+.rail-item .warn[hidden]{display:none}
+.rail-item .warn.busy{background:var(--amber);animation:dotPulse 1.15s ease-in-out infinite}
+.rail-foot{
+  margin-top:auto;padding:14px 16px 4px;
+  font-size:10.5px;line-height:1.5;color:var(--ink-mute);
+}
+.admin-pane{overflow-y:auto;padding:26px 32px 30px;min-width:0;min-height:0}
+/* Long-form hints stay readable rather than stretching the full width. */
+.admin-pane .sec{max-width:620px}
+/* Scoped to the pane on purpose: `.sec-h` is already the page's own section
+   header out in main, and an unscoped rule here would restyle both. */
+.admin-pane .sec{display:none}
+.admin-pane .sec.on{display:block;animation:secIn .2s ease}
+@keyframes secIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.admin-pane .sec-h{display:block;margin:0 0 4px;font-size:15px;font-weight:600;letter-spacing:-.01em}
+.admin-pane .sec-p{margin:0 0 18px;font-size:12.5px;color:var(--ink-mute);line-height:1.5}
+
+/* ── connection rows ──
+   The same bordered pill every other board uses for a credential: dot, name,
+   state on the right. The Hub used to render these as a borderless settings
+   table, which was the one screen in the estate that looked like a different
+   product.
+
+   The dot carries the state and is the reason a row needs no colour of its
+   own — grey unknown, green live, red not, amber mid-sign-in. Amber pulses,
+   because "waiting for you to finish signing in" is the one state that is
+   going to change on its own and the only honest way to say so is motion. */
+.sec-title{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-mute);margin:18px 0 10px}
+.conn{display:flex;align-items:center;gap:9px;padding:11px 13px;
+  border:1px solid var(--line-soft);border-radius:var(--r-md);
+  margin-bottom:10px;font-size:12.5px;transition:border-color .2s}
+.conn b{font-weight:600;flex:none}
+.conn .dot{width:8px;height:8px;border-radius:50%;background:var(--grey-car);
+  flex:none;transition:background .2s}
+.conn.ok   .dot{background:var(--green)}
+.conn.bad  .dot{background:var(--red)}
+.conn.busy .dot{background:var(--amber);animation:dotPulse 1.15s ease-in-out infinite}
+.conn.busy{border-color:rgba(245,179,27,.5)}
+@keyframes dotPulse{0%,100%{opacity:1}50%{opacity:.25}}
+.conn .st{margin-left:auto;color:var(--ink-mute);text-align:right;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conn.bad .st{color:#A3161B}
+.conn .acts{display:flex;gap:8px;flex:none;margin-left:14px}
+.row{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line-soft);font-size:13px}
+.row:last-child{border-bottom:none}
+.row .k{font-weight:600;min-width:110px}
+.row .v{color:var(--ink-mute);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.row .a{margin-left:auto;display:flex;gap:8px}
+.field label{display:block;margin-bottom:7px;font-size:10.5px;font-weight:600;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute)}
+.field textarea{width:100%;height:76px;padding:10px 12px;border:1px solid var(--line);
+  border-radius:var(--r-sm);outline:none;font-size:12px;resize:vertical}
+.field textarea:focus{border-color:var(--ink)}
+.hint{margin-top:7px;font-size:11.5px;color:var(--ink-mute)}
+.serials{width:100%;border-collapse:collapse;font-size:13px}
+.serials th{text-align:left;font-size:10.5px;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-mute);padding:0 10px 8px 0}
+.serials td{padding:9px 10px 9px 0;border-top:1px solid var(--line-soft);vertical-align:top}
+.serials td.s{font-weight:700;letter-spacing:.1em;font-variant-numeric:tabular-nums;white-space:nowrap}
+.serials td.p{font-variant-numeric:tabular-nums;color:var(--ink-mute)}
+.spin{width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;
+  border-radius:50%;display:inline-block;animation:sp .7s linear infinite;vertical-align:-1px}
+@keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="mark">Tesla</div>
+  <div class="sep"></div>
+  <div class="app">Zo Projects Hub</div>
+  <div class="spacer"></div>
+  <button class="icon-btn" id="refreshBtn">Refresh</button>
+  <button class="icon-btn" id="adminBtn">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.36.4.66.73.86.3.18.64.28 1 .28H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </svg>Admin
+  </button>
+</nav>
+
+<section class="hero">
+  <!-- The Almighty. A field of pale pods opening out of the black, after the
+       Thousand-Year Blood War shot.
+
+       Two things carry the reference and both are easy to lose. The contour is
+       not a line — it is a bristle of short ink strokes struck roughly
+       perpendicular to the edge, and drawing it as a stroke of any width gets
+       a clean cartoon shape instead. Those strokes are generated by sampling
+       the outline further down. And the shapes are pods, not eyes: lopsided,
+       pointed at one end, carrying a small off-centre smudge rather than a
+       pupil. Centre the mark and even it up and the whole field turns into
+       forty cartoon eyeballs, which is a much cheaper image.
+
+       Placement is generated too — a jittered grid, seeded so it is identical
+       on every load. Forty hand-placed shapes is a composition nobody can
+       adjust; a grid covers the full banner by construction, which is the
+       point, and the jitter keeps it off the grid visually. -->
+  <svg class="hero-bg" viewBox="0 0 1600 300" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <defs>
+      <!-- The strand texture behind everything. -->
+      <pattern id="strand" width="9" height="12" patternUnits="userSpaceOnUse">
+        <rect width="9" height="12" fill="#08090E"/>
+        <rect x="0"   width="1"   height="12" fill="#15171F"/>
+        <rect x="3.5" width="0.7" height="12" fill="#11131A"/>
+        <rect x="6.5" width="0.5" height="12" fill="#0E1017"/>
+      </pattern>
+      <!-- Flat, warm, light. Zoomed in, the reference fill is very nearly
+           uniform — all the modelling that reads as painterly lives in the ink
+           at the edge, not in the body. A strong radial gradient here turns
+           every pod into a rendered 3D egg, which was the biggest tell. -->
+      <radialGradient id="bone" cx="42%" cy="34%" r="80%">
+        <stop offset="0%"   stop-color="#F5EFE2"/>
+        <stop offset="72%"  stop-color="#EDE4D2"/>
+        <stop offset="100%" stop-color="#E1D6C0"/>
+      </radialGradient>
+      <!-- A faint blotch, and no more than faint. -->
+      <radialGradient id="smudge" cx="62%" cy="70%" r="52%">
+        <stop offset="0%"   stop-color="#B09973" stop-opacity=".2"/>
+        <stop offset="100%" stop-color="#B09973" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="socket" cx="50%" cy="50%" r="50%">
+        <stop offset="0%"   stop-color="#06070B" stop-opacity="1"/>
+        <stop offset="40%"  stop-color="#06070B" stop-opacity=".97"/>
+        <stop offset="72%"  stop-color="#06070B" stop-opacity=".68"/>
+        <stop offset="100%" stop-color="#06070B" stop-opacity="0"/>
+      </radialGradient>
+      <!-- One filter for the whole glow layer. Forty per-pod blurs is forty
+           offscreen buffers a frame; this is one. -->
+      <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur stdDeviation="7"/>
+      </filter>
+
+      <!-- Six pods, all deliberately lopsided, most with a point at one end.
+           A symmetric shape stamped forty times reads as clip art. -->
+      <path id="sh1" d="M8-58C45-55 66-28 58 8C51 38 26 58-8 59C-38 60-62 40-63 6C-64-28-30-61 8-58Z"/>
+      <path id="sh2" d="M-88 26C-70-6-30-48 20-56C52-61 72-42 64-14C54 18 18 46-18 54C-46 60-76 52-88 26Z"/>
+      <path id="sh3" d="M-62 24C-46-12-18-36 12-37C38-38 51-21 46 4C41 27 12 40-16 39C-36 38-52 34-62 24Z"/>
+      <path id="sh4" d="M-78-2C-52-34-16-46 12-44C42-42 60-22 58 4C56 30 26 46-8 45C-38 44-60 30-72 14Z"/>
+      <path id="sh5" d="M-92 10C-72-14-34-30 2-30C36-30 56-16 53 0C49 20 16 34-18 34C-52 34-84 26-92 10Z"/>
+      <path id="sh6" d="M-10-47C28-51 57-32 55 2C53 30 28 49-6 48C-34 47-53 30-57 4C-60-20-40-44-10-47Z"/>
+    </defs>
+
+    <rect width="1600" height="300" fill="#08090E"/>
+    <!-- Charcoal strands, drawn by script. As a repeating <pattern> they came
+         out as regular pinstripe, which the reference emphatically is not. -->
+    <g id="strands"></g>
+
+    <!-- Glow behind, ink in front. Script fills both. -->
+    <g id="eyeGlow" filter="url(#soft)"></g>
+    <g id="eyeField"></g>
+
+    <!-- The dark closing back in, sized to the two lines of type and no
+         bigger. It used to be a slab across the whole middle, which kept the
+         title readable by clearing out the third of the banner the field is
+         supposed to be densest in. -->
+    <ellipse cx="800" cy="152" rx="330" ry="96" fill="url(#socket)"/>
+    <ellipse cx="800" cy="140" rx="215" ry="66" fill="url(#socket)"/>
+  </svg>
+  <div class="hero-in">
+    <h1>Zo Projects Hub</h1>
+    <p>Every board in one place. Sign in <b>once</b> here and all of them have it.</p>
+  </div>
+</section>
+
+<div class="stats">
+  <div class="stat"><div class="stat-k">Boards</div><div class="stat-v" id="sBoards">—</div></div>
+  <div class="stat"><div class="stat-k">Running</div><div class="stat-v" id="sRunning">—</div></div>
+  <div class="stat"><div class="stat-k">Sources connected</div><div class="stat-v" id="sSources">—</div></div>
+</div>
+
+<main>
+  <aside class="side">
+    <div class="side-h"><h2>Connections</h2><span id="credCount"></span></div>
+    <div class="creds" id="credStrip"></div>
+    <div class="side-foot">Sign in from <b>Admin → Sign-ins</b>. Every board reads
+      the same credentials from here.</div>
+
+    <!-- Deliberately outside the admin gate: pulling a published fix is the
+         thing every copy should be doing often, and the passcode is the same on
+         all of them, so gating it would be ceremony rather than protection. -->
+    <div class="upd">
+      <button class="mini dark" id="updCheck" style="width:100%">Check for Updates</button>
+      <div class="upd-say" id="updSay">—</div>
+    </div>
+  </aside>
+
+  <div class="content">
+    <div id="notes"></div>
+    <div class="sec-h"><h2>Dashboards</h2><span id="secSub"></span></div>
+    <div class="grid" id="grid"></div>
+  </div>
+</main>
+
+<footer class="foot">
+  <span>Zo Projects</span>
+  <span id="fStore">credentials —</span>
+  <span>ZO-000</span>
+</footer>
+
+<div class="scrim" id="scrim"></div>
+
+<div class="modal" id="updModal" role="dialog" aria-label="Estate update">
+  <div class="modal-head"><h3 id="updTitle">Update found</h3>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body">
+    <div id="updBody"></div>
+    <div class="qr-err" id="updErr" hidden></div>
+    <div class="upd-act">
+      <button class="mini" data-close id="updCancel">Cancel</button>
+      <button class="mini dark" id="updGo">Download now</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="qrModal" role="dialog" aria-label="Team code as a QR code">
+  <div class="modal-head"><h3>Team code</h3>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body">
+    <canvas class="qr-canvas" id="qrCanvas" width="0" height="0"></canvas>
+    <div class="qr-err" id="qrErr" hidden></div>
+    <div class="qr-where" id="qrWhere">—</div>
+    <div class="qr-hint">Open the board on the other device, choose
+      <b>Scan QR</b>, and point its camera at this.</div>
+    <div class="qr-foot">
+      <span class="qr-count" id="qrCount"></span>
+      <button class="mini dark" data-close style="margin-left:auto">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="adminModal" role="dialog" aria-label="Admin">
+  <div class="modal-head"><h3>Admin</h3>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body" id="gate">
+    <div>
+      <div class="lock-ic">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+      </div>
+      <div class="gate-t">Restricted area. Enter the 6-digit admin code.</div>
+      <div class="otp" id="otp">
+        <input class="otp-box" type="password" inputmode="numeric" autocomplete="one-time-code" maxlength="1" aria-label="Digit 1">
+        <input class="otp-box" type="password" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 2">
+        <input class="otp-box" type="password" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 3">
+        <input class="otp-box" type="password" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 4">
+        <input class="otp-box" type="password" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 5">
+        <input class="otp-box" type="password" inputmode="numeric" autocomplete="off" maxlength="1" aria-label="Digit 6">
+      </div>
+      <div class="gate-err" id="gateErr"></div>
+      <button class="btn btn-dark" id="unlock" style="width:100%">Unlock</button>
+    </div>
+  </div>
+
+  <!-- Unlocked: rail of sections beside a scrolling pane, the same shape the
+       other boards' admin dialogs use. -->
+  <div class="admin" id="adminBody" hidden>
+
+    <nav class="admin-rail" aria-label="Settings sections">
+      <button class="rail-item on" data-sec="signins">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+        Sign-ins
+        <span class="warn" id="railWarnSignins" hidden></span>
+      </button>
+      <button class="rail-item" data-sec="boards">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
+          <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+        </svg>
+        Boards
+      </button>
+      <button class="rail-item" data-sec="store">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/>
+          <path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>
+        </svg>
+        Store
+      </button>
+      <button class="rail-item" data-sec="publish">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 19V5"/><path d="m5 12 7-7 7 7"/><path d="M5 21h14"/>
+        </svg>
+        Publish
+      </button>
+      <div class="rail-foot">
+        Credentials live outside every project, in
+        <b>%LOCALAPPDATA%\ZoProjects</b>, and never leave this machine.
+      </div>
+    </nav>
+
+    <div class="admin-pane">
+
+    <section class="sec on" id="secSignins">
+      <h4 class="sec-h">Sign-ins</h4>
+      <p class="sec-p">This is the only place anything signs in. Every board reads
+         what is written here, so one session covers all of them. Press Connect and
+         a window opens — signing in there finishes it on its own.</p>
+
+        <div class="sec-title">Cookies</div>
+
+        <div class="conn" data-src="garage" data-env="prod">
+          <i class="dot"></i><b>Garage · prod</b>
+          <span class="st">—</span>
+          <div class="acts">
+            <button class="mini dark" data-go>Connect</button>
+            <button class="mini danger" data-forget>Forget</button>
+          </div>
+        </div>
+
+        <div class="conn" data-src="garage" data-env="eng">
+          <i class="dot"></i><b>Garage · eng</b>
+          <span class="st">—</span>
+          <div class="acts">
+            <button class="mini dark" data-go>Connect</button>
+            <button class="mini danger" data-forget>Forget</button>
+          </div>
+        </div>
+
+        <div class="conn" data-src="intrepid">
+          <i class="dot"></i><b>Intrepid</b>
+          <span class="st">—</span>
+          <div class="acts">
+            <button class="mini dark" data-go>Connect</button>
+            <button class="mini danger" data-forget>Forget</button>
+          </div>
+        </div>
+
+        <div class="hint">Engineering is a different host from production, so each
+          opens its own sign-in. Everything else shares one window — a second
+          Connect on a host you are already signed into finishes instantly.</div>
+
+        <div class="row" style="margin-top:12px;align-items:center">
+          <div class="k">Sessions</div>
+          <div class="v" id="healthWhen">—</div>
+          <button class="mini dark" id="healthNow" style="margin-left:auto">Check now</button>
+        </div>
+        <div class="hint" id="healthHow">—</div>
+
+        <div class="sec-title">Token</div>
+
+        <div class="conn" data-src="mcp">
+          <i class="dot"></i><b>Garage · MCP</b>
+          <span class="st">—</span>
+          <div class="acts">
+            <button class="mini dark" data-go>Connect</button>
+            <button class="mini danger" data-forget>Forget</button>
+          </div>
+        </div>
+
+        <div class="hint">
+          The odd one out: a token rather than a cookie, and the only row that
+          opens a real sign-in page instead of reading a window. It buys one call
+          — turning a username into a display name for ZO-002 — which Garage
+          exposes nowhere else. Everything else runs on the cookies above, so
+          leaving this unset costs names and nothing more.
+        </div>
+
+        <div class="sec-title">Pasted by hand</div>
+
+        <div class="conn" data-src="github">
+          <i class="dot"></i><b>GitHub</b>
+          <span class="st">—</span>
+          <div class="acts">
+            <button class="mini danger" id="ghForget">Forget</button>
+          </div>
+        </div>
+        <div class="field" style="margin-top:10px">
+          <label class="k" for="ghIn">Personal access token</label>
+          <textarea id="ghIn" spellcheck="false" placeholder="github_pat_…"></textarea>
+          <div class="hint">For a board hosted elsewhere that syncs to a repo of its
+            own. Kept here rather than in any project, so it cannot be committed by
+            accident; the <b>Token</b> button on that board's tile copies it. Nothing
+            on this machine sends it anywhere — the board you paste it into does.</div>
+          <button class="mini dark" id="ghSave" style="margin-top:10px">Save token</button>
+        </div>
+    </section>
+
+    <section class="sec" id="secBoards">
+      <h4 class="sec-h">Boards</h4>
+      <p class="sec-p">Stable handles. Say “in ZO-002, change the window” and it is
+         unambiguous even after a rename or a port change. Serials are assigned in
+         order of first commit and never reused.</p>
+      <table class="serials">
+        <thead><tr><th>Serial</th><th>Board</th><th>Port</th><th>Folder</th></tr></thead>
+        <tbody id="serialRows"></tbody>
+      </table>
+    </section>
+
+    <section class="sec" id="secPublish">
+      <h4 class="sec-h">Publish</h4>
+      <p class="sec-p">Sends the estate to
+         <b>github.com/ebocc09/Zo-Projects-Hub</b>, where every other copy of the
+         Hub can pull it with <b>Check for Updates</b>. What goes is the working
+         tree as it stands, not the last commit — an uncommitted board edit is
+         the normal state here, and publishing a commit would ship something
+         older than what is on screen.</p>
+
+      <div class="row" style="margin-top:12px;align-items:center">
+        <div class="k">Changes</div>
+        <div class="v" id="pubSummary">—</div>
+        <button class="mini dark" id="pubRefresh" style="margin-left:auto">Review</button>
+      </div>
+
+      <div class="pub-list" id="pubList" hidden></div>
+      <div class="hint" id="pubDropped"></div>
+
+      <div class="field" style="margin-top:12px">
+        <label class="k" for="pubMsg">Message <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
+        <textarea id="pubMsg" spellcheck="false" placeholder="Left blank, one is written from what changed."></textarea>
+      </div>
+
+      <button class="mini dark" id="pubGo" style="margin-top:10px">Push to GitHub</button>
+
+      <div class="hint">Credential files are refused outright rather than skipped —
+        if one ever reaches the publish set, nothing is sent and it is named here.
+        Machine-local caches and logs are dropped quietly. The token in
+        <b>Sign-ins</b> is what authenticates the push, and it needs
+        <b>Contents: Read and write</b> on this repository.</div>
+    </section>
+
+    <section class="sec" id="secStore">
+      <h4 class="sec-h">Store</h4>
+      <p class="sec-p">One file outside every project. Boards read it; only this hub
+         writes it. Delete it and each board falls back to whatever cookie it has of
+         its own — which is nothing, on a machine where only the hub has signed in.</p>
+      <div class="row"><div class="k">File</div><div class="v" id="storePath">—</div></div>
+      <div class="row"><div class="k">Updated</div><div class="v" id="storeUpdated">—</div></div>
+    </section>
+
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const S = { password: "", boards: [], creds: null, health: null, signin: {}, busy: false };
+const unlocked = () => !$("adminBody").hidden;
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
+  c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" })[c]);
+
+async function api(path, body){
+  const res = await fetch(path, body === undefined ? undefined
+    : { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+  let d = {};
+  try { d = await res.json(); } catch {}
+  if(!res.ok){ const e = new Error(d.error || `Request failed (${res.status})`); Object.assign(e, d); throw e; }
+  return d;
+}
+const note = (m, bad) => { $("notes").innerHTML = `<div class="note${bad?" err":""}">${esc(m)}</div>`; };
+const clearNotes = () => { $("notes").innerHTML = ""; };
+
+/* ═════════════════════════ QR encoding ═════════════════════════
+   Byte mode, ECC level M, versions 1-10. Written rather than pulled in: the
+   Hub has no npm dependencies and must keep working with no network, so a CDN
+   script tag was not an option. Scope is the narrowest thing that encodes a
+   GitHub PAT - byte mode only, one ECC level, ten versions. A 93-character
+   fine-grained PAT lands at version 6; the headroom to 10 is there so a longer
+   credential does not silently fail to render.
+
+   ECC level M rather than L: this is read off a screen, at an angle, by a
+   phone camera, often with glare. The extra recovery capacity costs a slightly
+   denser code and buys a scan that actually works.
+
+   Verified by round-tripping every version at full capacity through an
+   independent decoder (jsQR), plus the published Reed-Solomon and BCH vectors.
+   ══════════════════════════════════════════════════════════════ */
+
+/* Per version at ECC M: total data codewords, EC codewords per block, and the
+   block structure as [count, dataCodewordsPerBlock] groups. Straight from the
+   standard's tables — the one part of this file that cannot be derived. */
+const QR_M = {
+  1:  [16,  10, [[1, 16]]],
+  2:  [28,  16, [[1, 28]]],
+  3:  [44,  26, [[1, 44]]],
+  4:  [64,  18, [[2, 32]]],
+  5:  [86,  24, [[2, 43]]],
+  6:  [108, 16, [[4, 27]]],
+  7:  [124, 18, [[4, 31]]],
+  8:  [154, 22, [[2, 38], [2, 39]]],
+  9:  [182, 22, [[3, 36], [2, 37]]],
+  10: [216, 26, [[4, 43], [1, 44]]]
+};
+
+/* Alignment pattern centre coordinates. Every pairing of these is a centre,
+   minus the three that would sit on a finder pattern. */
+const ALIGN = {
+  1: [], 2: [6, 18], 3: [6, 22], 4: [6, 26], 5: [6, 30],
+  6: [6, 34], 7: [6, 22, 38], 8: [6, 24, 42], 9: [6, 26, 46], 10: [6, 28, 50]
+};
+
+/* ── GF(256) ──
+   Arithmetic for Reed-Solomon, over the primitive polynomial 0x11D. Log and
+   antilog tables turn multiplication into addition, which is what makes the
+   generator-polynomial work below cheap. */
+const EXP = new Uint8Array(512);
+const LOG = new Uint8Array(256);
+(function buildTables(){
+  let x = 1;
+  for(let i = 0; i < 255; i++){
+    EXP[i] = x;
+    LOG[x] = i;
+    x <<= 1;
+    if(x & 0x100) x ^= 0x11D;
+  }
+  // Doubling the exponent table lets callers add two logs (max 254+254) and
+  // index straight in without a modulo on every multiply.
+  for(let i = 255; i < 512; i++) EXP[i] = EXP[i - 255];
+})();
+
+const gfMul = (a, b) => (a === 0 || b === 0) ? 0 : EXP[LOG[a] + LOG[b]];
+
+/* Generator polynomial for `degree` EC codewords: (x-α⁰)(x-α¹)…(x-α^(d-1)) */
+function generatorPoly(degree){
+  let poly = [1];
+  for(let d = 0; d < degree; d++){
+    const next = new Array(poly.length + 1).fill(0);
+    // Coefficients run highest degree first, so multiplying by x is a shift
+    // into next[i] and the α^d term lands one place further down. Swapping
+    // these two builds the polynomial back to front: it still looks plausible
+    // and every codeword it produces is wrong.
+    for(let i = 0; i < poly.length; i++){
+      next[i]     ^= poly[i];
+      next[i + 1] ^= gfMul(poly[i], EXP[d]);
+    }
+    poly = next;
+  }
+  return poly;
+}
+
+/* Polynomial division remainder — the EC codewords for one block. */
+function eccFor(data, ecLen){
+  const gen = generatorPoly(ecLen);
+  const rem = new Uint8Array(data.length + ecLen);
+  rem.set(data);
+  for(let i = 0; i < data.length; i++){
+    const factor = rem[i];
+    if(factor === 0) continue;
+    for(let j = 0; j < gen.length; j++) rem[i + j] ^= gfMul(gen[j], factor);
+  }
+  return Array.from(rem.slice(data.length));
+}
+
+/* ── bit stream → codewords ── */
+
+function encodeData(bytes, version){
+  const [dataCodewords] = QR_M[version];
+  const bits = [];
+  const push = (value, len) => {
+    for(let i = len - 1; i >= 0; i--) bits.push((value >> i) & 1);
+  };
+
+  push(0b0100, 4);                                  // byte mode
+  push(bytes.length, version < 10 ? 8 : 16);        // character count
+  for(const b of bytes) push(b, 8);
+
+  // Terminator, then pad to a byte boundary.
+  const capacity = dataCodewords * 8;
+  for(let i = 0; i < 4 && bits.length < capacity; i++) bits.push(0);
+  while(bits.length % 8 !== 0) bits.push(0);
+
+  const codewords = [];
+  for(let i = 0; i < bits.length; i += 8){
+    let byte = 0;
+    for(let j = 0; j < 8; j++) byte = (byte << 1) | bits[i + j];
+    codewords.push(byte);
+  }
+  // The standard's alternating pad bytes, until the block is full. The run
+  // always opens with 0xEC — keying the alternation off the codeword count
+  // instead starts on 0x11 whenever the data happened to end on an odd byte.
+  const PAD = [0xEC, 0x11];
+  for(let p = 0; codewords.length < dataCodewords; p++) codewords.push(PAD[p % 2]);
+
+  return codewords;
+}
+
+/* Split into blocks, compute EC per block, then interleave both halves the way
+   the standard requires — a burst of damage then lands across many blocks
+   rather than destroying one. */
+function interleave(codewords, version){
+  const [, ecLen, groups] = QR_M[version];
+
+  const blocks = [];
+  let at = 0;
+  for(const [count, size] of groups){
+    for(let i = 0; i < count; i++){
+      blocks.push(codewords.slice(at, at + size));
+      at += size;
+    }
+  }
+  const eccs = blocks.map(b => eccFor(b, ecLen));
+
+  const out = [];
+  const widest = Math.max(...blocks.map(b => b.length));
+  for(let i = 0; i < widest; i++){
+    for(const b of blocks) if(i < b.length) out.push(b[i]);
+  }
+  for(let i = 0; i < ecLen; i++){
+    for(const e of eccs) out.push(e[i]);
+  }
+  return out;
+}
+
+/* ── format and version information ──
+   Both are BCH codes. Computing them beats tabulating them: a mistyped digit in
+   a lookup table produces a code that looks perfect and scans as nothing. */
+
+function formatBits(mask){
+  const data = (0b00 << 3) | mask;          // 00 = ECC level M
+  let rem = data;
+  for(let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
+  return ((data << 10) | (rem & 0x3FF)) ^ 0x5412;
+}
+
+function versionBits(version){
+  let rem = version;
+  for(let i = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >>> 11) * 0x1F25);
+  return (version << 12) | (rem & 0xFFF);
+}
+
+/* ── the matrix ── */
+
+function buildMatrix(version){
+  const size = 17 + version * 4;
+  const modules  = Array.from({ length: size }, () => new Array(size).fill(false));
+  const reserved = Array.from({ length: size }, () => new Array(size).fill(false));
+
+  const set = (r, c, dark) => { modules[r][c] = dark; reserved[r][c] = true; };
+
+  // Finder patterns and their separators.
+  const finder = (top, left) => {
+    for(let r = -1; r <= 7; r++){
+      for(let c = -1; c <= 7; c++){
+        const rr = top + r, cc = left + c;
+        if(rr < 0 || rr >= size || cc < 0 || cc >= size) continue;
+        const ring = Math.max(Math.abs(r - 3), Math.abs(c - 3));
+        set(rr, cc, ring !== 2 && ring <= 3);
+      }
+    }
+  };
+  finder(0, 0); finder(0, size - 7); finder(size - 7, 0);
+
+  // Timing patterns.
+  for(let i = 8; i < size - 8; i++){
+    const dark = i % 2 === 0;
+    set(6, i, dark);
+    set(i, 6, dark);
+  }
+
+  // Alignment patterns, minus the three that collide with a finder.
+  const centres = ALIGN[version];
+  for(const r of centres){
+    for(const c of centres){
+      if((r === 6 && c === 6) ||
+         (r === 6 && c === size - 7) ||
+         (r === size - 7 && c === 6)) continue;
+      for(let dr = -2; dr <= 2; dr++){
+        for(let dc = -2; dc <= 2; dc++){
+          set(r + dr, c + dc, Math.max(Math.abs(dr), Math.abs(dc)) !== 1);
+        }
+      }
+    }
+  }
+
+  // The always-dark module, and the format areas held back for later.
+  set(size - 8, 8, true);
+  for(let i = 0; i < 9; i++){
+    if(!reserved[8][i])            set(8, i, false);
+    if(!reserved[i][8])            set(i, 8, false);
+  }
+  for(let i = 0; i < 8; i++){
+    if(!reserved[8][size - 1 - i]) set(8, size - 1 - i, false);
+    if(!reserved[size - 1 - i][8]) set(size - 1 - i, 8, false);
+  }
+
+  // Version information, two 3×6 blocks, versions 7 and up only.
+  if(version >= 7){
+    const bits = versionBits(version);
+    for(let i = 0; i < 18; i++){
+      const dark = ((bits >> i) & 1) === 1;
+      const r = Math.floor(i / 3), c = i % 3;
+      set(size - 11 + c, r, dark);
+      set(r, size - 11 + c, dark);
+    }
+  }
+
+  return { size, modules, reserved };
+}
+
+/* Zigzag fill: two-module-wide columns walked right to left, alternating up and
+   down, skipping the vertical timing column. Positions left over once the bits
+   run out stay light — which is exactly what the standard calls for. */
+function placeData(m, codewords){
+  const { size, modules, reserved } = m;
+  const bitAt = i => {
+    if(i >= codewords.length * 8) return false;
+    return ((codewords[i >> 3] >> (7 - (i & 7))) & 1) === 1;
+  };
+
+  let i = 0, upward = true;
+  for(let right = size - 1; right >= 1; right -= 2){
+    if(right === 6) right = 5;                    // the timing column is not data
+    for(let step = 0; step < size; step++){
+      const row = upward ? size - 1 - step : step;
+      for(let c = 0; c < 2; c++){
+        const col = right - c;
+        if(reserved[row][col]) continue;
+        modules[row][col] = bitAt(i++);
+      }
+    }
+    upward = !upward;
+  }
+}
+
+const MASKS = [
+  (r, c) => (r + c) % 2 === 0,
+  (r, c) => r % 2 === 0,
+  (r, c) => c % 3 === 0,
+  (r, c) => (r + c) % 3 === 0,
+  (r, c) => (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0,
+  (r, c) => ((r * c) % 2) + ((r * c) % 3) === 0,
+  (r, c) => (((r * c) % 2) + ((r * c) % 3)) % 2 === 0,
+  (r, c) => (((r + c) % 2) + ((r * c) % 3)) % 2 === 0
+];
+
+function applyMask(m, mask){
+  const { size, modules, reserved } = m;
+  const fn = MASKS[mask];
+  for(let r = 0; r < size; r++){
+    for(let c = 0; c < size; c++){
+      if(!reserved[r][c] && fn(r, c)) modules[r][c] = !modules[r][c];
+    }
+  }
+}
+
+function placeFormat(m, mask){
+  const { size, modules } = m;
+  const bits = formatBits(mask);
+  // Position i in the placement order carries bit 14-i: the sequence runs most
+  // significant bit first. Reading it back with the same reversed mapping used
+  // to write it looks perfectly self-consistent, so this is only catchable
+  // against a decoder that did not come from here.
+  const bit = i => ((bits >> (14 - i)) & 1) === 1;
+
+  // Copy one: around the top-left finder, hopping the timing column and row.
+  for(let i = 0; i <= 5; i++)      modules[8][i]            = bit(i);
+  modules[8][7]                                             = bit(6);
+  modules[8][8]                                             = bit(7);
+  modules[7][8]                                             = bit(8);
+  for(let i = 9; i <= 14; i++)     modules[14 - i][8]       = bit(i);
+
+  // Copy two: split between the other two finders, so a damaged corner still
+  // leaves a readable copy. Seven bits up the left column and eight along the
+  // top — not eight and seven. The module below the seventh is the permanently
+  // dark one, and writing a format bit over it costs both that bit and the
+  // dark module, which is enough on its own to make every symbol unreadable.
+  for(let i = 0; i <= 6; i++)      modules[size - 1 - i][8]  = bit(i);
+  for(let i = 7; i <= 14; i++)     modules[8][size - 15 + i] = bit(i);
+}
+
+/* The four penalty rules. Lower is better; the mask that scores lowest is the
+   one that gets used. Rule 3 is the one that matters most in practice — it
+   punishes anything resembling a finder pattern out in the data. */
+function penalty(m){
+  const { size, modules } = m;
+  let score = 0;
+
+  // Rule 1 — runs of five or more.
+  for(let r = 0; r < size; r++){
+    for(const horizontal of [true, false]){
+      let run = 1;
+      for(let i = 1; i < size; i++){
+        const cur  = horizontal ? modules[r][i]     : modules[i][r];
+        const prev = horizontal ? modules[r][i - 1] : modules[i - 1][r];
+        if(cur === prev){ run++; }
+        else{ if(run >= 5) score += 3 + (run - 5); run = 1; }
+      }
+      if(run >= 5) score += 3 + (run - 5);
+    }
+  }
+
+  // Rule 2 — 2×2 blocks of one colour.
+  for(let r = 0; r < size - 1; r++){
+    for(let c = 0; c < size - 1; c++){
+      const v = modules[r][c];
+      if(v === modules[r][c + 1] && v === modules[r + 1][c] && v === modules[r + 1][c + 1]) score += 3;
+    }
+  }
+
+  // Rule 3 — the 1:1:3:1:1 finder-alike, in either direction, either polarity.
+  const A = [true, false, true, true, true, false, true, false, false, false, false];
+  const B = [false, false, false, false, true, false, true, true, true, false, true];
+  const matches = (get, i) => {
+    let a = true, b = true;
+    for(let k = 0; k < 11; k++){
+      const v = get(i + k);
+      if(v !== A[k]) a = false;
+      if(v !== B[k]) b = false;
+      if(!a && !b) return false;
+    }
+    return a || b;
+  };
+  for(let r = 0; r < size; r++){
+    for(let c = 0; c + 11 <= size; c++){
+      if(matches(i => modules[r][i], c)) score += 40;
+      if(matches(i => modules[i][r], c)) score += 40;
+    }
+  }
+
+  // Rule 4 — drift away from an even split of dark and light.
+  let dark = 0;
+  for(let r = 0; r < size; r++) for(let c = 0; c < size; c++) if(modules[r][c]) dark++;
+  const percent = (dark * 100) / (size * size);
+  score += Math.floor(Math.abs(percent - 50) / 5) * 10;
+
+  return score;
+}
+
+/**
+ * Encode text as a QR matrix.
+ * @param {string} text
+ * @returns {{size:number, version:number, mask:number, modules:boolean[][]}}
+ * @throws if the text is too long for version 10 at ECC M.
+ */
+function qrEncode(text){
+  const bytes = [];
+  for(const ch of String(text)){
+    const code = ch.codePointAt(0);
+    if(code < 0x80) bytes.push(code);
+    else{
+      // Non-ASCII should never appear in a PAT, but silently mangling it would
+      // be worse than a slightly larger code.
+      for(const b of new TextEncoder().encode(ch)) bytes.push(b);
+    }
+  }
+
+  let version = 0;
+  for(let v = 1; v <= 10; v++){
+    const needed = 4 + (v < 10 ? 8 : 16) + bytes.length * 8;
+    if(needed <= QR_M[v][0] * 8){ version = v; break; }
+  }
+  if(!version) throw new Error(`Too long for a QR code at this size (${bytes.length} bytes, max 214).`);
+
+  const codewords = interleave(encodeData(bytes, version), version);
+
+  let best = null;
+  for(let mask = 0; mask < 8; mask++){
+    const m = buildMatrix(version);
+    placeData(m, codewords);
+    applyMask(m, mask);
+    placeFormat(m, mask);
+    const score = penalty(m);
+    if(!best || score < best.score) best = { score, mask, m };
+  }
+
+  return { size: best.m.size, version, mask: best.mask, modules: best.m.modules };
+}
+
+
+/* ── overlays ── */
+let openEl = null;
+function showModal(el){ if(openEl) openEl.classList.remove("on"); openEl = el;
+  el.classList.add("on"); $("scrim").classList.add("on"); }
+function hideModal(){ if(openEl) openEl.classList.remove("on"); openEl = null;
+  $("scrim").classList.remove("on");
+  /* Every close route lands here — the X, the scrim, Escape, the Close button
+     and the countdown — so tearing the QR down here is the one place it cannot
+     be skipped. A credential left painted on a hidden canvas is still a
+     credential sitting in the page. */
+  stopQr(); }
+$("scrim").addEventListener("click", hideModal);
+document.addEventListener("click", e => { if(e.target.closest("[data-close]")) hideModal(); });
+document.addEventListener("keydown", e => { if(e.key === "Escape") hideModal(); });
+
+/* ── painting ── */
+
+/* The left column, and the stat that counts the same thing.
+
+   Every credential, not just the two there used to be. Counting a subset let
+   the column read "2 of 2" while the admin rail carried a red dot for
+   something missing — two parts of one page disagreeing about whether the
+   estate was signed in.
+
+   Called from paintConns() as well as paint(), so signing in inside the modal
+   updates the column behind it instead of leaving it wrong until the next
+   fifteen-second poll. It matters more now than it did in the hero: the column
+   is on screen the whole time you are working, so a stale row is a row you
+   will act on.
+
+   Stored is no longer the same question as connected. A cookie the health
+   sweep has found dead is still in the file — it is deliberately not cleared —
+   so counting `set` would have this column reading "4 of 4" over a session
+   that stopped working an hour ago. That is the same disagreement the comment
+   above describes, one layer down: the file says yes and the server says no.
+   The server wins. */
+const isDead = key => ((S.health || {}).keys || {})[key] &&
+                      S.health.keys[key].state === "dead";
+
+function paintCredCol(){
+  const c = S.creds; if(!c) return;
+  const g = c.garage || {};
+  const CREDS = [
+    ["Garage · prod", g.prod && g.prod.set,        "garage:prod"],
+    ["Garage · eng",  g.eng  && g.eng.set,         "garage:eng"],
+    ["Intrepid",      c.intrepid && c.intrepid.set, "intrepid"],
+    // MCP is not swept: it reports its own expiry and refreshes itself.
+    ["Garage · MCP",  c.garageMcp && c.garageMcp.set, null]
+  ].map(([n, on, key]) => [n, Boolean(on) && !(key && isDead(key)), key]);
+
+  const live = CREDS.filter(x => x[1]).length;
+  $("sSources").textContent  = `${live} of ${CREDS.length}`;
+  $("credCount").textContent = `${live}/${CREDS.length}`;
+  setHTML($("credStrip"), CREDS.map(([n, on, key], i) =>
+    `<div class="cred ${on?"on":"off"}" style="animation-delay:${i*40}ms">
+       <i></i><b>${esc(n)}</b><span class="st">${
+         on ? "On" : (key && isDead(key) ? "Expired" : "Off")}</span>
+     </div>`).join(""));
+}
+
+/* ── redraw only what changed ──
+   The tiles and the credential chips both carry an entrance animation, and
+   assigning innerHTML destroys and recreates every element inside — which
+   replays that animation. With a poll every fifteen seconds that meant the
+   whole page visibly flickering on a timer, almost always to render exactly
+   what was already on screen.
+
+   Comparing against what we generated last time rather than against
+   el.innerHTML: the browser normalises markup on the way in, so reading it
+   back gives a string that never matches the one we wrote. */
+const lastHTML = new WeakMap();
+function setHTML(el, html){
+  if(lastHTML.get(el) === html) return;
+  lastHTML.set(el, html);
+  el.innerHTML = html;
+}
+
+function paint(d){
+  S.boards = d.boards;
+  S.creds  = d.creds;
+  if(d.health) S.health = d.health;
+
+  /* The phases come down the ungated route now, which is what lets the panel
+     notice a sign-in it did not start. The auto-reconnect opens a window off
+     the server's own timer, with no click behind it to kick off the fast
+     poll — without this the row would sit unchanged until somebody pressed
+     something. Only escalate to the 1.5s cadence if we can: the fast poll is
+     an admin route and needs the password. */
+  if(d.signin){
+    S.signin = d.signin;
+    if(S.password && anyBusy()) startPolling();
+  }
+
+  const others = d.boards.filter(b => !b.self);
+  const up = others.filter(b => b.running).length;
+  $("sBoards").textContent  = others.length;
+  $("sRunning").textContent = up;
+
+  paintCredCol();
+
+  $("fStore").textContent = d.creds.updated
+    ? "credentials updated " + new Date(d.creds.updated).toLocaleString()
+    : "no credentials stored";
+  $("secSub").textContent = `${up} of ${others.length} running`;
+
+  setHTML($("grid"), others.map(b => {
+    /* An external board is never "stopped" and has no port, so it gets its own
+       pill and its host in place of one. Reusing the running/stopped pair
+       would have the Hub claiming credit for something it does not run. */
+    const state = b.external ? "running" : (!b.present ? "missing" : (b.running ? "running" : ""));
+    const pill = b.external
+      ? `<span class="pill p-tag"><i></i>Hosted</span>`
+      : (!b.present ? `<span class="pill p-err"><i></i>Folder missing</span>`
+        : (b.running ? `<span class="pill p-run"><i></i>Running</span>`
+                     : `<span class="pill p-off"><i></i>Stopped</span>`));
+    const tags = (b.sources || []).map(s => `<span class="pill p-tag">${esc(s)}</span>`).join("");
+    const where = b.external
+      ? esc(String(b.url).replace(/^https?:\/\//, "").replace(/\/$/, ""))
+      : ":" + b.port;
+
+    return `<div class="board ${state}">
+      <div class="board-top">
+        <span class="serial">${esc(b.serial)}</span>
+        <h3>${esc(b.name)}</h3>
+      </div>
+      <p>${esc(b.blurb)}</p>
+      <div class="board-meta">${pill}${tags}
+        <span class="where">${where}</span></div>
+      ${b.portMismatch ? `<div class="hint">Registry says ${b.serial} is on a different
+        port than its own config — the board's config wins.</div>` : ""}
+      <div class="board-act">
+        ${b.external
+          ? `<a class="mini dark" href="${esc(b.url)}" target="_blank" rel="noopener">Open</a>`
+          : (b.present ? `<button class="mini dark" data-launch="${b.serial}">
+              ${b.running ? "Open" : "Start and open"}</button>` : "")}
+        ${b.needsToken ? `<button class="mini" data-token="${esc(b.needsToken)}">Token</button>
+        <button class="mini" data-qr="${esc(b.serial)}">QR</button>` : ""}
+        ${!b.external && b.running ? `<button class="mini danger" data-stop="${b.serial}">Stop</button>` : ""}
+      </div>
+    </div>`;
+  }).join(""));
+
+  if(unlocked()) paintAdmin();
+}
+
+/* A masked token would say nothing useful, so this row reports the refresh
+   token's presence and the access token's age instead. An expired access token
+   is not a problem — ZO-002 refreshes on its next call — so it reads as signed
+   in rather than as a warning. */
+function mcpSay(m){
+  if(!m || !m.set) return m && m.registered ? "registered, not signed in" : "not connected";
+  if(!m.expiresAt) return "signed in";
+  const left = Math.round((new Date(m.expiresAt) - Date.now()) / 60000);
+  return left > 0 ? `signed in — token good for ${left} min`
+                  : "signed in — token refreshes on next use";
+}
+
+/* Every row is addressed the same way, so painting is one loop rather than
+   four hard-coded ids. The key matches the server's, which is what lets the
+   sign-in phases and the stored credentials be looked up side by side. */
+const CONN_ROWS = () => [...document.querySelectorAll(".conn[data-src]")];
+const rowKey = el => el.dataset.src === "garage"
+  ? `garage:${el.dataset.env}` : el.dataset.src;
+
+/* What the sweep has to say about a stored cookie.
+
+   Three of the four states are worth showing and one is not. `dead` overrides
+   the stored text entirely and turns the row red — that is the whole feature.
+   `unknown` is deliberately NOT red: it means the last probe got no answer, or
+   that this cookie has not been probed yet, and a dropped VPN must not look
+   like an expiry. It gets a quiet suffix instead, so the row is honest about
+   not knowing without crying wolf. `live` says so, because "saved …a1b2c3d4"
+   never distinguished a checked session from an unchecked one and that
+   ambiguity is what made the old row untrustworthy. */
+function healthSay(key, stored){
+  const h = ((S.health || {}).keys || {})[key];
+  if(!h || !stored.ok) return stored;
+  if(h.state === "dead")    return { text: "session expired — reconnect", ok: false };
+  if(h.state === "unknown") return { text: stored.text + " · last check failed", ok: true };
+  if(h.state === "live")    return { text: stored.text + " · checked", ok: true };
+  return stored;
+}
+
+function storedFor(key, c){
+  if(key === "github")   return { text: c.github && c.github.set ? `saved ${c.github.hint}` : "not set",
+                                  ok: Boolean(c.github && c.github.set) };
+  // Not swept: MCP carries its own expiry and refreshes on the next call.
+  if(key === "mcp")      return { text: mcpSay(c.garageMcp), ok: Boolean(c.garageMcp && c.garageMcp.set) };
+  if(key === "intrepid") return healthSay(key,
+    { text: c.intrepid && c.intrepid.set ? `saved ${c.intrepid.hint}` : "not connected",
+      ok: Boolean(c.intrepid && c.intrepid.set) });
+  const g = (c.garage || {})[key.split(":")[1]];
+  return healthSay(key,
+    { text: g && g.set ? `saved ${g.hint}` : "not connected", ok: Boolean(g && g.set) });
+}
+
+/* A live attempt outranks the stored value: mid-sign-in, what the row should
+   say is what is happening, not what was true before the click. */
+function paintRow(el, c, phases){
+  const key = rowKey(el);
+  const st  = el.querySelector(".st");
+  const go  = el.querySelector("[data-go]");
+  const ph  = (phases || {})[key] || { phase: "idle" };
+  const busy = ph.phase === "opening" || ph.phase === "waiting" || ph.phase === "verifying";
+  const stored = storedFor(key, c);
+
+  el.classList.toggle("busy", busy);
+  el.classList.toggle("ok",  !busy && stored.ok && ph.phase !== "failed");
+  el.classList.toggle("bad", !busy && (!stored.ok || ph.phase === "failed"));
+
+  if(busy)                        st.textContent = ph.detail || "Signing in…";
+  else if(ph.phase === "failed")  st.textContent = ph.detail || ph.error || "Sign-in failed";
+  else if(ph.phase === "cancelled" && !stored.ok) st.textContent = "Sign-in cancelled";
+  else                            st.textContent = stored.text;
+
+  // Not every row has one: the pasted-token row has nothing to sign in to.
+  if(go){
+    go.textContent = busy ? "Cancel" : (stored.ok ? "Sign in again" : "Connect");
+    go.classList.toggle("dark", !busy);
+    go.classList.toggle("danger", busy);
+    // MCP has no capture loop to interrupt — cancelling it would only lie about
+    // stopping something that is finishing in a browser tab regardless.
+    go.disabled = busy && key === "mcp";
+  }
+}
+
+function paintConns(){
+  const c = S.creds; if(!c) return;
+  for(const el of CONN_ROWS()) paintRow(el, c, S.signin);
+  paintCredCol();
+
+  /* The rail carries the section's worst news, so a missing credential is
+     visible from a section you are not looking at. MCP is left out of the
+     red: unset costs display names and nothing else, and a permanent red dot
+     for something optional is a dot nobody reads after the first week. */
+  const rows  = CONN_ROWS();
+  const busy  = rows.some(el => el.classList.contains("busy"));
+  // MCP and GitHub are both optional — a permanent red dot for something that
+  // is fine to leave unset is a dot nobody reads after the first week.
+  const optional = new Set(["mcp", "github"]);
+  const short = rows.some(el => !optional.has(el.dataset.src) && el.classList.contains("bad"));
+  const warn  = $("railWarnSignins");
+  warn.hidden = !(busy || short);
+  warn.classList.toggle("busy", busy);
+}
+
+/* The freshest of the three checks, not each one separately: the sweep does
+   all three together, so three identical timestamps would be three rows of
+   noise saying one thing. */
+function paintHealth(){
+  const h = S.health;
+  if(!h){ $("healthWhen").textContent = "—"; return; }
+
+  const stamps = Object.values(h.keys || {})
+    .map(v => v.checkedAt && new Date(v.checkedAt).getTime()).filter(Boolean);
+  const last = stamps.length ? Math.max(...stamps) : null;
+
+  const secs = last ? Math.round((Date.now() - last) / 1000) : null;
+  $("healthWhen").textContent =
+    last == null ? "not checked yet"
+    : secs < 60  ? "checked just now"
+    : `checked ${new Date(last).toLocaleTimeString()}`;
+
+  const mins = Math.round((h.intervalMs || 0) / 60000);
+  $("healthHow").textContent =
+    `Every cookie above is re-probed every ${mins} min, and ${h.strikes} rejections in a row `
+    + `counts as expired — one bad answer does not. `
+    + (h.autoReconnect
+        ? "A session found expired opens its own sign-in window, once per expiry."
+        : "Auto-reconnect is off: an expired session goes red and waits for you.");
+}
+
+function paintAdmin(){
+  const c = S.creds; if(!c) return;
+  paintConns();
+  paintHealth();
+  $("storePath").textContent   = c.file;
+  $("storeUpdated").textContent= c.updated ? new Date(c.updated).toLocaleString() : "never";
+  setHTML($("serialRows"), S.boards.map(b =>
+    `<tr><td class="s">${esc(b.serial)}</td><td>${esc(b.name)}</td>
+      <td class="p">${b.external ? "—" : b.port}</td>
+      <td class="p">${b.external ? esc(String(b.url).replace(/^https?:\/\//, ""))
+                                 : "~/" + esc(b.dir.split(/[\\/]/).pop())}</td></tr>`).join(""));
+}
+
+/* The poll used to clear the notice area on every pass, which meant anything
+   you were told — "token saved", "cookie stored" — disappeared within fifteen
+   seconds of being read. It now only clears the message it put there itself. */
+let hubDown = false;
+async function refresh(){
+  try{
+    paint(await api("/api/state"));
+    if(hubDown){ clearNotes(); hubDown = false; }
+  }catch(err){
+    hubDown = true;
+    note("Could not reach the hub: " + err.message, true);
+  }
+}
+$("refreshBtn").addEventListener("click", refresh);
+
+/* ── copying a token ──
+   For a board hosted elsewhere that syncs with its own credential: the token
+   lives in the shared store like everything else, and this hands it to the
+   clipboard so the sync field is one paste away rather than a hunt through a
+   JSON file.
+
+   navigator.clipboard needs a secure context. The Hub is on localhost, which
+   counts — but a fallback is still worth having, because the failure mode
+   otherwise is a button that looks like it worked and did not. */
+async function copyText(text){
+  try{
+    await navigator.clipboard.writeText(text);
+    return true;
+  }catch{
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;top:-2000px;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch { ok = false; }
+    ta.remove();
+    return ok;
+  }
+}
+
+document.addEventListener("click", async e => {
+  const tk = e.target.closest("[data-token]");
+  if(!tk) return;
+  const restore = tk.textContent;
+  tk.disabled = true;
+  try{
+    const d = await api("/api/token/github");
+    const ok = await copyText(d.token);
+    tk.textContent = ok ? "Copied" : "Copy failed";
+    tk.classList.toggle("copied", ok);
+    if(!ok) note("Could not reach the clipboard — the token is in " + S.creds.file, true);
+  }catch(err){
+    tk.textContent = "No token";
+    note(err.message, true);
+  }finally{
+    setTimeout(() => { tk.textContent = restore; tk.classList.remove("copied");
+                       tk.disabled = false; }, 1800);
+  }
+});
+
+/* ── estate updates ──
+   Check is a plain GET and open to anyone; applying is a POST. Neither is
+   passcode-gated, because every copy of the Hub shares one passcode and the
+   thing being protected — pulling a published fix — is what we want people
+   doing. Publishing is the gated half. */
+
+function updGroupRow(g){
+  const n = g.files.length;
+  return `<div class="upd-grp${g.isHub ? " hub" : ""}">
+    <span class="serial">${esc(g.isHub ? "HUB" : g.serial)}</span>
+    <span class="nm">${esc(g.name)}</span>
+    <span class="ct">${n} file${n === 1 ? "" : "s"}</span>
+  </div>`;
+}
+
+function paintUpdate(d){
+  const body = $("updBody");
+  $("updTitle").textContent = "Update found";
+  $("updErr").hidden = true;
+  $("updGo").hidden = false;
+  $("updCancel").textContent = "Cancel";
+
+  const names = d.groups.map(updGroupRow).join("");
+  const files = d.groups.flatMap(g => g.files.map(f => f.rel));
+  const note = d.needsRestart
+    ? `<div class="upd-note">Some of this is the Hub itself. Boards restart on
+       their own; the Hub keeps running and will ask you to restart it once the
+       files are in — <b>server.js</b> and <b>registry.js</b> are only read at
+       startup.</div>`
+    : "";
+
+  body.innerHTML = names + note +
+    `<div class="upd-files">${files.map(esc).join("  ·  ")}</div>`;
+}
+
+async function checkUpdates({ quiet } = {}){
+  const btn = $("updCheck"), say = $("updSay");
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = "Checking…";
+  try{
+    const d = await api("/api/update/check");
+    if(d.upToDate){
+      say.textContent = "Up to date" + (d.published ? " — published " + when(d.published) : "");
+      return d;
+    }
+    say.textContent = `${d.total} file${d.total === 1 ? "" : "s"} to update`;
+    paintUpdate(d);
+    showModal($("updModal"));
+    return d;
+  }catch(err){
+    say.textContent = err.message;
+    if(!quiet) note(err.message, true);
+  }finally{
+    btn.disabled = false;
+    btn.textContent = was;
+  }
+}
+
+function when(iso){
+  const t = new Date(iso);
+  if(isNaN(t)) return "—";
+  const mins = Math.round((Date.now() - t) / 60000);
+  if(mins < 1)    return "just now";
+  if(mins < 60)   return mins + " min ago";
+  if(mins < 1440) return Math.round(mins / 60) + "h ago";
+  return Math.round(mins / 1440) + "d ago";
+}
+
+$("updCheck").addEventListener("click", () => checkUpdates());
+
+$("updGo").addEventListener("click", async () => {
+  const go = $("updGo");
+  go.disabled = true;
+  go.textContent = "Downloading…";
+  $("updErr").hidden = true;
+  try{
+    const d = await api("/api/update/apply", {});
+    $("updTitle").textContent = d.nothing ? "Already up to date" : "Update installed";
+    go.hidden = true;
+    $("updCancel").textContent = "Close";
+
+    const bits = [];
+    if(d.installed) bits.push(`<div class="upd-grp"><span class="nm">${d.installed} file${d.installed === 1 ? "" : "s"} installed</span></div>`);
+    if(d.deleted)   bits.push(`<div class="upd-grp"><span class="nm">${d.deleted} removed</span></div>`);
+    if(d.restarted && d.restarted.length)
+      bits.push(`<div class="upd-grp"><span class="nm">Restarted</span><span class="ct">${d.restarted.map(esc).join(", ")}</span></div>`);
+    if(d.backedUp && d.backedUp.length)
+      bits.push(`<div class="upd-note">${d.backedUp.length} file${d.backedUp.length === 1 ? " was" : "s were"}
+        edited on this machine and would have been overwritten. The old
+        version${d.backedUp.length === 1 ? "" : "s"} kept in
+        <b>.zo-backup</b>:<div class="upd-files">${d.backedUp.map(esc).join("  ·  ")}</div></div>`);
+    if(d.needsRestart)
+      bits.push(`<div class="upd-note"><b>Restart the Hub to finish.</b> The board
+        files are live now, but <b>server.js</b> and <b>registry.js</b> are only
+        read at startup, so this window is still running the old ones.</div>`);
+
+    $("updBody").innerHTML = bits.join("") || `<div class="upd-grp"><span class="nm">Nothing to do.</span></div>`;
+    $("updSay").textContent = d.nothing ? "Up to date" : "Updated";
+    refresh();
+  }catch(err){
+    $("updErr").textContent = err.message;
+    $("updErr").hidden = false;
+    go.disabled = false;
+    go.textContent = "Try again";
+  }
+});
+
+/* ── publishing ── */
+
+function paintPublish(d){
+  const n = d.added.length + d.changed.length + d.removed.length;
+  $("pubSummary").textContent = d.first
+    ? `first publish — ${d.files.length} files`
+    : (n ? `${n} file${n === 1 ? "" : "s"} to send` : "nothing to send");
+
+  const line = (label, cls, list) => list.length
+    ? `<div><b class="${cls}">${label}</b> ${list.map(esc).join("  ·  ")}</div>` : "";
+  const html = d.first
+    ? line("all", "add", d.files)
+    : line("new", "add", d.added) + line("changed", "chg", d.changed) + line("removed", "del", d.removed);
+
+  $("pubList").innerHTML = html || "<div>Nothing has changed since the last publish.</div>";
+  $("pubList").hidden = false;
+  $("pubDropped").textContent = d.dropped.length
+    ? `${d.dropped.length} machine-local file dropped: ${d.dropped.join(", ")}`
+    : "";
+}
+
+/* admin() owns the button's disabled state and label for the duration, so these
+   handlers hand it over rather than setting it either side and fighting it. */
+function publishRefused(message){
+  $("pubList").hidden = false;
+  $("pubList").innerHTML = `<div class="del">${esc(message).replace(/\n/g, "<br>")}</div>`;
+  $("pubSummary").textContent = "refused";
+}
+
+$("pubRefresh").addEventListener("click", async e => {
+  try { paintPublish(await admin("/api/publish/preview", {}, e.target)); }
+  catch(err){ publishRefused(err.message); }
+});
+
+$("pubGo").addEventListener("click", async e => {
+  try{
+    const d = await admin("/api/publish", { message: $("pubMsg").value }, e.target);
+    if(d.nothing){
+      note("Nothing had changed — nothing was sent.");
+    }else{
+      note(`Published ${d.commit.slice(0, 8)} — every Hub can now Check for Updates.`);
+      $("pubMsg").value = "";
+    }
+    // Re-preview rather than painting the push result: what was just sent is no
+    // longer pending, and showing it as outstanding would invite a second push.
+    paintPublish(await admin("/api/publish/preview", {}));
+  }catch(err){
+    note(err.message, true);
+    publishRefused(err.message);
+  }
+});
+
+/* ── showing a token as a QR ──
+   The clipboard solves this on one machine and cannot cross to a second, which
+   is the whole gap: a teammate holding a phone has no way to receive a
+   93-character token except by being read it aloud. Painting it as a QR keeps
+   it out of Slack, out of a text file, and out of the repo.
+
+   It is a live credential on a screen, so it does not linger: sixty seconds,
+   then it closes itself. */
+const QR_SECONDS = 60;
+let qrTimer = null;
+
+function stopQr(){
+  if(qrTimer){ clearInterval(qrTimer); qrTimer = null; }
+  const cv = $("qrCanvas");
+  if(!cv) return;
+  cv.getContext("2d").clearRect(0, 0, cv.width, cv.height);
+  cv.width = cv.height = 0;
+}
+
+/* Whole pixels per module, always. Letting the browser scale a QR to fit a box
+   blurs the module edges, and a blurred edge is the difference between a scan
+   that takes a moment and one that never resolves. */
+function paintQr(canvas, text){
+  const q = qrEncode(text);
+  const quiet = 4;
+  const total = q.size + quiet * 2;
+  const scale = Math.max(4, Math.floor(300 / total));
+  const px = total * scale;
+
+  canvas.width = canvas.height = px;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, px, px);
+  ctx.fillStyle = "#000000";
+  for(let r = 0; r < q.size; r++){
+    for(let c = 0; c < q.size; c++){
+      if(q.modules[r][c]) ctx.fillRect((c + quiet) * scale, (r + quiet) * scale, scale, scale);
+    }
+  }
+  return q;
+}
+
+document.addEventListener("click", async e => {
+  const btn = e.target.closest("[data-qr]");
+  if(!btn) return;
+
+  const board = S.boards.find(x => x.serial === btn.dataset.qr);
+  $("qrWhere").textContent = board ? `${board.serial} · ${board.name}` : btn.dataset.qr;
+  $("qrErr").hidden = true;
+  $("qrCount").textContent = "";
+  stopQr();
+  showModal($("qrModal"));
+
+  let token;
+  try{
+    token = (await api("/api/token/github")).token;
+  }catch(err){
+    $("qrErr").textContent = err.message;
+    $("qrErr").hidden = false;
+    return;
+  }
+
+  // The modal may have been dismissed while the fetch was in flight; painting a
+  // token into a closed dialog would leave it there for the next open.
+  if(openEl !== $("qrModal")) return;
+
+  try{
+    paintQr($("qrCanvas"), token);
+  }catch(err){
+    $("qrErr").textContent = "Could not render the code — " + err.message;
+    $("qrErr").hidden = false;
+    return;
+  }
+
+  let left = QR_SECONDS;
+  $("qrCount").textContent = `Hides in ${left}s`;
+  qrTimer = setInterval(() => {
+    left--;
+    if(left <= 0){ hideModal(); return; }        // hideModal clears the timer
+    $("qrCount").textContent = `Hides in ${left}s`;
+  }, 1000);
+});
+
+/* ── launching ──
+   The tab is opened inside the click, before any await: a window opened after
+   an async hop is no longer trusted as user-initiated and gets blocked. It
+   parks on about:blank while the board boots, then goes where it is told. */
+document.addEventListener("click", async e => {
+  const go = e.target.closest("[data-launch]");
+  const st = e.target.closest("[data-stop]");
+  if(!go && !st) return;
+
+  if(go){
+    const serial = go.dataset.launch;
+    const b = S.boards.find(x => x.serial === serial);
+    const tab = window.open(b && b.running ? b.url : "", "_blank");
+    const label = go.textContent;
+    go.disabled = true; go.innerHTML = '<i class="spin"></i>Starting';
+    try{
+      const d = await api("/api/launch", { serial });
+      if(d.ok){ if(tab) tab.location = d.url; }
+      else { if(tab) tab.close(); note(`${serial}: ${d.error}`, true); }
+      await refresh();
+    }catch(err){ if(tab) tab.close(); note(err.message, true); }
+    finally{ go.disabled = false; go.innerHTML = label; }
+    return;
+  }
+
+  const serial = st.dataset.stop;
+  st.disabled = true;
+  try{ await api("/api/stop", { serial }); await refresh(); }
+  catch(err){ note(err.message, true); }
+  finally{ st.disabled = false; }
+});
+
+/* ── admin gate ── */
+$("adminBtn").addEventListener("click", () => {
+  showModal($("adminModal"));
+  if(!unlocked()) setTimeout(() => otpBoxes[0].focus(), 60);
+});
+
+const otpBoxes = Array.from(document.querySelectorAll("#otp .otp-box"));
+const otpValue = () => otpBoxes.map(b => b.value).join("");
+function otpClear(focus){
+  otpBoxes.forEach(b => { b.value = ""; b.classList.remove("filled"); });
+  $("otp").classList.remove("bad");
+  if(focus) otpBoxes[0].focus();
+}
+function otpFill(digits){
+  otpBoxes.forEach((b, i) => { b.value = digits[i] || ""; b.classList.toggle("filled", Boolean(b.value)); });
+  const next = otpBoxes.findIndex(b => !b.value);
+  (next === -1 ? otpBoxes[5] : otpBoxes[next]).focus();
+  if(otpValue().length === 6) tryUnlock();
+}
+otpBoxes.forEach((box, i) => {
+  box.addEventListener("input", () => {
+    const digits = box.value.replace(/\D/g, "");
+    box.value = digits.slice(0, 1);
+    box.classList.toggle("filled", Boolean(box.value));
+    $("gateErr").textContent = ""; $("otp").classList.remove("bad");
+    if(digits.length > 1){ otpFill(otpValue().slice(0, i) + digits); return; }
+    if(box.value && i < 5) otpBoxes[i + 1].focus();
+    if(otpValue().length === 6) tryUnlock();
+  });
+  box.addEventListener("keydown", e => {
+    if(e.key === "Backspace" && !box.value && i > 0){
+      e.preventDefault(); otpBoxes[i-1].value = "";
+      otpBoxes[i-1].classList.remove("filled"); otpBoxes[i-1].focus();
+    }
+    if(e.key === "ArrowLeft"  && i > 0){ e.preventDefault(); otpBoxes[i-1].focus(); }
+    if(e.key === "ArrowRight" && i < 5){ e.preventDefault(); otpBoxes[i+1].focus(); }
+    if(e.key === "Enter") tryUnlock();
+  });
+  box.addEventListener("paste", e => {
+    e.preventDefault();
+    const d = (e.clipboardData.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+    if(d) otpFill(d);
+  });
+  box.addEventListener("focus", () => box.select());
+});
+
+let unlocking = false;
+async function tryUnlock(){
+  if(unlocking) return;
+  const code = otpValue();
+  if(code.length < 6){ $("gateErr").textContent = "Enter all six digits."; return; }
+  unlocking = true;
+  try{
+    const d = await api("/api/admin/unlock", { password: code });
+    S.password = code; S.creds = d.creds; S.boards = d.boards;
+    S.signin = d.signin || {};
+    if(d.health) S.health = d.health;
+    otpClear(false); $("gateErr").textContent = "";
+    $("gate").hidden = true;
+    $("adminBody").hidden = false;
+    $("adminModal").classList.add("unlocked");
+    paintAdmin();
+    // An attempt started before this panel was opened — pick it up rather than
+    // showing a frozen "waiting" that never resolves.
+    if(anyBusy()) startPolling();
+  }catch(err){
+    $("otp").classList.add("bad");
+    $("gateErr").textContent = err.message === "Wrong password" ? "Incorrect code." : err.message;
+    setTimeout(() => otpClear(true), 420);
+  }finally{ unlocking = false; }
+}
+$("unlock").addEventListener("click", tryUnlock);
+
+async function admin(path, extra, btn){
+  const restore = btn ? btn.textContent : null;
+  if(btn){ btn.disabled = true; btn.textContent = "Working"; }
+  try{ return await api(path, { password: S.password, ...(extra || {}) }); }
+  finally{ if(btn){ btn.disabled = false; btn.textContent = restore; } }
+}
+
+/* Rail-driven sections: the rail item and the pane section share a key, so
+   adding a section is markup only. */
+document.querySelectorAll(".rail-item[data-sec]").forEach(item => {
+  item.addEventListener("click", () => {
+    const key = item.dataset.sec;
+    document.querySelectorAll(".rail-item[data-sec]").forEach(i => i.classList.toggle("on", i === item));
+    document.querySelectorAll(".admin-pane .sec").forEach(sec =>
+      sec.classList.toggle("on", sec.id.toLowerCase() === "sec" + key));
+  });
+});
+
+/* ── signing in ────────────────────────────────────────────────────────
+   One press. Connect opens the window and the server keeps watching it, so
+   this does not ask anyone to come back and press a second button once they
+   are signed in — it polls until the row settles.
+
+   The poll is what makes the panel safe to close: the capture is happening
+   server-side either way, and reopening simply picks up whatever phase it is
+   in. Nothing here holds the state. */
+
+const SIGNIN_POLL_MS = 1500;
+let signinPoll = null;
+
+const anyBusy = () => Object.values(S.signin || {})
+  .some(p => p.phase === "opening" || p.phase === "waiting" || p.phase === "verifying");
+
+function startPolling(){
+  if(signinPoll) return;
+  signinPoll = setInterval(async () => {
+    if(!S.password) return stopPolling();
+    try{
+      const d = await admin("/api/admin/signin", {});
+      S.signin = d.signin; S.creds = d.creds;
+      if(d.health) S.health = d.health;
+      paintConns(); paintHealth();
+      if(!anyBusy()){
+        stopPolling();
+        // A captured cookie can change what the boards say about themselves.
+        refresh().catch(() => {});
+      }
+    }catch{ stopPolling(); }
+  }, SIGNIN_POLL_MS);
+}
+function stopPolling(){ clearInterval(signinPoll); signinPoll = null; }
+
+document.addEventListener("click", async e => {
+  const go   = e.target.closest("[data-go]");
+  const forg = e.target.closest("[data-forget]");
+  if(!go && !forg) return;
+  const row = (go || forg).closest(".conn[data-src]");
+  if(!row || !S.password) return;
+
+  const src = row.dataset.src;
+  const env = row.dataset.env || "prod";
+  const key = rowKey(row);
+  const st  = row.querySelector(".st");
+
+  try{
+    if(forg){
+      const d = await admin(src === "mcp" ? "/api/admin/mcp/signout"
+                                          : "/api/admin/source/forget",
+                            { source: src, env }, forg);
+      S.creds = d.creds; S.signin = d.signin || S.signin;
+      if(d.health) S.health = d.health;
+      paintConns(); paintHealth(); await refresh();
+      return;
+    }
+
+    // Mid-attempt the same button cancels — one control, two states, so the
+    // row never grows a button that is meaningless most of the time.
+    const busy = (S.signin || {})[key];
+    if(busy && (busy.phase === "waiting" || busy.phase === "verifying" || busy.phase === "opening")){
+      const d = await admin("/api/admin/source/cancel", { source: src, env });
+      S.signin = { ...S.signin, [key]: d.signin };
+      S.creds  = d.creds; paintConns();
+      return;
+    }
+
+    // Paint the intent immediately: the POST waits on a browser launch, and a
+    // row that sat unchanged for a second looked like a dead button.
+    row.classList.add("busy");
+    st.textContent = "Opening a sign-in window…";
+
+    const d = await admin(src === "mcp" ? "/api/admin/mcp/signin"
+                                        : "/api/admin/source/connect",
+                          { source: src, env });
+    S.signin = { ...S.signin, [key]: d.signin };
+    if(d.creds)  S.creds  = d.creds;
+    if(d.health) S.health = d.health;
+    paintConns(); paintHealth();
+    startPolling();
+  }catch(err){
+    st.textContent = err.message;
+    row.classList.remove("busy");
+  }
+});
+
+/* Check now. Worth having for the same reason the sweep is worth having: the
+   five-minute cadence is right for noticing an expiry and wrong for standing
+   in front of after you have just fixed one.
+
+   It can open a sign-in window as a side effect — a cookie that has been dead
+   since before the Hub started reaches its second strike here rather than in
+   five minutes' time. That is the feature working, not a surprise. */
+$("healthNow").addEventListener("click", async e => {
+  try{
+    const d = await admin("/api/admin/source/recheck", {}, e.target);
+    S.health = d.health; S.creds = d.creds; S.signin = d.signin || S.signin;
+    paintConns(); paintHealth();
+    if(anyBusy()) startPolling();
+
+    const dead = Object.entries(d.health.keys || {})
+      .filter(([, v]) => v.state === "dead").map(([k]) => k);
+    note(dead.length
+      ? `Expired: ${dead.join(", ")}. ${d.health.autoReconnect
+          ? "A sign-in window is opening." : "Press Connect on those rows."}`
+      : "Every session checked out.");
+  }catch(err){ note(err.message, true); }
+});
+
+$("ghSave").addEventListener("click", async e => {
+  const v = $("ghIn").value.trim();
+  if(!v) return note("Paste a token first.", true);
+  try{
+    const d = await admin("/api/admin/github/save", { token: v }, e.target);
+    // Cleared immediately: a token left sitting in a textarea is one shoulder
+    // away from being read, and it is saved now anyway.
+    $("ghIn").value = "";
+    S.creds = d.creds; paintConns();
+    note("Token saved. The Token button on that board's tile now copies it.");
+  }catch(err){ note(err.message, true); }
+});
+
+$("ghForget").addEventListener("click", async e => {
+  try{
+    const d = await admin("/api/admin/github/forget", {}, e.target);
+    S.creds = d.creds; paintConns();
+  }catch(err){ note(err.message, true); }
+});
+
+/* ── the banner ──
+   The pod field. Everything here is an attempt to reproduce one frame's
+   drawing style, and the choices below all come from zooming into it rather
+   than from remembering it. What the enlargement shows, and what earlier
+   passes each got wrong:
+
+     · The contour is a thick solid band of black, not a line and not a fringe
+       of fine hairs. It sits inside the shape edge and it is heavy — call it
+       a fifteenth of the pod's width.
+     · Bleeding inward from that band is a scatter of short dry-brush flecks
+       that run ALONG the contour, not across it. Perpendicular marks read as
+       fur; tangential ones read as a loaded brush skipping.
+     · The body is close to flat. All the modelling is in the ink.
+     · The mark inside is a dense scribble of overlapping strokes, not a
+       smooth shape.
+     · The pods are big. The reference is a close-up — a pod is a fifth of the
+       frame across, not a twentieth.
+     · The background is irregular charcoal strands, and the black immediately
+       around each pod is pure, with the strands only picking up further out. */
+(function eyes(){
+  const glow = $("eyeGlow"), field = $("eyeField"), strands = $("strands");
+  if(!glow || !field || !strands) return;
+  const defs = glow.parentNode.querySelector("defs");
+  if(!defs) return;
+
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (n, a) => { const x = document.createElementNS(NS, n);
+    for(const k in a) x.setAttribute(k, a[k]); return x; };
+
+  /* Seeded, so the layout is identical on every load. A banner that reshuffles
+     on refresh cannot be art-directed, and is distracting besides — you notice
+     that it moved without being able to say what moved. */
+  function rng(seed){
+    return function(){
+      seed = seed + 0x6D2B79F5 | 0;
+      let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  const rnd = rng(20260809);
+  const span = (lo, hi) => lo + rnd() * (hi - lo);
+  const W = 1600, H = 300;
+
+  /* ── background ──
+     Vertical charcoal strands, each one drifting a little off true so the
+     field does not read as ruled. */
+  {
+    const g = el("g", { fill:"none", "stroke-linecap":"round" });
+    for(let i = 0; i < 190; i++){
+      const x = span(-10, W + 10), drift = span(-7, 7);
+      const y0 = span(-30, 30), y1 = span(H - 30, H + 30);
+      const grey = Math.round(span(12, 31));
+      g.appendChild(el("path", {
+        d: "M" + x.toFixed(1) + " " + y0.toFixed(1) +
+           "C" + (x + drift).toFixed(1) + " " + (y0 + H * .35).toFixed(1) +
+           " " + (x - drift).toFixed(1) + " " + (y0 + H * .7).toFixed(1) +
+           " " + (x + drift * .4).toFixed(1) + " " + y1.toFixed(1),
+        stroke: "rgb(" + grey + "," + (grey + 2) + "," + (grey + 7) + ")",
+        "stroke-width": span(0.5, 4.5).toFixed(2),
+        opacity: span(0.14, 0.46).toFixed(2)
+      }));
+    }
+    strands.appendChild(g);
+  }
+
+  /* ── the inked edge ──
+     Walk the outline; at each step lay a short stroke ALONG it, pushed a
+     random distance inward. Depth is biased hard toward the contour, so the
+     flecks crowd where the brush would have run out of ink and thin out as
+     they reach into the body. */
+  function drybrush(path){
+    const total = path.getTotalLength();
+    if(!total) return null;
+
+    /* Centroid, to know which way is in. Every shape here is a convex-ish
+       blob, so "toward the middle" is the inward normal. */
+    let cx = 0, cy = 0;
+    const N = 90;
+    for(let i = 0; i < N; i++){
+      const p = path.getPointAtLength(total * i / N);
+      cx += p.x; cy += p.y;
+    }
+    cx /= N; cy /= N;
+
+    /* The solid band, laid down as overlapping short segments of varying
+       width rather than one even stroke. In the reference the black swells
+       and thins its way around a pod the way a brush does; a constant-width
+       stroke is the difference between drawn and vector-drawn, and it is
+       visible at a glance even when nothing else is. */
+    const band = el("g", { fill:"none", stroke:"#0A0B10",
+      "stroke-linecap":"round", "stroke-linejoin":"round" });
+    for(let d = 0; d < total; d += 5){
+      const p = path.getPointAtLength(d);
+      const q = path.getPointAtLength(Math.min(d + 8, total));
+      band.appendChild(el("line", {
+        x1: p.x.toFixed(1), y1: p.y.toFixed(1),
+        x2: q.x.toFixed(1), y2: q.y.toFixed(1),
+        "stroke-width": span(11, 27).toFixed(1)
+      }));
+    }
+
+    /* The dry-brush scatter, in clumps rather than evenly around the rim.
+
+       Emitting one fleck every N units at a random depth produced a tidy
+       dotted ring — regular spacing plus an opacity that faded with depth,
+       which came out grey and mechanical. A brush running dry does not do
+       that: it lays down a run of solid black marks at roughly one depth,
+       skips, and picks up again somewhere else. So marks come in short arcs
+       that share a depth, separated by gaps, and they stay black. */
+    const g = el("g", { fill:"none", stroke:"#0A0B10", "stroke-linecap":"round" });
+    let d = 0;
+    while(d < total){
+      const runEnd = d + span(6, 22);
+      const base   = 8 + Math.pow(rnd(), 1.8) * 11;
+      while(d < runEnd && d < total){
+        const p = path.getPointAtLength(d);
+        const q = path.getPointAtLength((d + 2) % total);
+        const tx = (q.x - p.x), ty = (q.y - p.y);
+        const m = Math.hypot(tx, ty) || 1;
+        const ux = tx / m, uy = ty / m;
+        let nx = -uy, ny = ux;
+        if(nx * (p.x - cx) + ny * (p.y - cy) > 0){ nx = -nx; ny = -ny; }
+
+        const depth = base + span(-4, 6);
+        const len   = span(2.5, 10);
+        const bx = p.x + nx * depth, by = p.y + ny * depth;
+        g.appendChild(el("line", {
+          x1: (bx - ux * len / 2).toFixed(1), y1: (by - uy * len / 2).toFixed(1),
+          x2: (bx + ux * len / 2).toFixed(1), y2: (by + uy * len / 2).toFixed(1),
+          "stroke-width": span(1.2, 3.2).toFixed(2),
+          opacity: span(0.62, 1).toFixed(2)
+        }));
+        d += span(1.6, 3.6);
+      }
+      d += span(3, 20);   // the skip
+    }
+    return { band: band, flecks: g };
+  }
+
+  /* ── the mark ──
+     A lens of overlapping strokes with a few running off one end as a tail.
+     Three variants so the same scribble is not stamped on every pod. */
+  function scrawl(){
+    const g = el("g", { fill:"none", stroke:"#15130E", "stroke-linecap":"round" });
+    const HH = 17, HW = 5.5;
+    for(let i = 0; i < 62; i++){
+      const t = span(-1, 1);
+      const y = t * HH;
+      const w = HW * Math.sqrt(Math.max(0, 1 - t * t));
+      const x = span(-w, w);
+      const a = Math.PI / 2 + span(-0.55, 0.55);
+      const L = span(2.5, 8);
+      g.appendChild(el("line", {
+        x1: (x - Math.cos(a) * L / 2).toFixed(1), y1: (y - Math.sin(a) * L / 2).toFixed(1),
+        x2: (x + Math.cos(a) * L / 2).toFixed(1), y2: (y + Math.sin(a) * L / 2).toFixed(1),
+        "stroke-width": span(0.9, 2.5).toFixed(2),
+        opacity: span(0.45, 1).toFixed(2)
+      }));
+    }
+    for(let i = 0; i < 3; i++){
+      const x = span(-3, 3);
+      g.appendChild(el("line", {
+        x1: x.toFixed(1), y1: (HH - span(0, 6)).toFixed(1),
+        x2: (x + span(-3, 3)).toFixed(1), y2: (HH + span(3, 10)).toFixed(1),
+        "stroke-width": span(0.8, 1.8).toFixed(2),
+        opacity: span(0.35, 0.85).toFixed(2)
+      }));
+    }
+    return g;
+  }
+
+  const SHAPES = [1, 2, 3, 4, 5, 6];
+  for(const n of SHAPES){
+    const shape = $("sh" + n);
+    // Clip so the heavy stroke and the flecks stay inside the silhouette. A
+    // centred stroke would otherwise fatten every pod by half its width.
+    const cp = el("clipPath", { id: "cp" + n });
+    cp.appendChild(el("use", { href: "#sh" + n }));
+    defs.appendChild(cp);
+    const b = drybrush(shape);
+    if(b){
+      b.band.setAttribute("id", "bd" + n);   defs.appendChild(b.band);
+      b.flecks.setAttribute("id", "db" + n); defs.appendChild(b.flecks);
+    }
+  }
+  const MARKS = 3;
+  for(let i = 0; i < MARKS; i++){
+    const s = scrawl(); s.setAttribute("id", "mk" + i); defs.appendChild(s);
+  }
+
+  /* ── placement ──
+     Cells, not coordinates. The grid has more cells than pods, and the spare
+     ones are what makes the field able to move: when a pod shuts it releases
+     its cell, claims a free one, and opens there. Without the slack every
+     move would be a swap with an occupied cell and pods would pile up.
+
+     Far fewer and far bigger than early passes. The reference is a close-up —
+     a pod spans about a fifth of the frame, and at a twentieth it was
+     wallpaper. The outer rows run off the top and bottom edges the way the
+     reference crops its own. */
+  const COLS = 9, ROWS = 3, CELLS = COLS * ROWS, POD_N = 22;
+
+  function placement(cell, R){
+    const c = cell % COLS, r = (cell / COLS) | 0;
+    const edge = (r === 0 || r === ROWS - 1);
+    const sp = (lo, hi) => lo + R() * (hi - lo);
+    return {
+      cell: cell,
+      x: (c + .5) * (W / COLS) + sp(-.38, .38) * (W / COLS),
+      y: (r + .5) * (H / ROWS) + sp(-.5, .5) * (H / ROWS),
+      s: edge ? sp(.9, 1.5) : sp(.5, 1.05),
+      r: sp(-40, 40),
+      sh: SHAPES[Math.floor(R() * SHAPES.length)],
+      mk: Math.floor(R() * MARKS),
+      px: sp(-16, 16), py: sp(-14, 14), pr: sp(-40, 40), ps: sp(.55, 1.05)
+    };
+  }
+
+  // Seeded shuffle, so which cells start empty is stable across loads.
+  const order = [];
+  for(let i = 0; i < CELLS; i++) order.push(i);
+  for(let i = order.length - 1; i > 0; i--){
+    const j = Math.floor(rnd() * (i + 1));
+    const t = order[i]; order[i] = order[j]; order[j] = t;
+  }
+  const free = order.slice(POD_N);
+
+  function use(href, cls, tf, attrs){
+    const u = el("use", { href: href, class: cls });
+    if(tf) u.setAttribute("transform", tf);
+    for(const k in (attrs || {})) u.setAttribute(k, attrs[k]);
+    return u;
+  }
+
+  /* Two parallel trees: one blurred, one crisp. Same placement and the same
+     open-delay, so a pod and its glow move as one thing. Keeping the blur to a
+     single group filter is the whole reason they are apart. */
+  const cells = order.slice(0, POD_N).map((cell, i) => {
+    const p = placement(cell, rnd);
+
+    /* The halo is DARK. In the reference the strands go to pure black right up
+       against a pod and only reappear further out; a pale glow around each one
+       is a video-game bloom and reads instantly as the wrong medium. */
+    const gOut = el("g", { class:"eye" }), gLid = el("g", { class:"lid open" });
+    const halo  = use("#sh1", "halo",  "scale(1.14)");
+    const bloom = use("#sh1", "bloom", "scale(1.3)");
+    gLid.appendChild(halo); gLid.appendChild(bloom);
+    gOut.appendChild(gLid); glow.appendChild(gOut);
+
+    const fOut = el("g", { class:"eye" }), fLid = el("g", { class:"lid open" });
+    const body   = use("#sh1", "body",   null, { fill:"url(#bone)" });
+    const smudge = use("#sh1", "smudge", null, { fill:"url(#smudge)" });
+    const wash   = use("#sh1", "wash");
+    const mark   = use("#mk0", "mark");
+    // Heavy band first, flecks over it bleeding into the body.
+    const ink    = use("#bd1", "ink");
+    const quill  = use("#db1", "quill");
+    fLid.appendChild(body); fLid.appendChild(smudge); fLid.appendChild(wash);
+    fLid.appendChild(mark); fLid.appendChild(ink); fLid.appendChild(quill);
+    fOut.appendChild(fLid); field.appendChild(fOut);
+
+    const c = { parts:[gOut, fOut], lids:[gLid, fLid],
+                shapeParts:[halo, bloom, body, smudge, wash],
+                ink:ink, quill:quill, mark:mark, place:null };
+    // Stagger only the first opening; every later one is immediate.
+    const d = (rnd() * 1.15).toFixed(2) + "s";
+    gOut.style.setProperty("--d", d);
+    fOut.style.setProperty("--d", d);
+    dress(c, p);
+    return c;
+  });
+
+  /* Everything that has to change when a pod moves. Shape is five hrefs plus
+     two more on the inked edge and its clip — miss one and a pod ends up
+     wearing another shape's outline, which is subtle enough on a dark banner
+     to survive a casual look and obvious once you see it. */
+  function dress(c, p){
+    const at = "translate(" + p.x.toFixed(1) + "," + p.y.toFixed(1) + ") rotate("
+             + p.r.toFixed(1) + ") scale(" + p.s.toFixed(3) + ")";
+    for(const e of c.parts) e.setAttribute("transform", at);
+    for(const e of c.shapeParts) e.setAttribute("href", "#sh" + p.sh);
+    const clip = "url(#cp" + p.sh + ")";
+    c.ink.setAttribute("href", "#bd" + p.sh);   c.ink.setAttribute("clip-path", clip);
+    c.quill.setAttribute("href", "#db" + p.sh); c.quill.setAttribute("clip-path", clip);
+    c.mark.setAttribute("href", "#mk" + p.mk);
+    c.mark.setAttribute("transform",
+      "translate(" + p.px.toFixed(1) + "," + p.py.toFixed(1) + ") rotate("
+      + p.pr.toFixed(1) + ") scale(" + p.ps.toFixed(2) + ")");
+    c.place = p;
+  }
+
+  if(matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+  /* The estate's palette first, then a few that only exist out here. Blue
+     comes up twice on purpose — the estate is blue, and the stranger colours
+     land harder when they are the exception rather than the rule. */
+  const HUES = ["#3E6AE1","#3E6AE1","#7FA1F7","#12BB6A","#F5B31B",
+                "#E82127","#8B5BD6","#22D3EE","#FF7AC8"];
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  const rand = (lo, hi) => lo + Math.random() * (hi - lo);
+
+  function fire(c, hue){
+    for(const e of c.parts){
+      e.style.setProperty("--pulse", hue);
+      e.classList.remove("fire");
+      void e.getBoundingClientRect();   // reflow, or the restart is ignored
+      e.classList.add("fire");
+    }
+  }
+
+  /* A charge does not land on one pod and stop. It picks a seed, then jumps to
+     a few of its nearest neighbours a beat later, so the colour walks across
+     the field instead of blinking on and off in place. Neighbours are worked
+     out per cascade rather than cached, because the field rearranges itself
+     and a cached map would be sending charges to where pods used to be. */
+  function cascade(){
+    const hue = pick(HUES);
+    const i = Math.floor(Math.random() * cells.length);
+    fire(cells[i], hue);
+    const from = cells[i].place;
+    const hops = 1 + Math.floor(Math.random() * 3);
+    cells.map((c, j) => ({ j: j, d: Math.hypot(c.place.x - from.x, c.place.y - from.y) }))
+      .filter(o => o.j !== i)
+      .sort((a, b) => a.d - b.d)
+      .slice(0, 5)
+      .sort(() => Math.random() - 0.5)
+      .slice(0, hops)
+      .forEach((o, n) => setTimeout(() => fire(cells[o.j], hue), rand(100, 280) * (n + 1)));
+  }
+
+  (function loop(){
+    setTimeout(() => {
+      // A hidden tab still runs timers and there is nothing to see, so skip
+      // the work and just reschedule.
+      if(!document.hidden) cascade();
+      loop();
+    }, rand(600, 2600));
+  })();
+
+  /* ── the field rearranges ──
+     A pod shuts, and while it is dark it lets go of its cell, takes a free
+     one, and comes back a different shape and size somewhere else. Nothing
+     ever animates between the two positions — the move happens entirely
+     inside the closed frame, so what you see is a pod gone from here and a
+     pod arriving there, never one sliding across.
+
+     Each pod keeps its own clock. Shutting the field together read as the
+     page glitching: every shape vanishing and returning on one frame is a
+     repaint, not a face. */
+  const SHUT_MS = 340;
+
+  function relocate(c){
+    const slot = Math.floor(Math.random() * free.length);
+    const target = free[slot];
+    free[slot] = c.place.cell;          // ours goes back into the pool
+    dress(c, placement(target, Math.random));
+  }
+
+  for(const c of cells){
+    (function cycle(){
+      setTimeout(() => {
+        if(document.hidden){ cycle(); return; }
+        /* Drop the first-load stagger before the first shut, not after it.
+           animation-delay applies to whichever animation is running, so a pod
+           still carrying a 1.15s delay would sit fully open through its own
+           shut — and the relocation, which is on a plain 340ms timeout, would
+           land while it was still visible and show as a jump. */
+        for(const e of c.parts) e.style.setProperty("--d", "0s");
+        for(const l of c.lids){ l.classList.remove("open"); l.classList.add("shut"); }
+        setTimeout(() => {
+          relocate(c);
+          for(const l of c.lids){ l.classList.remove("shut"); l.classList.add("open"); }
+          cycle();
+        }, SHUT_MS);
+      }, rand(4500, 15000));
+    })();
+  }
+})();
+
+/* ── boot ── */
+refresh();
+// A board started or stopped elsewhere should not leave this stale for long.
+setInterval(() => { if(!openEl) refresh(); }, 15000);
+</script>
+</body>
+</html>

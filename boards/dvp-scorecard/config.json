@@ -1,0 +1,14 @@
+{
+  "port": 3130,
+  "trtId": null,
+
+  "intrepidApi": "https://intrepidapi.tesla.com/cogs/api/cogs",
+
+  "concurrency": 8,
+  "outputDir": "~/Desktop",
+
+  "minCars": 3,
+  "priorWeight": 10,
+
+  "defaultAdminPassword": "226565"
+}

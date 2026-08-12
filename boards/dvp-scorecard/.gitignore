@@ -1,0 +1,15 @@
+# Credentials & local state — per-user, never commit.
+.connections.json
+.admin.json
+
+# Uploaded/derived survey data — customer PII, stays local.
+data/
+*.xlsx
+*.csv
+
+# Portable runtime, if built here
+runtime/
+
+node_modules/
+.DS_Store
+Thumbs.db

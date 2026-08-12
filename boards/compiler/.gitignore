@@ -1,0 +1,9 @@
+# Credentials and machine state — never committed.
+.connections.json
+.admin.json
+
+# Caches, rebuildable from the source systems.
+.trt-cache.json
+
+node_modules/
+*.log

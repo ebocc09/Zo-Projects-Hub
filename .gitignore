@@ -1,0 +1,21 @@
+# The shared credential store lives outside the project, but never risk it.
+.admin.json
+credentials.json
+
+node_modules/
+*.log
+
+# Each board keeps its own runtime state — settings, caches, and any cookie
+# it fell back to before the hub existed. None of it belongs in a shared zip.
+boards/*/.connections.json
+boards/*/.garage.json
+boards/*/.tokens*.json
+boards/*/.client*.json
+boards/*/.admin.json
+boards/*/.trt-cache.json
+boards/*/.staff-cache.json
+boards/*/.measure-cache.json
+boards/*/.vin-trt-cache.json
+
+# Per-board server output from launches.
+logs/
