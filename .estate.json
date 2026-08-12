@@ -1,5 +1,5 @@
 {
-  "published": "2026-08-12T04:46:34.538Z",
+  "published": "2026-08-12T04:47:28.479Z",
   "files": {
     ".gitignore": "e11ff96107bcedf49101a58cc7cbdf1ce24debb3",
     "README.md": "704650fa66e8ac66095182e0b7b30181f219c359",
@@ -71,7 +71,6 @@
     "registry.js": "fe6d0eaae383f1128752ada9250783b79121650e",
     "server.js": "6152e1ad7cf3c8d6aacce6fb2255ff25cae35de8",
     "signin.js": "96659cd2cc5df13e0179ed59df1f2416c1d2df44",
-    "tok-check.cjs": "42081145cd95dd2fe75b4c9432ee1e8c30567ef8",
     "updater.js": "ab1c892fbfb49124db1ce3cc9723ff2bdbdb0f11"
   }
 }
