@@ -155,6 +155,45 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { q, sites: await L.searchSites(q, 20) });
     }
 
+    /* ── AD username → display name, for the other boards ──
+
+       This board is the only one allowed to speak MCP. The rule is written out
+       in credstore.js: the Hub mints tokens and never refreshes, exactly one
+       board consumes and rotates, and a second MCP consumer would reintroduce
+       a bug this estate has already had — two clients sharing a refresh token,
+       whoever refreshes first invalidating the other.
+
+       So when ZO-003 wanted full names instead of usernames, the answer was not
+       to copy the OAuth client into it. `lookup_user` is the one Garage call
+       with no cookie equivalent, and it already lives here behind a disk cache;
+       offering it over HTTP costs one route and keeps the single-writer
+       property intact.
+
+       No admin password: a display name is not privileged, the caller already
+       has the username, and the reply carries nothing else the lookup returns. */
+    if(p === "/api/staff" && req.method === "GET"){
+      const users = [...new Set((url.searchParams.get("users") || "")
+        .split(",").map(s => s.trim().toLowerCase()).filter(Boolean))];
+
+      if(!users.length) return sendJson(res, 200, { names: {} });
+      // A centre's roster is tens of people. A request far past that is a
+      // caller with a bug, and answering it would mean that many MCP calls.
+      if(users.length > 200){
+        return sendJson(res, 400, { error: "Too many usernames in one request (max 200)" });
+      }
+
+      const cache = await L.resolveStaff(users);
+      const names = {};
+      for(const u of users){
+        const n = L.staffName(cache, u);
+        // staffName falls back to the username itself. Send that back as
+        // absent rather than as an answer — the caller has its own fallback
+        // and cannot tell an echo from a real name that happens to match.
+        if(n && n.toLowerCase() !== u) names[u] = n;
+      }
+      return sendJson(res, 200, { names });
+    }
+
     /* ── remember the chosen centre ──
        The one mutating route that does not take the admin password, and
        deliberately so. Picking your centre is the dashboard's primary

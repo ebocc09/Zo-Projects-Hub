@@ -271,6 +271,10 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 .field textarea{height:80px;padding:10px 12px;resize:vertical;font-size:12px}
 .field input:focus,.field textarea:focus{border-color:var(--ink)}
 .hint{margin-top:7px;font-size:11.5px;color:var(--ink-mute)}
+/* The one sentence a modal is actually asking. Above .hint in weight because
+   a count of cars about to be touched must not read as small print. */
+.lead{margin:0 0 4px;font-size:13px;line-height:1.5;color:var(--ink-soft)}
+.lead b{color:var(--ink)}
 
 /* An element carrying `hidden` still shows if a rule gives it a display value,
    because the attribute's own style is only a UA default. .modal-foot sets
@@ -489,6 +493,18 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
            the status you asked for — so its view toggle is a sort instead. -->
       <button class="chip on" id="sortDwell" hidden>Longest first</button>
       <button class="chip" id="sortRecent" hidden>Newest first</button>
+      <!-- The only control on the board that does something to a car rather
+           than reading one, which is why it asks first and why it says how
+           many. Cars on Ground only. -->
+      <button class="chip" id="trunksBtn" hidden
+              title="Wake every car listed and pop its trunk, so they can be picked out of the lot">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+             style="vertical-align:-1px;margin-right:6px">
+          <path d="M3 15v-2a9 9 0 0 1 18 0v2"/><path d="M3 15h18"/>
+          <path d="M7 15v3"/><path d="M17 15v3"/>
+        </svg>Open all trunks
+      </button>
       <button class="chip" id="exportBtn"
               title="Download exactly what is on screen as an Excel workbook">
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
@@ -574,11 +590,40 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
       <div class="hint">Intrepid's own receiving ladder, in its own order. The whole
         centre is counted either way — this picks which cars get listed.</div>
     </div>
+    <div class="facet" id="cogDwell"></div>
   </div>
   <div class="modal-foot">
     <span class="modal-sub" id="cogCount" style="margin-right:auto"></span>
     <button class="btn btn-ghost" data-close>Cancel</button>
     <button class="btn btn-dark" id="runCog">Run scan</button>
+  </div>
+</div>
+
+<!-- Export — which columns, never which rows -->
+<div class="modal" id="exportModal" role="dialog" aria-label="Export">
+  <div class="modal-head"><h3>Export</h3>
+    <span class="modal-sub" id="exportCtx"></span>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body"><div class="facet" id="exportPresets"></div></div>
+  <div class="modal-foot">
+    <span class="modal-sub" id="exportCount" style="margin-right:auto"></span>
+    <button class="btn btn-ghost" data-close>Cancel</button>
+    <button class="btn btn-dark" id="runExport">Download</button>
+  </div>
+</div>
+
+<!-- Open all trunks — asks before, reports after, same window both times -->
+<div class="modal" id="trunkModal" role="dialog" aria-label="Open all trunks">
+  <div class="modal-head"><h3 id="trunkTitle">Open all trunks</h3>
+    <span class="modal-sub" id="trunkCtx"></span>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body" id="trunkBody"></div>
+  <div class="modal-foot">
+    <span class="modal-sub" id="trunkFootNote" style="margin-right:auto"></span>
+    <button class="btn btn-ghost" data-close id="trunkCancel">Cancel</button>
+    <button class="btn btn-dark" id="runTrunks">Open them</button>
   </div>
 </div>
 
@@ -702,7 +747,13 @@ const S = {
   facets:null, kinds:[], garageUrl:null,
   filters:{}, chosenKinds:["sv","containment","logistics"],
   view:"flagged", listSub:"",
-  cogStatuses:null, cogChosen:[], cogSort:"dwell", cogTally:[], cogTotal:0, cogNoRecord:0
+  cogStatuses:null, cogChosen:[], cogSort:"dwell", cogTally:[], cogTotal:0, cogNoRecord:0,
+  /* Two of them: `cogDwell` is what the menu has selected, `cogWindow` is what
+     the rows on screen were actually scanned with. They diverge the moment
+     someone reopens the menu and changes it without pressing Run, and the
+     export must be named after the second one. */
+  cogDwell:0, cogWindow:0,
+  exportPreset:"all"
 };
 
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
@@ -989,6 +1040,46 @@ function paintCogMenu(){
     : "Every status — the whole centre";
 }
 
+/* ── the time-on-ground filter ──
+   Same .facet / .opt markup as Sites, and single-select for the same reason
+   the windows are nested: "under 24h and under 7d" is just "under 24h".
+
+   It exists because the status filter alone does not answer the question
+   people actually bring to this tool. A VRI-pending list at a real centre is
+   mostly cars that have stood for months; today's arrivals are three rows
+   somewhere inside four hundred, and they are the only ones still worth
+   walking out to. Any is the default, because the months-long backlog is the
+   other real question and the tool was built for it first.
+
+   The window is applied by the scan rather than by the page. It could be done
+   client-side off rows already fetched — the sort toggles are — but then the
+   strip and the export would disagree with the screen about what "listed"
+   means, and the trunk button would be the third thing to have to be told. */
+const DWELL_OPTS = [
+  { v: 0,   label: "Any",         sub: "however long" },
+  { v: 24,  label: "Under 24h",   sub: "arrived today" },
+  { v: 72,  label: "Under 3d",    sub: "this week" },
+  { v: 168, label: "Under 7d",    sub: "" },
+  { v: 720, label: "Under 30d",   sub: "" }
+];
+
+function paintCogDwell(){
+  $("cogDwell").innerHTML = `
+    <div class="facet-head"><span>Time on ground</span></div>
+    <div class="opts">${DWELL_OPTS.map(o =>
+      `<button class="opt dwell-opt${S.cogDwell === o.v ? " on" : ""}" data-dwell="${o.v}"
+        >${esc(o.label)}${o.sub ? ` <small>${esc(o.sub)}</small>` : ""}</button>`).join("")}</div>
+    <div class="hint">Measured from arrival, the same span the rows show as dwell.
+      The centre's totals are unaffected — this picks which cars get listed.</div>`;
+}
+
+$("cogDwell").addEventListener("click", e => {
+  const btn = e.target.closest(".dwell-opt");
+  if(!btn) return;
+  S.cogDwell = Number(btn.dataset.dwell);
+  paintCogDwell();
+});
+
 $("cogStatuses").addEventListener("click", e => {
   if(e.target.closest("[data-clear]")){ S.cogChosen = []; paintCogMenu(); return; }
   const opt = e.target.closest(".opt");
@@ -1010,6 +1101,7 @@ $("cogBtn").addEventListener("click", async () => {
   }
   S.tool = "cog";
   paintCogMenu();
+  paintCogDwell();
   showModal($("cogModal"));
 
   if(!S.cogStatuses){
@@ -1038,7 +1130,8 @@ $("runCog").addEventListener("click", async () => {
   clearNotes(); progWatch();
 
   try{
-    const data = await api("/api/cog/scan", { trtId: S.trtId, statuses: S.cogChosen });
+    const data = await api("/api/cog/scan",
+      { trtId: S.trtId, statuses: S.cogChosen, maxDwellHours: S.cogDwell || null });
     renderCog(data);
     hideModal();
   }catch(err){
@@ -1067,9 +1160,22 @@ function progWatch(){
       const label = { starting:"Starting", enumerate:"Reading the index",
                       title:"Title status", containment:"Containment", holds:"Service visits",
                       statuses:"Reading the ladder", inventory:"Cars on ground",
-                      cog:"COG status" }[d.phase] || d.phase;
+                      cog:"COG status",
+                      identify:"Finding these cars in Garage", wake:"Waking them up",
+                      settle:"Giving the sleepers a moment", trunks:"Opening trunks"
+                    }[d.phase] || d.phase;
       $("pPhase").textContent = label + " · " + d.elapsed + "s";
-      if(d.phase === "inventory" || d.phase === "statuses"){
+      /* The trunk run has no honest total to fill a bar against — the number
+         of rounds depends on how many cars answer — so it counts within the
+         phase and parks the bar rather than pretending to converge. */
+      if(d.phase === "settle"){
+        $("pCount").textContent = "";
+        $("pBar").style.width = "70%";
+      }else if(["identify", "wake", "trunks"].includes(d.phase)){
+        $("pCount").textContent = d.total ? `${d.done || 0} / ${d.total}` : "";
+        $("pBar").style.width = { identify:15, wake:40, trunks:70 }[d.phase] +
+          (d.total ? (d.phase === "trunks" ? 28 : 20) * ((d.done || 0) / d.total) : 0) + "%";
+      }else if(d.phase === "inventory" || d.phase === "statuses"){
         $("pCount").textContent = "";
         $("pBar").style.width = d.phase === "statuses" ? "6%" : "25%";
       }else if(d.phase === "enumerate"){
@@ -1456,6 +1562,9 @@ function paintList(){
 
   for(const id of ["viewFlagged", "viewAll"]) $(id).hidden = cog;
   for(const id of ["sortDwell", "sortRecent"]) $(id).hidden = !cog;
+  // Nothing listed is nothing to open, and a live button over an empty list
+  // only ever produces an error message.
+  $("trunksBtn").hidden = !cog || !rows.length;
   $("viewFlagged").classList.toggle("on", S.view === "flagged");
   $("viewAll").classList.toggle("on", S.view === "all");
   $("sortDwell").classList.toggle("on", S.cogSort === "dwell");
@@ -1483,6 +1592,132 @@ function paintStats(tiles){
     </div>`).join("");
 }
 
+/* ── open all trunks ──
+
+   Finding one car in a lot of six hundred is the job this solves: an open
+   liftgate is visible from the end of a row, so the list on screen is made to
+   raise its hands.
+
+   Two things about this control are deliberate and neither is decoration.
+
+   It asks first. Everything else on this board reads; this one reaches out
+   and moves a few hundred tailgates, and it is one chip away from the sort
+   toggles that do nothing at all. The count in the question is the point of
+   it — "open 176 trunks" is a different sentence from "open all trunks", and
+   the second one is the only one a stray click can produce.
+
+   It reports after. A car that is off the network, or standing in a corner of
+   the lot with no signal, simply will not answer, and there is no way to know
+   that from the lot. A list of the ones that stayed shut is the difference
+   between walking the rows looking for an open trunk and walking them looking
+   for a car that might never have got the message. */
+
+let trunkVins = [];
+
+$("trunksBtn").addEventListener("click", () => {
+  if(S.busy) return;
+  const rows = visibleRows();
+  if(!rows.length){ note("Nothing on screen to open.", true); return; }
+
+  trunkVins = rows.map(r => r.vin).filter(Boolean);
+  const n = trunkVins.length;
+
+  $("trunkTitle").textContent = "Open all trunks";
+  $("trunkCtx").textContent   = S.trt && S.trt.name ? S.trt.name : ("TRT " + S.trtId);
+  /* Says which cars, in the words of the filters that chose them. "Open 176
+     trunks" is only a safe question if the 176 is legible, and a window
+     silently in force is exactly how that stops being true. */
+  const winOpt = DWELL_OPTS.find(o => o.v === S.cogWindow);
+  const which = [
+    S.cogChosen.length ? "the statuses you picked" : "every status",
+    winOpt && winOpt.v ? winOpt.label.toLowerCase() : null
+  ].filter(Boolean).join(", ");
+
+  $("trunkBody").innerHTML = `
+    <p class="lead">This wakes <b>${n.toLocaleString()}</b> car${n === 1 ? "" : "s"} and opens
+      ${n === 1 ? "its trunk" : "every one of their trunks"} — the list on screen,
+      which is ${esc(which)}.</p>
+    <div class="hint">Cars that are asleep get poked first and tried again as they wake, so
+      this takes a minute or two to finish. Anything still shut at the end is listed by name.</div>`;
+  $("trunkFootNote").textContent = "";
+  $("trunkCancel").hidden = false;
+  $("trunkCancel").textContent = "Cancel";
+  $("runTrunks").hidden   = false;
+  $("runTrunks").textContent = `Open ${n.toLocaleString()} trunk${n === 1 ? "" : "s"}`;
+  showModal($("trunkModal"));
+});
+
+$("runTrunks").addEventListener("click", async () => {
+  if(S.busy || !trunkVins.length) return;
+
+  S.busy = true;
+  hideModal();
+  clearNotes();
+
+  const btn = $("trunksBtn");
+  const restore = btn.innerHTML;    // innerHTML, not textContent — it carries an SVG
+  btn.disabled = true;
+  btn.innerHTML = '<i class="spin"></i>Opening';
+  progWatch();
+
+  try{
+    const d = await api("/api/cog/trunks", { vins: trunkVins });
+    paintTrunkResult(d);
+  }catch(err){
+    if(err.needsAuth){ note("Garage session expired — sign in again on the Hub, then try again.", true); }
+    else { note("Could not open the trunks: " + err.message, true); }
+  }finally{
+    S.busy = false; progHide();
+    btn.disabled = false; btn.innerHTML = restore;
+  }
+});
+
+/* Failures are grouped by what Garage said rather than listed one per line.
+   Two hundred rows all reading "vehicle is offline" hide the one that says
+   something else, and that one is the only interesting line on the screen. */
+function paintTrunkResult(d){
+  const ok = d.opened.length;
+  const byReason = new Map();
+  for(const f of d.failed){
+    const key = f.reason || "no reply";
+    if(!byReason.has(key)) byReason.set(key, []);
+    byReason.get(key).push(f.vin);
+  }
+
+  const parts = [`<p class="lead"><b>${ok.toLocaleString()}</b> of ${
+    d.requested.toLocaleString()} trunk${d.requested === 1 ? "" : "s"} opened.</p>`];
+
+  if(!d.failed.length && !d.unknown.length){
+    parts.push(`<div class="hint">Every car on the list answered.</div>`);
+  }
+
+  for(const [reason, vins] of [...byReason].sort((a, b) => b[1].length - a[1].length)){
+    parts.push(`<div class="facet">
+      <div class="facet-head"><span>${vins.length.toLocaleString()} stayed shut — ${
+        esc(reason)}</span></div>
+      <div class="hint" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+           word-break:break-all">${vins.map(esc).join("  ")}</div></div>`);
+  }
+
+  if(d.unknown.length){
+    parts.push(`<div class="facet">
+      <div class="facet-head"><span>${d.unknown.length.toLocaleString()} not in Garage's index</span></div>
+      <div class="hint">Intrepid has these standing at this centre and the index has never
+        heard of them, so there was nothing to send a command to.</div>
+      <div class="hint" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+           word-break:break-all">${d.unknown.map(esc).join("  ")}</div></div>`);
+  }
+
+  $("trunkTitle").textContent = "Trunks opened";
+  $("trunkBody").innerHTML    = parts.join("");
+  $("trunkFootNote").textContent = d.rounds > 1
+    ? `${d.rounds} rounds — cars were re-poked between each` : "";
+  $("trunkCancel").hidden = false;
+  $("trunkCancel").textContent = "Done";
+  $("runTrunks").hidden   = true;
+  showModal($("trunkModal"));
+}
+
 /* ── export ──
    Sends the rows already on screen rather than asking for a fresh scan: the
    file matches the page exactly and costs nothing. Re-scanning would also
@@ -1495,11 +1730,51 @@ function paintStats(tiles){
    Labels are resolved here, not on the server: the page already turns
    `service-loaner` into "Service loaner" for the rows, and the spreadsheet
    should read in the same words as the screen it came from. */
-$("exportBtn").addEventListener("click", async () => {
+/* Which columns, never which rows. The presets narrow the sheet; the row set
+   is still exactly what is on screen, filters, sort and all.
+
+   Two of them, because they are two different jobs. The full sheet is the one
+   you open to work from. VIN + delivery date is the one you paste into
+   something else — a message, a whiteboard, another system's import — and for
+   that, twenty-four columns of context is the thing in the way. */
+const EXPORT_PRESETS = [
+  { v: "all",          label: "All data",             sub: "every column" },
+  { v: "vin-delivery", label: "VIN + delivery date",  sub: "two columns" }
+];
+
+function paintExportPresets(){
+  $("exportPresets").innerHTML = `
+    <div class="facet-head"><span>Columns</span></div>
+    <div class="opts">${EXPORT_PRESETS.map(o =>
+      `<button class="opt export-opt${S.exportPreset === o.v ? " on" : ""}" data-preset="${o.v}"
+        >${esc(o.label)} <small>${esc(o.sub)}</small></button>`).join("")}</div>
+    <div class="hint">The rows are the same either way — whatever is on screen now.
+      ${S.tool === "cog" ? "Delivery date is Intrepid's scheduled date."
+                         : "Delivery date is the scheduled appointment from the Garage index."}</div>`;
+}
+
+$("exportPresets").addEventListener("click", e => {
+  const btn = e.target.closest(".export-opt");
+  if(!btn) return;
+  S.exportPreset = btn.dataset.preset;
+  paintExportPresets();
+});
+
+$("exportBtn").addEventListener("click", () => {
   const rows = visibleRows();
   if(!rows.length){ note("Nothing on screen to export.", true); return; }
+  $("exportCount").textContent = `${rows.length.toLocaleString()} row${
+    rows.length === 1 ? "" : "s"}`;
+  $("exportCtx").textContent = S.tool === "cog" ? "Cars on Ground" : "Service Visits";
+  paintExportPresets();
+  showModal($("exportModal"));
+});
 
-  const btn = $("exportBtn");
+$("runExport").addEventListener("click", async () => {
+  const rows = visibleRows();
+  if(!rows.length){ note("Nothing on screen to export.", true); hideModal(); return; }
+
+  const btn = $("runExport");
   const restore = btn.innerHTML;   // innerHTML, not textContent — it carries an SVG
   btn.disabled = true;
   btn.textContent = "Exporting";
@@ -1517,7 +1792,10 @@ $("exportBtn").addEventListener("click", async () => {
           label: `compiler-cars-on-ground-${site}-${
             (S.cogChosen.length ? S.cogTally.filter(t => S.cogChosen.includes(t.id))
                                     .map(t => t.name).join("-")
-                                : "all-statuses").replace(/\s+/g, "") }-${stamp}`,
+                                : "all-statuses").replace(/\s+/g, "") }${
+            // Named after what was scanned, not what the menu now says.
+            S.cogWindow ? "-under" + (DWELL_OPTS.find(o => o.v === S.cogWindow) || {})
+              .label.replace(/^Under\s*/, "") : "" }-${stamp}`,
           rows }
       : { label: `compiler-service-visits-${site}-${S.view}-${stamp}`,
           rows : rows.map(r => ({
@@ -1527,6 +1805,12 @@ $("exportBtn").addEventListener("click", async () => {
             categoryLabel: labelFor("vehicle_category", r.category),
             titleLabel   : r.title ? labelFor("title", r.title) : ""
           })) };
+
+    /* The preset lands in the name for the same reason the view and the
+       window do: a two-column file and a twenty-four-column one both called
+       `…-2026-08-13.xlsx` are indistinguishable in a downloads folder. */
+    if(S.exportPreset !== "all") payload.label += "-vin-delivery";
+    payload.preset = S.exportPreset;
 
     const res = await fetch("/api/export", {
       method : "POST",
@@ -1551,8 +1835,12 @@ $("exportBtn").addEventListener("click", async () => {
     a.remove();
     // Revoked late: Safari cancels the download if the URL dies too early.
     setTimeout(() => URL.revokeObjectURL(url), 4000);
+    hideModal();
   }catch(err){
+    /* Closed on failure too — note() writes into the strip behind the scrim,
+       so leaving the modal up hides the only explanation. */
     note("Export failed: " + err.message, true);
+    hideModal();
   }finally{
     btn.disabled = false;
     btn.innerHTML = restore;
@@ -1595,6 +1883,7 @@ function renderCog(data){
   S.cogTally = data.tally || [];
   S.cogTotal = data.total || 0;
   S.cogNoRecord = data.noRecord || 0;
+  S.cogWindow = data.maxDwellHours || 0;
   S.cogSort = "dwell";
 
   const rows = S.rows;
@@ -1609,20 +1898,33 @@ function renderCog(data){
      column of mixed units does not compare. */
   const days = sec => sec == null ? "—" : Math.floor(sec / 86400).toLocaleString() + "d";
 
+  /* Under a window the last tile would read "Over 30d: 0" by construction,
+     which is a tile spending itself to say nothing. What is worth knowing
+     instead is the size of what the window is hiding — the backlog is still
+     the story of the lot even when it is deliberately off the screen. */
+  const win = DWELL_OPTS.find(o => o.v === (data.maxDwellHours || 0));
+  const lastTile = data.maxDwellHours
+    ? { k: "Older", v: (data.dwellOlder || 0).toLocaleString(), small: "hidden" }
+    : { k: "Over 30d", v: over30.toLocaleString() };
+
   paintStats([
     { k: "On ground", v: S.cogTotal.toLocaleString() },
     { k: "Listed",    v: rows.length.toLocaleString(),
       small: S.cogTotal ? Math.round(rows.length / S.cogTotal * 100) + "%" : "" },
     { k: "Longest",   v: days(longest) },
     { k: "Median",    v: days(median) },
-    { k: "Over 30d",  v: over30.toLocaleString() }
+    lastTile
   ]);
 
   const site = (data.trt && data.trt.name) ? data.trt.name : "TRT " + data.trtId;
   const picked = (data.statusIds || []).length
     ? S.cogTally.filter(t => data.statusIds.includes(t.id)).map(t => t.name).join(" + ")
     : "every status";
-  S.listSub = `${site} · ${picked} · ${S.cogTotal.toLocaleString()} on ground`;
+  /* The window goes in the subtitle for the same reason the view goes in the
+     export filename: a screen showing 3 rows when the centre has 400 pending
+     must say why, or it reads as a broken scan. */
+  S.listSub = `${site} · ${picked}${win && win.v ? " · " + win.label : ""} · ${
+    S.cogTotal.toLocaleString()} on ground`;
 
   $("listTitle").textContent = "Cars on Ground";
   $("listHead").hidden = false;
@@ -1633,9 +1935,19 @@ function renderCog(data){
      answer, not as a broken tool — so the ladder is spelled out underneath. */
   const msgs = [...(data.notes || [])];
   if(!rows.length && S.cogTotal){
-    $("list").innerHTML = `<div class="empty"><h3>No cars in that status</h3>
-      <p>All ${S.cogTotal.toLocaleString()} cars on ground at ${esc(site)} are elsewhere
-         on the ladder.</p></div>`;
+    /* Two different empties. "Nothing on that rung" and "nothing that new"
+       want opposite next moves — widen the status, or widen the window — and
+       a single message would send half the readers the wrong way. */
+    $("list").innerHTML = data.maxDwellHours
+      ? `<div class="empty"><h3>Nothing that recent</h3>
+          <p>${(data.dwellOlder || 0).toLocaleString()} car${
+            data.dwellOlder === 1 ? "" : "s"} match the status at ${esc(site)}, and every one
+             of them has been standing longer than ${esc(win ? win.label.toLowerCase()
+             .replace("under ", "") : "the window")}. Set <b>Time on ground</b> to
+             <b>Any</b> to see them.</p></div>`
+      : `<div class="empty"><h3>No cars in that status</h3>
+          <p>All ${S.cogTotal.toLocaleString()} cars on ground at ${esc(site)} are elsewhere
+             on the ladder.</p></div>`;
     msgs.unshift("On ground: " + S.cogTally.map(t => `${t.count} ${t.name}`).join(" · ") + ".");
   }
   if(msgs.length) note(msgs.join("  ")); else clearNotes();

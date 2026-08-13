@@ -583,6 +583,24 @@ sharing one OAuth client, and because refreshing rotates the refresh token,
 whichever refreshed first stranded the other. One writer, no such failure. A
 second MCP consumer would bring it straight back — see `credstore.js`.
 
+#### So other boards ask this one
+
+`GET /api/staff?users=crieder,lcolman` →
+`{ "names": { "crieder": "Colton Rieder", "lcolman": "Leonardo Colman" } }`
+
+When ZO-003 wanted full names instead of usernames, the answer was **not** to
+copy the OAuth client into it — that is precisely the second consumer the rule
+forbids. Instead the one call with no cookie equivalent is offered over HTTP.
+The single-writer property is untouched: still one MCP client, still one
+rotator.
+
+Names come from the same disk cache the reports use, so a roster this board has
+already seen costs nothing. Unknown usernames come back **absent** rather than
+echoed, because `staffName()` falls back to the username itself and a caller
+cannot tell that echo from a real name. No admin password: a display name is not
+privileged, the caller already has the username, and nothing else `lookup_user`
+returns is passed on.
+
 This board's old `.tokens.json` and `.client.json` are deleted on first run.
 They were registered against a redirect URI nothing serves now.
 

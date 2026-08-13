@@ -2,6 +2,10 @@
 .connections.json
 .admin.json
 
+# Display names learned from ZO-002. Real employee names — a local cache, not
+# project data, and the reason this board can show them without an MCP client.
+.staff-cache.json
+
 # Uploaded/derived survey data — customer PII, stays local.
 data/
 *.xlsx

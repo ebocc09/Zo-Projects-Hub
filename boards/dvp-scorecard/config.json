@@ -4,6 +4,9 @@
 
   "intrepidApi": "https://intrepidapi.tesla.com/cogs/api/cogs",
 
+  "//nameService": "ZO-002 turns an AD username into a display name. It is the only board allowed to speak Garage MCP — see credstore.js. Empty string disables the lookup and the board shows usernames.",
+  "nameService": "http://127.0.0.1:3120",
+
   "concurrency": 8,
   "outputDir": "~/Desktop",
 

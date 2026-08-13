@@ -105,8 +105,43 @@ date when Intrepid recorded one.
 - **No customer PII** leaves the server: the per-car payload is RN, VIN, score,
   and the prep person's username only. Names, emails, verbatims are never sent
   to the page.
-- The prep person shows as their network username (`crieder`). A full display
-  name would need a Garage lookup, which v1 deliberately omits.
+- The prep person shows as their **full name** (`Colton Rieder`), resolved from
+  the username Intrepid records. See below for where that comes from. The
+  username is still the identity, still in the export, and still the tooltip on
+  every name — only the label changed.
+
+## Full names, and why this board does not call Garage
+
+Intrepid names people by AD username, so the board used to read `crieder` where
+it meant Colton Rieder. Garage's `lookup_user` is the only thing that closes
+that gap, and **this board deliberately does not call it.**
+
+The reason is in `credstore.js` and it is not a style preference. The Hub mints
+the Garage MCP token and never refreshes it; exactly **one** board consumes and
+rotates it — ZO-002, the FSD Tracker. A second MCP consumer would recreate a bug
+this estate has already had, where two clients shared a refresh token and
+whichever refreshed first invalidated the other. Copying the OAuth client in
+here would have been the obvious move and the wrong one.
+
+So ZO-002 offers the one call with no cookie equivalent over plain HTTP:
+
+```
+GET http://127.0.0.1:3120/api/staff?users=crieder,lcolman
+    → { "names": { "crieder": "Colton Rieder", "lcolman": "Leonardo Colman" } }
+```
+
+This board asks once per compile for the whole roster, caches the answers in
+`.staff-cache.json` (gitignored — real employee names), and never asks about the
+same person twice. A username Garage does not know is remembered as a miss, so
+it does not cost a lookup on every compile.
+
+**It degrades in one direction only.** No ZO-002, no answer, no name — and the
+board shows the username, which is exactly what it showed before. Names are
+decoration over a key that already worked, so nothing is ranked, grouped or
+joined on them. A compile that could not reach the service says so in the
+notices rather than quietly implying usernames were the best available.
+
+Set `nameService` to `""` in `config.json` to switch the lookup off entirely.
 
 ## Files
 

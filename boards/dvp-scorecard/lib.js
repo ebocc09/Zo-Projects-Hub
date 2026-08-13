@@ -14,6 +14,8 @@
 const fs   = require("fs");
 const path = require("path");
 const https = require("https");
+// Loopback only, for the ZO-002 name service — see resolveNames().
+const http  = require("http");
 
 const credstore = require("./credstore");
 
@@ -405,9 +407,103 @@ async function statusSetters(vin, shipmentId){
   return result;
 }
 
-/* Email → a display handle. "crieder@tesla.com" → "crieder". Kept simple and
-   Intrepid-only; a nicer full name would need Garage lookup_user (not in v1). */
+/* Email → a display handle. "crieder@tesla.com" → "crieder". */
 const handle = email => String(email || "").split("@")[0] || "(unknown)";
+
+/* ── username → display name ──
+
+   Intrepid names people by AD username, so the board read "crieder" where it
+   meant Colton Rieder. Garage's `lookup_user` is the only thing that closes
+   that gap, and this board deliberately does NOT call it.
+
+   The reason is in credstore.js and it is not a style preference: the Hub mints
+   the MCP token and never refreshes it, exactly ONE board consumes and rotates
+   it — ZO-002 — and a second consumer would recreate a bug this estate has
+   already had, where two clients shared a refresh token and whichever refreshed
+   first invalidated the other. Copying the OAuth client in here would have been
+   the obvious move and the wrong one.
+
+   So ZO-002 offers the answer over plain HTTP and this board asks. What it gets
+   back is cached to disk, because a centre's roster barely changes and the
+   whole point is not to make a Garage call per compile.
+
+   Degrades in one direction only: an unresolved username still names the person
+   well enough to rank them, which is exactly what the board did before. Names
+   are decoration over a key that already worked. */
+
+const NAME_CACHE = path.join(HERE, ".staff-cache.json");
+let nameMap = null, nameDirty = false;
+
+function nameCache(){
+  if(nameMap) return nameMap;
+  nameMap = {};
+  if(fs.existsSync(NAME_CACHE)){
+    try { nameMap = JSON.parse(fs.readFileSync(NAME_CACHE, "utf8")) || {}; }
+    catch { nameMap = {}; }
+  }
+  return nameMap;
+}
+
+function nameFlush(){
+  if(!nameDirty) return;
+  try { fs.writeFileSync(NAME_CACHE, JSON.stringify(nameMap, null, 1)); nameDirty = false; }
+  catch { /* a cache that will not write costs lookups, not correctness */ }
+}
+
+/* Plain HTTP to a loopback port — request() above is https-only and hardcodes
+   443, and widening it would put the name service on the same code path as the
+   Intrepid calls for no gain. */
+function localGet(url, timeoutMs = 20000){
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = http.request({ hostname: u.hostname, port: u.port || 80,
+      path: u.pathname + u.search, method: "GET" }, res => {
+      let buf = "";
+      res.on("data", c => buf += c);
+      res.on("end", () => resolve({ status: res.statusCode, body: buf }));
+    });
+    req.on("error", reject);
+    req.setTimeout(timeoutMs, () => req.destroy(new Error("name service timed out")));
+    req.end();
+  });
+}
+
+/* Resolves what it can and reports what it could not, so the caller can say so
+   rather than quietly showing usernames as though that were the answer. */
+async function resolveNames(users){
+  const base  = String(CONFIG.nameService || "").replace(/\/+$/, "");
+  const cache = nameCache();
+  const wanted = [...new Set(users.filter(Boolean).map(u => String(u).toLowerCase()))];
+  // "" is a remembered miss — asked once, Garage did not know them. Asking
+  // again every compile would cost a lookup per compile forever.
+  const unknown = wanted.filter(u => !(u in cache));
+
+  if(!unknown.length) return { asked: 0, learned: 0, unreachable: false };
+  if(!base) return { asked: unknown.length, learned: 0, unreachable: true, disabled: true };
+
+  let learned = 0;
+  try{
+    // One request for the whole roster; ZO-002 pools the lookups behind it.
+    const res = await localGet(`${base}/api/staff?users=${encodeURIComponent(unknown.join(","))}`);
+    if(res.status !== 200) throw new Error(`name service returned ${res.status}`);
+    const got = (JSON.parse(res.body) || {}).names || {};
+    for(const u of unknown){
+      const n = got[u];
+      if(n){ cache[u] = String(n); learned++; }
+      else  { cache[u] = ""; }          // remembered as a miss
+    }
+    nameDirty = true;
+    nameFlush();
+  }catch{
+    /* Leave them unresolved rather than caching a failure that is probably
+       "ZO-002 is not running". A miss cached now would outlive the outage. */
+    return { asked: unknown.length, learned: 0, unreachable: true };
+  }
+
+  return { asked: unknown.length, learned, unreachable: false };
+}
+
+const personName = user => nameCache()[String(user || "").toLowerCase()] || "";
 
 /* ──────────────────────────── the compile ────────────────────────────
    xlsx rows ({rn,score,date}) + a TRT → a per-person cleanliness scorecard.  */
@@ -506,6 +602,24 @@ async function compile({ rows, trtId, onProgress } = {}){
     return { ...c, score: scoreByRn.has(c.rn) ? scoreByRn.get(c.rn) : null, ...st,
              ...postVriTicket(st, c.date) };
   });
+
+  /* Names before summarise(), because summarise() is synchronous and the range
+     filter re-runs it without touching Intrepid. Resolving the whole roster
+     here means a narrowed range reads names from a warm cache and can never
+     surface someone the full compile did not already ask about. */
+  const roster = [];
+  for(const r of carRows){
+    for(const u of [r.finishedBy, r.washedBy, r.vriBy, r.vriFailedBy]){
+      if(u) roster.push(handle(u));
+    }
+  }
+  const names = await resolveNames(roster);
+  if(names.unreachable){
+    notices.push(names.disabled
+      ? `Full names are switched off (nameService is empty in config.json), so the board shows usernames.`
+      : `Could not reach ZO-002 for full names, so ${names.asked} person(s) show as usernames. ` +
+        `Start the FSD Tracker from the Hub and re-compile to fill them in.`);
+  }
 
   const attributed = carRows.filter(r => r.score != null);
   const noPerson = attributed.filter(r => !r.finishedBy).length;
@@ -700,7 +814,10 @@ function byPerson(rows, { sort = "weighted", minCars = 0 } = {}){
     const adjusted = n ? (sum + PRIOR_K * teamMean) / (n + PRIOR_K) : null;
 
     out.push({
-      email, handle: handle(email),
+      /* `name` is "" when Garage does not know them or the lookup could not
+         run. The client falls back to `handle`, which is what the board showed
+         before names existed — so a missing name costs decoration, never a row. */
+      email, handle: handle(email), name: personName(handle(email)),
       cars   : rs.length,
       scored : n,
       mean   : mean == null ? null : Number(mean.toFixed(1)),
@@ -860,6 +977,7 @@ module.exports = {
   connectionsSummary,
   appointmentsOn, statusSetters, postVriTicket, compile, summarise, byPerson, rankMeta,
   storeLabel, searchSites, trtInfo, trtDirectory,
+  resolveNames, personName, handle,
   testIntrepid, intrepidCookie,
   MIN_CARS, PRIOR_K
 };

@@ -209,6 +209,60 @@ async function appointmentsOn(date, trtId){
   return Array.isArray(rows) ? rows : [];
 }
 
+/* ── delivery advisor for a reference number ──
+   The advisor owns the appointment. It is NOT the delivery host
+   (`DriverADUserName`, the person who ran the handover) — [[fsd-tracker]]
+   measured the two differing on 24 of 70 appointments, so they must not be
+   used interchangeably. This returns the advisor and nothing else, because
+   the advisor is the only person this board is being asked about.
+
+   The display name comes back paired with the username, so no directory
+   lookup is needed — unlike the host, which arrives as a bare AD username.
+
+   The same payload carries a Drivers block with customer name, email and
+   phone. That is PII and is deliberately never read here.
+
+   A car with no appointment has no advisor, and that is an ordinary answer
+   rather than a failure: "" all the way out, so the column reads blank.  */
+async function appointmentAdvisor(rn){
+  if(!rn) return "";
+  const d = await intrepidGet(`/getDeliveryAppointmentDetails?rn=${encodeURIComponent(rn)}`);
+  const rec = (d && d.Data && d.Data[0]) || null;
+  if(!rec) return "";
+  return (rec.DeliveryAdvisorDisplayName || "").trim()
+      || (rec.DeliveryAdvisorUserName || "").trim();
+}
+
+/* One call per distinct RN, pooled — a full lot is hundreds of cars, and
+   opening a socket per row is how a centre-wide export turns into a stall.
+   Deduped first: the same RN on two rows is one appointment.
+
+   A lookup that fails is left blank rather than aborting the export. The
+   whole file should not be lost because one appointment 500s — except on a
+   dead cookie, which fails every row and is worth saying out loud. */
+async function advisorsByRn(rns, concurrency = 8){
+  const list = [...new Set((rns || []).filter(Boolean).map(String))];
+  const out = new Map();
+  if(!list.length) return out;
+
+  let authErr = null;
+  const got = await pool(list, concurrency, async rn => {
+    try { return await appointmentAdvisor(rn); }
+    catch(err){
+      if(err.needsCookie) authErr = err;
+      return "";
+    }
+  });
+  if(authErr) throw authErr;
+
+  list.forEach((rn, i) => {
+    const v = got[i];
+    // pool() reports a thrown item as {error}, which is not a name.
+    out.set(rn, typeof v === "string" ? v : "");
+  });
+  return out;
+}
+
 /* ── TRT directory ──
    getLocations is the only endpoint that maps a TRT to a site, and it answers
    with every location Tesla has — about 1,850 records and 7.5 MB. Far too
@@ -428,6 +482,240 @@ function signOutGarage(){
   return { removed: 1 };
 }
 
+/* ─────────────────────────── Garage commands ───────────────────────────
+
+   Reads need only the session cookie. Writes do not: Garage is Rails, and
+   every POST is checked against the per-session CSRF token its pages carry in
+   a `<meta name="csrf-token">` tag. That token is not in the cookie, so it is
+   scraped from a page fetched with the same session — one extra GET per run,
+   not per car.
+
+   The wire format is copied out of Garage's own service class rather than
+   guessed. Two things there are easy to get wrong and both are load-bearing:
+   `device_type` rides in the query string on EVERY call, and it is also
+   injected into the body whenever there is one. */
+
+const GARAGE_UA = "Mozilla/5.0 (the-compiler)";
+
+let csrfToken = null;
+
+async function garageCsrf({ refresh = false } = {}){
+  if(csrfToken && !refresh) return csrfToken;
+
+  const res = await request(GARAGE + "/vehicles", {
+    headers: { Cookie: garageCookie(), Accept: "text/html", "User-Agent": GARAGE_UA }
+  });
+  if(res.status === 401 || res.status === 403 || (res.status >= 300 && res.status < 400)){
+    const err = new Error("Garage session expired or rejected — sign in again");
+    err.needsAuth = true;
+    throw err;
+  }
+  const m = res.body.match(/name="csrf-token"\s+content="([^"]+)"/) ||
+            res.body.match(/content="([^"]+)"\s+name="csrf-token"/);
+  if(!m){
+    /* A signed-out session answers 200 with the sign-in page, which has no
+       token on it. Same cause as the parse failure in garageGet, so it has to
+       read the same way rather than as a Garage-changed-its-HTML mystery. */
+    const err = new Error("Garage returned a sign-in page rather than data — sign in again");
+    err.needsAuth = true;
+    throw err;
+  }
+  csrfToken = m[1];
+  return csrfToken;
+}
+
+/* One command. `retry` is spent on a stale token: the page a run started from
+   can age out mid-run, and Rails answers that with a 422 that is indis-
+   tinguishable from a real refusal unless a fresh token is tried once. */
+async function garagePost(pathAndQuery, body = null, { retry = true } = {}){
+  const token = await garageCsrf();
+  const payload = body ? JSON.stringify({ ...body, device_type: "vehicle" }) : null;
+
+  const res = await request(GARAGE + pathAndQuery, {
+    method : "POST",
+    headers: {
+      Cookie: garageCookie(),
+      Accept: "application/json",
+      "Content-Type"    : "application/json",
+      "Content-Length"  : payload ? Buffer.byteLength(payload) : 0,
+      "X-CSRF-Token"    : token,
+      "X-Requested-With": "XMLHttpRequest",
+      "User-Agent"      : GARAGE_UA
+    },
+    body: payload
+  });
+
+  if(res.status === 422 && retry){
+    await garageCsrf({ refresh: true });
+    return garagePost(pathAndQuery, body, { retry: false });
+  }
+  if(res.status === 401 || (res.status >= 300 && res.status < 400)){
+    const err = new Error("Garage session expired or rejected — sign in again");
+    err.needsAuth = true;
+    throw err;
+  }
+
+  let data = null;
+  try { data = JSON.parse(res.body); } catch { /* some commands answer empty */ }
+
+  if(res.status !== 200){
+    /* Garage's own errors are the useful ones — "vehicle is offline" reads
+       very differently from "you may not access this feature". The txid is
+       what makes a refusal traceable in Garage's logs, so it is kept. */
+    const err = new Error((data && data.error) || `Garage HTTP ${res.status}`);
+    if(data && data.txid) err.txid = data.txid;
+    err.status = res.status;
+    throw err;
+  }
+  return data || {};
+}
+
+/* Every command is addressed by Garage's 16-digit device id, and Cars on
+   Ground only ever has VINs — it is an Intrepid tool and never touches the
+   index. So the ids are looked up, in pages, off the same tesladex the rest
+   of the board reads. `vpn_state` comes back free in the same query and is
+   worth having: it says which cars are already awake. */
+const ID_CHUNK = 150;
+
+async function garageIdsForVins(vins, onProgress = () => {}){
+  const found = new Map();
+  const list  = [...new Set(vins.filter(Boolean))];
+
+  for(let i = 0; i < list.length; i += ID_CHUNK){
+    const chunk = list.slice(i, i + ID_CHUNK);
+    const page  = await tesladexSearch({
+      query : "vin:(" + chunk.join(" OR ") + ")",
+      fields: ["vin", "id", "vpn_state"],
+      size  : chunk.length,
+      sort  : "vin:asc"
+    });
+    for(const r of page.results || []){
+      if(r.vin && r.id != null) found.set(r.vin, { id: r.id, vpnState: r.vpn_state || "" });
+    }
+    onProgress({ phase: "identify", total: list.length, done: Math.min(i + ID_CHUNK, list.length) });
+  }
+  return found;
+}
+
+/* ── pop the trunks ──
+
+   Ed's problem is finding a specific car in a lot of several hundred, and an
+   open liftgate is visible down a whole row. So: wake everything, then open
+   every trunk.
+
+   Both steps are per-vehicle. Garage has a `batch_wake_up` that takes the
+   whole list in one call, and it is not usable here — it answers 403 "you may
+   not access this feature" for a service-centre role, because it belongs to
+   the advanced-search batch tooling rather than to the vehicle page. Don't
+   swap it back in without checking that first; it fails loudly but only once
+   a run is already underway.
+
+   A poked car needs somewhere between a few seconds and a minute to answer,
+   and some never do. Rather than sleep for the worst case and open everything
+   at the end, each round opens what it can and only the cars that refused go
+   round again — the online ones pop within a second of the click, which is
+   the difference between a tool you stand and wait for and one you walk
+   behind. Outstanding cars are re-poked before each retry, because a single
+   SMS poke is one chance and the second one is nearly free. */
+
+const TRUNK_ROUNDS = [0, 20000, 45000, 90000];
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function popTrunks({ vins, onProgress = () => {} } = {}){
+  const wanted = [...new Set((vins || []).filter(isVin))];
+  if(!wanted.length) throw new Error("No vehicles to open");
+
+  onProgress({ phase: "identify", total: wanted.length, done: 0 });
+  const ids = await garageIdsForVins(wanted, onProgress);
+
+  /* A VIN the index cannot place is reported, not silently dropped. Two of
+     them in a list of two hundred is noise; two hundred of them means the
+     session is reading a different environment and the run is meaningless. */
+  const unknown = wanted.filter(v => !ids.has(v));
+
+  const outstanding = wanted.filter(v => ids.has(v))
+    .map(v => ({ vin: v, ...ids.get(v) }));
+  const opened = [];
+  const failed = new Map();
+
+  if(!outstanding.length){
+    return { requested: wanted.length, opened: [], failed: [], unknown, rounds: 0 };
+  }
+
+  const total = outstanding.length;
+  let queue = outstanding;
+  let rounds = 0;
+
+  for(const wait of TRUNK_ROUNDS){
+    if(!queue.length) break;
+    if(wait){
+      onProgress({ phase: "settle", total, done: opened.length });
+      await sleep(wait);
+    }
+    rounds++;
+
+    /* Cars already reported online by the index skip the poke on the first
+       round only — after that the index reading is stale enough not to trust
+       against a car that has just refused a command. */
+    const toPoke = rounds === 1
+      ? queue.filter(c => c.vpnState !== "online")
+      : queue;
+
+    /* pool() catches for us — it turns a throw into a result object — so a
+       dead session cannot escape by being thrown. It has to be carried back
+       as a flag and rethrown outside the pool, or a whole run of "session
+       expired" reports as several hundred cars that quietly did nothing. */
+    let deadSession = null;
+
+    if(toPoke.length){
+      let poked = 0;
+      onProgress({ phase: "wake", total: toPoke.length, done: 0 });
+      await pool(toPoke, CONFIG.concurrency, async c => {
+        try { await garagePost(`/api/1/vehicles/${c.id}/wake_up?device_type=vehicle`); }
+        catch(err){ if(err.needsAuth) deadSession = err; }
+        onProgress({ phase: "wake", total: toPoke.length, done: ++poked });
+      });
+      if(deadSession) throw deadSession;
+    }
+
+    let done = 0;
+    onProgress({ phase: "trunks", total: queue.length, done: 0 });
+    const results = await pool(queue, CONFIG.concurrency, async c => {
+      try{
+        await garagePost(`/api/1/vehicles/${c.id}/open_trunk?device_type=vehicle`);
+        return { car: c, ok: true };
+      }catch(err){
+        if(err.needsAuth) deadSession = err;
+        return { car: c, ok: false, reason: err.message };
+      }finally{
+        onProgress({ phase: "trunks", total: queue.length, done: ++done });
+      }
+    });
+    if(deadSession) throw deadSession;
+
+    const again = [];
+    for(const r of results){
+      /* A result with no `car` is pool() reporting a throw the command code
+         did not expect. It is still that car's outcome, so it is recorded
+         against the VIN rather than dropped into silence. */
+      const car = r && r.car ? r.car : (r && r._item);
+      if(!car) continue;
+      if(r.ok){ opened.push(car.vin); failed.delete(car.vin); }
+      else { failed.set(car.vin, r.reason || r.error || "no reply"); again.push(car); }
+    }
+    queue = again;
+  }
+
+  return {
+    requested: wanted.length,
+    opened,
+    failed   : [...failed].map(([vin, reason]) => ({ vin, reason })),
+    unknown,
+    rounds
+  };
+}
+
 /* ─────────────────────────── tesladex enumeration ───────────────────────────
    Which cars this centre handed over on a given day. Until August 2026 this
    was impossible — tesladex 403'd on delivered vehicles and Intrepid was the
@@ -592,6 +880,25 @@ const FACETS = {
       { v: "Frozen",               label: "Frozen" }
     ]
   },
+  /* Has a delivery booked, whenever it is. The other facets ask what a car
+     *is*; this one asks whether anybody is waiting for it — which is what
+     turns a service visit from a queue entry into a deadline.
+
+     `exists: true` marks the odd one out: the option is not a value to match
+     but the presence of a date, so buildQuery writes a range over the whole
+     field rather than an OR group. The date itself is nested under
+     `delivery_details`, which is the only reason this took finding — the flat
+     `scheduled_delivery_date` the field list appears to offer is 422
+     `Unknown fields` against the index. */
+  scheduled_delivery: {
+    label: "Scheduled for delivery",
+    field: "delivery_details.scheduled_delivery_date",
+    exists: true,
+    note: "Cars with a delivery appointment booked, on any date",
+    options: [
+      { v: "yes", label: "Yes" }
+    ]
+  },
   /* New / Used is the one facet Garage cannot answer. The index has no title
      field at all; the answer lives in Intrepid's Falcon record as
      `TitleStatus`, one call per VIN, which means it cannot go into the Lucene
@@ -706,7 +1013,15 @@ function buildQuery({ trtId, offsiteTrtId, sites = "onsite", filters = {} }){
     // to filter on and is applied to the rows afterwards instead.
     if(key === "delivery" || facet.fetched || !facet.field) continue;
     const vals = filters[key] || [];
-    if(vals.length) parts.push(orGroup(facet.field, vals));
+    if(!vals.length) continue;
+
+    /* An existence facet asks whether the field is set at all, so its chosen
+       value never reaches the query — only the fact that something was
+       chosen. `[* TO *]` rather than `:*`, because the field is a date and a
+       wildcard over a date is not a term query. */
+    if(facet.exists){ parts.push(`${facet.field}:[* TO *]`); continue; }
+
+    parts.push(orGroup(facet.field, vals));
   }
   return parts.join(" AND ") || "*:*";
 }
@@ -752,8 +1067,15 @@ async function scanVehicles({ trtId, offsiteTrtId, sites = "onsite",
   await ensureSession();
 
   const query = buildQuery({ trtId, offsiteTrtId, sites, filters });
+  /* The scheduled date is fetched whether or not the facet is set: it costs
+     nothing extra on a query that is already running, and the export offers
+     it as a column. Nested projection works — asking for
+     `delivery_details.scheduled_delivery_date` returns only that subfield
+     rather than the whole object, which also keeps the destination city and
+     the rest of the delivery record off this server. */
   const fields = ["vin", "model", "vehicle_type", "ownership", "vehicle_category",
-                  "fleet_status", "delivery_stage", "delivered", "delivery_date_epoch"];
+                  "fleet_status", "delivery_stage", "delivered", "delivery_date_epoch",
+                  "delivery_details.scheduled_delivery_date"];
 
   /* ── who is in scope ── */
   const cars = [];
@@ -858,6 +1180,11 @@ async function scanVehicles({ trtId, offsiteTrtId, sites = "onsite",
       stage      : c.delivery_stage || "",
       delivered  : c.delivered === true,
       deliveredAt: c.delivery_date_epoch ? new Date(c.delivery_date_epoch * 1000).toISOString() : null,
+      /* When the customer is booked to collect it — a plain "2026-08-13", not
+         a timestamp, so it is passed through as the index wrote it rather
+         than parsed into a Date and back out an hour off. Null means no
+         appointment, which is what the Scheduled for delivery facet tests. */
+      scheduledFor: (c.delivery_details && c.delivery_details.scheduled_delivery_date) || null,
       // Only the fields the board renders. The raw records carry customer
       // contact details that have no business leaving the server.
       visits: visits.map(v => ({
@@ -948,6 +1275,11 @@ const COG_VIN_CHUNK = 500;
    someone greps the board for what Intrepid actually returned and finds the
    nickname instead. Nothing keys on either string: the status is matched by
    id everywhere it matters. */
+/* The time windows the tool offers, in hours. Declared here rather than on
+   the page because the route validates against them: a window the menu never
+   offered would hide most of a lot and read as an empty centre. */
+const DWELL_WINDOWS = [24, 72, 168, 720];
+
 const COG_LABELS = {
   "Receiving Inspection Pending": "VRI Pending"
 };
@@ -1001,8 +1333,16 @@ function dwellLabel(sec){
    `statusIds` narrows what comes back; an empty list means every status,
    which is how the tool renders its own breakdown. The tally is always over
    the whole centre regardless, because "5 pending" only means something
-   next to what the other 697 cars are doing.                              */
-async function carsOnGround({ trtId, statusIds = [], onProgress = () => {} } = {}){
+   next to what the other 697 cars are doing.
+
+   `maxDwellHours` narrows the same list by how long the car has been
+   standing. A VRI-pending list at a real centre is mostly cars that have been
+   there for months, and they bury the ones that arrived this morning — which
+   are the ones anybody can still do something about. Null means no window,
+   and the tally ignores the window for the same reason it ignores the status
+   filter.                                                                  */
+async function carsOnGround({ trtId, statusIds = [], maxDwellHours = null,
+                              onProgress = () => {} } = {}){
   if(!trtId){
     const err = new Error("No TRT set — choose a centre in the top corner");
     err.needsTrt = true;
@@ -1063,8 +1403,14 @@ async function carsOnGround({ trtId, statusIds = [], onProgress = () => {} } = {
   }
 
   const want = new Set((statusIds || []).map(Number).filter(n => !isNaN(n)));
+  const maxSec = maxDwellHours ? Number(maxDwellHours) * 3600 : null;
   const counts = new Map();
   let noRecord = 0;
+  /* Split, because the two hidden groups mean opposite things: `dwellOlder`
+     is the filter doing its job, `dwellUnknown` is a car the filter had no
+     grounds to judge. Lumping them would let a centre with no arrival stamps
+     read as a quiet morning. */
+  let dwellOlder = 0, dwellUnknown = 0;
   const rows = [];
 
   for(const vin of vins){
@@ -1090,6 +1436,17 @@ async function carsOnGround({ trtId, statusIds = [], onProgress = () => {} } = {
     if(want.size && !want.has(id)) continue;
 
     const sec = dwellSeconds(car.arrivalTimeStamp);
+
+    /* A car with no arrival stamp is dropped by a window rather than kept.
+       "Under 24h" is a claim about the car, and an unknown dwell does not
+       support it — keeping it would put a car that has stood for two years
+       at the top of a list of this morning's arrivals. The count is carried
+       out so the notice can say it happened. */
+    if(maxSec != null){
+      if(sec == null){ dwellUnknown++; continue; }
+      if(sec > maxSec){ dwellOlder++; continue; }
+    }
+
     const cogRec = rec || {};
     rows.push({
       vin,
@@ -1127,6 +1484,17 @@ async function carsOnGround({ trtId, statusIds = [], onProgress = () => {} } = {
     .map(s => ({ id: s.id, name: s.name, count: counts.get(s.id) || 0 }))
     .filter(s => s.count > 0);
 
+  /* Only the unknowns get a notice. The cars the window deliberately hid are
+     the point of the window and are counted on the strip; saying "hid 400
+     older cars" in a warning box would read as a problem rather than as the
+     thing that was asked for. */
+  if(dwellUnknown){
+    notes.push(`${dwellUnknown} car${dwellUnknown === 1 ? " has" : "s have"} no arrival ` +
+               `timestamp in Intrepid, so ${dwellUnknown === 1 ? "it is" : "they are"} not ` +
+               `shown under a time window. Clear the window to see ${
+               dwellUnknown === 1 ? "it" : "them"}.`);
+  }
+
   if(noRecord && pending){
     notes.push(`${noRecord} of these have no COG record at all — Intrepid shows a car ` +
                `without one as ${pending.name}, and that is where they are counted. ` +
@@ -1142,6 +1510,8 @@ async function carsOnGround({ trtId, statusIds = [], onProgress = () => {} } = {
     statuses,
     total  : vins.length,
     matched: rows.length,
+    maxDwellHours: maxDwellHours ? Number(maxDwellHours) : null,
+    dwellOlder, dwellUnknown,
     tally, noRecord, rows, notes
   };
 }
@@ -1266,10 +1636,12 @@ function connectionsSummary(){
 module.exports = {
   CONFIG, loadConnections, saveConnections, adminPassword, savedTrtId, savedOffsiteTrtId,
   intrepidCookie, intrepidGet, intrepidPost, appointmentsOn,
-  cogStatuses, carsOnGround, dwellLabel,
+  appointmentAdvisor, advisorsByRn,
+  cogStatuses, carsOnGround, dwellLabel, DWELL_WINDOWS,
   trtInfo, trtDirectory, searchSites,
   ensureSession, callTool, tesladexSearch, tesladexPage, dayRangeEpoch,
   garageCookie, signOutGarage,
+  garagePost, garageIdsForVins, popTrunks,
   FACETS, HOLD_KINDS, buildQuery, scanVehicles, logisticsHoldReasons, summarise,
   SCAN_CAP,
   testIntrepid, testGarage, testTesladex,

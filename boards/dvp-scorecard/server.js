@@ -225,7 +225,9 @@ const server = http.createServer(async (req, res) => {
           { key: "dirtyPer100", header: "Per 100 cars", width: 14, type: "number", digits: 1 },
           { key: "worst",    header: "Worst score %", width: 14, type: "number", digits: 0 }
         ],
-        rows: people.map((p, i) => ({ rank: i + 1, handle: p.handle, email: p.email,
+        // "Prep person" is the full name where Garage knew it; the username
+        // keeps its own column, so the sheet stays joinable on it either way.
+        rows: people.map((p, i) => ({ rank: i + 1, handle: p.name || p.handle, email: p.email,
           cars: p.cars, contribution: p.contribution, productivity: p.productivity,
           finished: p.finished, quality: p.quality, washed: p.washed, vri: p.vri,
           caught: p.caught, caughtPer100: p.caughtPer100,

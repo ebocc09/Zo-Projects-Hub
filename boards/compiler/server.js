@@ -306,21 +306,71 @@ const server = http.createServer(async (req, res) => {
         ? [...new Set(body.statuses.map(Number).filter(n => known.has(n)))]
         : [];
 
+      /* A window the page did not offer is a bug on the page, not a request
+         worth honouring quietly — a typo'd 0.5 would hide the whole lot and
+         look like an empty centre. */
+      const maxDwellHours = L.DWELL_WINDOWS.includes(Number(body.maxDwellHours))
+        ? Number(body.maxDwellHours)
+        : null;
+
       const started = Date.now();
       jobStart();
       let out;
       try{
-        out = await L.carsOnGround({ trtId, statusIds, onProgress: jobUpdate });
+        out = await L.carsOnGround({ trtId, statusIds, maxDwellHours, onProgress: jobUpdate });
       }finally{
         jobEnd();
       }
 
       log(`cog: TRT ${trtId} · ${out.total} on ground · ${out.matched} matched · ${
-            out.noRecord} no record in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+            out.noRecord} no record${maxDwellHours ? ` · under ${maxDwellHours}h (${
+            out.dwellOlder} older, ${out.dwellUnknown} undated hidden)` : ""} in ${
+            ((Date.now() - started) / 1000).toFixed(1)}s`);
 
       return sendJson(res, 200, {
         trt: await L.trtInfo(trtId), statusIds, ...out
       });
+    }
+
+    /* ── pop the trunks ──
+       Takes the VINs from the page rather than re-scanning, for the same
+       reason the export does: what pops must be what was on screen. A rescan
+       between the click and the commands would open trunks on cars the person
+       pressing the button never saw.
+
+       This is the only route on the board that changes anything in the world
+       rather than reading it, so it is also the only one that refuses a job
+       it cannot fully describe — an empty list, or one carrying something
+       that is not a VIN. */
+    if(p === "/api/cog/trunks" && req.method === "POST"){
+      const body = await readBody(req);
+      const vins = Array.isArray(body.vins)
+        ? [...new Set(body.vins.map(v => String(v || "").trim().toUpperCase()))]
+        : [];
+
+      if(!vins.length){
+        return sendJson(res, 400, { error: "Nothing on screen to open" });
+      }
+      const bad = vins.filter(v => !L.isVin(v));
+      if(bad.length){
+        return sendJson(res, 400, {
+          error: `${bad.length} of these are not VINs — the list on screen is not what it should be` });
+      }
+
+      const started = Date.now();
+      jobStart();
+      let out;
+      try{
+        out = await L.popTrunks({ vins, onProgress: jobUpdate });
+      }finally{
+        jobEnd();
+      }
+
+      log(`trunks: ${out.opened.length}/${out.requested} opened · ${out.failed.length} refused · ${
+            out.unknown.length} not in the index · ${out.rounds} round(s) in ${
+            ((Date.now() - started) / 1000).toFixed(1)}s`);
+
+      return sendJson(res, 200, out);
     }
 
     /* ── export what is on screen ──
@@ -340,6 +390,18 @@ const server = http.createServer(async (req, res) => {
 
       const label = String(body.label || "export").replace(/[^0-9A-Za-z_.-]+/g, "-").slice(0, 80);
 
+      /* Which columns, not which rows — the row set is still exactly what was
+         on screen. Both tools answer the same two presets, and both spell
+         "the delivery date" with the same key, so one filter serves both.
+
+         The narrow preset filters the full column list rather than declaring
+         its own, so a column renamed in one place cannot go stale in the
+         other. VIN leads both sheets, so filtering preserves the order the
+         preset is named after. */
+      const preset = body.preset === "vin-delivery" ? "vin-delivery" : "all";
+      const NARROW = ["vin", "scheduled"];
+      const pick = cols => preset === "all" ? cols : cols.filter(c => NARROW.includes(c.key));
+
       /* Cars on ground writes a different sheet from the same route: one row
          per car either way, but the columns are the car's position in the
          receiving ladder rather than what is holding it up.
@@ -349,6 +411,12 @@ const server = http.createServer(async (req, res) => {
          filtered above a threshold or averaged without anyone parsing a
          string back into a duration. */
       if(String(body.kind || "") === "cog"){
+        /* Advisor is fetched here rather than carried in with the rows: it is
+           the one column that is not already on screen, and paying for it at
+           export time means a scan does not spend a request per car on a name
+           nobody asked to see. Blank for a car with no appointment. */
+        const advisors = await L.advisorsByRn(rows.map(r => r.rn));
+
         const cogSheet = rows.map(r => ({
           vin      : r.vin,
           model    : r.modelLabel || r.model || "",
@@ -359,6 +427,7 @@ const server = http.createServer(async (req, res) => {
           // record, or inferred from there not being one?
           source   : r.inferred ? "No COG record" : "COG record",
           dwell    : r.dwell || "",
+          scheduled: r.scheduled ? String(r.scheduled).slice(0, 10) : "",
           dwellHrs : r.dwellSec == null ? "" : r.dwellSec / 3600,
           dwellDays: r.dwellSec == null ? "" : r.dwellSec / 86400,
           arrived  : r.arrived ? String(r.arrived).slice(0, 16).replace("T", " ") : "",
@@ -367,6 +436,7 @@ const server = http.createServer(async (req, res) => {
           logistics: r.logistics || "",
           hold     : r.hold || "",
           rn       : r.rn || "",
+          advisor  : advisors.get(String(r.rn || "")) || "",
           itinerary: r.itinerary || "",
           vriPassed: r.vriPassed ? String(r.vriPassed).slice(0, 10) : "",
           touchedAt: r.touchedAt ? String(r.touchedAt).slice(0, 10) : "",
@@ -375,8 +445,9 @@ const server = http.createServer(async (req, res) => {
 
         const cogBuf = xlsx.build({
           sheetName: "Cars on ground",
-          columns: [
+          columns: pick([
             { key: "vin",       header: "VIN",             width: 20 },
+            { key: "scheduled", header: "Scheduled delivery", width: 18 },
             { key: "model",     header: "Model",           width: 12 },
             { key: "type",      header: "Vehicle type",    width: 18 },
             { key: "color",     header: "Colour",          width: 22 },
@@ -391,15 +462,18 @@ const server = http.createServer(async (req, res) => {
             { key: "logistics", header: "Logistics status", width: 20 },
             { key: "hold",      header: "Hold",            width: 18 },
             { key: "rn",        header: "RN",              width: 15 },
+            // Next to the RN it was looked up by. Blank where a car has no
+            // appointment booked — that is an answer, not a gap.
+            { key: "advisor",   header: "Delivery advisor", width: 22 },
             { key: "itinerary", header: "Itinerary",       width: 20 },
             { key: "vriPassed", header: "VRI passed",      width: 13 },
             { key: "touchedAt", header: "Status updated",  width: 15 },
             { key: "touchedBy", header: "Updated by",      width: 26 }
-          ],
+          ]),
           rows: cogSheet
         });
 
-        log(`export: ${cogSheet.length} cars on ground -> ${label}.xlsx`);
+        log(`export: ${cogSheet.length} cars on ground (${preset}) -> ${label}.xlsx`);
         return sendXlsx(res, cogBuf, label);
       }
 
@@ -436,6 +510,10 @@ const server = http.createServer(async (req, res) => {
           stage    : r.stage || "",
           delivered: r.delivered ? "Delivered" : "Undelivered",
           deliveredOn: day(r.deliveredAt),
+          /* Already a plain "2026-08-13" from the index, so it is sliced
+             rather than parsed — running it through `day()` would put it
+             through a Date and hand back yesterday for anyone east of UTC. */
+          scheduled: r.scheduledFor ? String(r.scheduledFor).slice(0, 10) : "",
           title    : r.titleLabel || "",
           refurb   : r.refurb || "",
           inUse    : day(r.inUseSince),
@@ -459,8 +537,9 @@ const server = http.createServer(async (req, res) => {
 
       const buf = xlsx.build({
         sheetName: "Service visits",
-        columns: [
+        columns: pick([
           { key: "vin",         header: "VIN",              width: 20 },
+          { key: "scheduled",   header: "Scheduled delivery", width: 18 },
           { key: "model",       header: "Model",            width: 12 },
           { key: "type",        header: "Vehicle tag",      width: 16 },
           { key: "ownership",   header: "Ownership",        width: 14 },
@@ -487,11 +566,11 @@ const server = http.createServer(async (req, res) => {
           { key: "lgCount",     header: "Logistics count",  width: 15, type: "number", digits: 0 },
           { key: "lgReasons",   header: "Logistics reason", width: 24 },
           { key: "lgNotes",     header: "Logistics note",   width: 34 }
-        ],
+        ]),
         rows: sheet
       });
 
-      log(`export: ${sheet.length} rows -> ${label}.xlsx`);
+      log(`export: ${sheet.length} rows (${preset}) -> ${label}.xlsx`);
       return sendXlsx(res, buf, label);
     }
 

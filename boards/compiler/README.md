@@ -143,12 +143,49 @@ has never held is worse than no filter: it returns nothing and looks broken.
 | Fleet status | `fleet_status` | Active · Inactive · Pending cycle in · Pending cycle out |
 | Delivery stage | `delivery_stage` | General assembly · Arrived at VRL · Arrived not at VRL · Rectification · At service center · In-garage delivered · Post delivery owned · Frozen |
 | Model | `model` | Model 3 · Y · S · X · Cybertruck |
+| **Scheduled for delivery** | `delivery_details.scheduled_delivery_date` | Yes *(presence, not a value)* |
 | **Title status** | *(not indexed — see below)* | New · Used · Salvaged · TBD |
 
 Facets AND together; values inside one facet OR. Nothing selected in a facet
 means no opinion, so the query only ever narrows. The Lucene it built is
 returned with every scan and shown in the server log, so a surprising result
 can be checked rather than argued with.
+
+### Scheduled for delivery is an existence test
+
+The other facets ask what a car *is*. This one asks whether anybody is waiting
+for it, which is what turns a service visit from a queue entry into a
+deadline. One option, **Yes** — off means no opinion, on means the car has a
+delivery appointment booked, on any date.
+
+`exists: true` on the facet marks the difference: the chosen value never
+reaches the query, only the fact that something was chosen, and `buildQuery`
+writes a range over the whole field instead of an OR group.
+
+```
+delivery_details.scheduled_delivery_date:[* TO *]
+```
+
+Three things about that line were each a dead end first:
+
+- **The field is nested under `delivery_details`.** The flat
+  `scheduled_delivery_date` that `tesladex_fields` appears to offer is **422
+  `Unknown fields`** — the listing is a tree and the leaf names in it are not
+  the query paths. Sibling leaves on the same object include `eta2sc_date`,
+  `destination_trt_id`, `scheduled_delivery_location_trt_id` and a
+  `_local` / `_utc` pair of each date.
+- **`_exists_:` is rejected**, because tesladex validates every field name in
+  the query against its own map and `_exists_` is not in it. The Elasticsearch
+  idiom does not survive the wrapper.
+- **`:*` is wrong for a date.** A wildcard is a term query and the field is
+  mapped `date`; the open range is the form that works.
+
+At Houston-Cypress: 612 undelivered, **333 with a delivery booked**. Nested
+projection also works — asking for `delivery_details.scheduled_delivery_date`
+in `fields` returns only that leaf rather than the whole object, which keeps
+the destination city and the rest of the delivery record off this server. It
+is fetched on every scan whether or not the facet is set, because it costs
+nothing on a query already running and the export offers it as a column.
 
 ### New / Used is the one Garage cannot answer
 
@@ -217,10 +254,25 @@ the filename. Exporting 8 rows when someone believed they had 40 is a nasty
 surprise; a file called `…-flagged-…` is not.
 
 ```
-compiler-service-visits-<site>-<flagged|all>-<yyyy-mm-dd>.xlsx
+compiler-service-visits-<site>-<flagged|all>[-vin-delivery]-<yyyy-mm-dd>.xlsx
 ```
 
-One row per vehicle, twenty-four columns: the identity and tag fields, a
+**Export** opens a chooser first — *which columns*, never which rows. Both
+tools offer the same two presets and both spell the delivery date with the
+same key, so one filter over the full column list serves both; the narrow
+preset never declares its own columns, or a header renamed in one place would
+go stale in the other.
+
+| Preset | |
+|---|---|
+| **All data** | every column — the sheet you open to work from |
+| **VIN + delivery date** | two columns — the one you paste somewhere else |
+
+The preset lands in the filename for the reason the view does: a two-column
+file and a twenty-five-column one both called `…-2026-08-13.xlsx` are
+indistinguishable in a downloads folder.
+
+One row per vehicle, twenty-five columns: the identity and tag fields, a
 `Flagged` yes/no, a `Blockers` summary, then a count plus the detail for each
 of the three kinds. **Not one row per hold** — a car with two campaigns is
 still one car, and a sheet that repeats it double-counts the moment anyone
@@ -337,19 +389,134 @@ compare side by side. An empty result spells the whole ladder out underneath
 it — a healthy lot answering "none pending" should read as an answer, not as a
 broken tool.
 
+### Time on ground
+
+A second filter in the same menu, under the ladder. **Any** · **Under 24h** ·
+**Under 3d** · **Under 7d** · **Under 30d**, one at a time — the windows nest,
+so "under 24h and under 7d" is just "under 24h".
+
+The status filter alone does not answer the question people bring to this
+tool. Houston-Cypress has 763 cars on ground and the oldest has been standing
+**four and a half years**; today's arrivals are eighty rows somewhere inside
+that, and they are the ones still worth walking out to.
+
+| Window | Listed | Hidden |
+|---|---|---|
+| Any | 763 | — |
+| Under 24h | 80 | 683 |
+| Under 3d | 175 | 588 |
+| Under 7d | 248 | 515 |
+| Under 30d | 339 | 424 |
+
+Measured from `arrivalTimeStamp`, the same span the rows already show as
+dwell, so the filter and the number on the row can never disagree.
+
+**Applied by the scan, not by the page.** It could be done client-side off
+rows already fetched — the sort toggles are — but then the strip, the export
+and the trunk button would each need telling separately what "listed" means,
+and three places that can disagree is three places that eventually will. A
+rescan is three seconds.
+
+**The window is validated against `DWELL_WINDOWS` in `lib.js`, not just
+accepted.** A window the menu never offered — a typo'd `0.5` — would hide
+almost the whole lot and read as an empty centre rather than as a bad request.
+
+Cars with **no arrival timestamp are dropped** by any window rather than kept.
+"Under 24h" is a claim about the car and an unknown dwell does not support it;
+keeping them would put a car that has stood for two years at the top of a list
+of this morning's arrivals. A notice gives the count, because that is the one
+case where the window is hiding something it could not judge rather than
+something it judged.
+
+Under a window the last tile changes from **Over 30d** — which would read 0 by
+construction — to **Older**, the count the window is hiding. The backlog is
+still the story of the lot even when it is deliberately off the screen. The
+window also goes in the subtitle and the export filename, for the reason the
+view already does: a screen showing 3 rows when the centre has 400 pending has
+to say why, or it reads as a broken scan.
+
+An empty result under a window says *Nothing that recent* rather than *No cars
+in that status*. The two want opposite next moves — widen the window, or widen
+the status — and one message would send half the readers the wrong way.
+
 ### Export
 
 Same rules as the other tool: exactly what is on screen, no re-scan, status in
 the filename.
 
 ```
-compiler-cars-on-ground-<site>-<statuses|all-statuses>-<yyyy-mm-dd>.xlsx
+compiler-cars-on-ground-<site>-<statuses|all-statuses>[-under24h]-<yyyy-mm-dd>.xlsx
 ```
 
-Nineteen columns. Dwell goes out **twice** — a readable `1508d` to look at, and
+Same two presets as the other tool — **All data** or **VIN + delivery date**,
+where the date is Intrepid's `scheduledDeliveryDate` rather than the index's.
+
+Twenty columns. Dwell goes out **twice** — a readable `1508d` to look at, and
 the same span as a number in both hours and days, so a column can be sorted,
 filtered above a threshold or averaged without anyone parsing a duration back
 out of a string.
+
+### Open all trunks
+
+The list on screen can be made to raise its hands. **Open all trunks** wakes
+every car listed and pops its liftgate, because an open trunk is visible from
+the end of a row and a VIN on a screen is not. It respects the status filter —
+"that list" means the rows you are looking at, not the whole centre.
+
+This is the only control on the board that changes something in the world
+rather than reading it, so it asks first, with the count in the question:
+*open 176 trunks*, never *open all trunks*. It is one chip away from the sort
+toggles, which do nothing at all.
+
+**Both steps are per-vehicle, and the batch call is a trap.** Garage has
+`POST /api/1/vehicles/batch_wake_up` taking `{vehicle_ids:[…]}` — its own
+advanced-search page uses it to poke up to 5,000 cars in one call. It answers
+**403 `you may not access this feature`** for a service-centre role, because
+it belongs to the batch tooling rather than to the vehicle page. Don't swap it
+back in to save calls; it fails only once a run is already underway.
+
+| Call | |
+|---|---|
+| `POST /api/1/vehicles/<id>/wake_up?device_type=vehicle` | the Poke button · `{"response":"ok"}` |
+| `POST /api/1/vehicles/<id>/open_trunk?device_type=vehicle` | no body · the id is Garage's 16-digit device id |
+
+There is **no `close_trunk`** anywhere in Garage's bundle, and no
+`actuate_trunk` either — `open_trunk` is the whole vocabulary. The liftgate
+commands sit beside `flash_lights`, `honk_horn` and `locate_ping`, which are
+the other three ways to make a car identify itself.
+
+#### Writes need a CSRF token, and it is not in the cookie
+
+Reads need only the session cookie. Garage is Rails, so every POST is checked
+against the per-session token its pages carry in `<meta name="csrf-token">`.
+It is scraped from `/vehicles` with the same session — **one extra GET per
+run, not per car** — and cached. A 422 buys exactly one retry with a fresh
+token, because a token can age out mid-run and Rails answers that
+indistinguishably from a real refusal.
+
+`device_type=vehicle` rides in the **query string on every call** and is also
+injected into the body whenever there is one. Both were copied out of Garage's
+own service class rather than guessed.
+
+#### Rounds, not a sleep
+
+Cars on Ground is an Intrepid tool and holds only VINs, so the ids are looked
+up off tesladex first, 150 VINs to a query. `vpn_state` comes back free in the
+same query and says who is already awake.
+
+A poked car answers somewhere between a few seconds and a minute, and some
+never do. Rather than sleep for the worst case and fire everything at the end,
+each round opens what it can and only the refusals go round again — at 0s,
+20s, 45s and 90s, re-poking the outstanding cars before each retry. The online
+ones pop within a second of the click, which is the difference between a tool
+you stand and wait for and one you walk behind.
+
+Whatever is still shut at the end is listed in the result window, grouped by
+what Garage said rather than one line per car: two hundred rows all reading
+*vehicle is offline* hide the one that says something else, and that one is
+the only interesting line on the screen. VINs the index has never heard of are
+reported separately — two of them is noise, two hundred means the session is
+reading a different environment and the run was meaningless.
 
 ---
 
