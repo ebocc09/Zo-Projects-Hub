@@ -1091,6 +1091,16 @@ a.vin-link:hover{border-bottom-color:var(--blue);color:var(--blue)}
         </svg>
         Measurement
       </button>
+      <!-- data-sec must be all lowercase: the switcher compares
+           sec.id.toLowerCase() === "sec" + key, so "secalerts" matches
+           "alerts" and would never match "Alerts". -->
+      <button class="rail-item" data-sec="alerts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>
+        </svg>
+        Alerts
+        <span class="warn" id="railWarnAlerts" hidden></span>
+      </button>
       <button class="rail-item" data-sec="maintenance">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/>
@@ -1245,6 +1255,78 @@ a.vin-link:hover{border-bottom-color:var(--blue);color:var(--blue)}
         all deliveries. <b>FSD</b> is how many of <i>their own</i> cars were driven on
         FSD. They answer different questions and are not comparable, so the car count
         sits beside both: three cars at 100% is not a better day than twenty at 85%.</p>
+    </section>
+
+    <section class="sec" id="secalerts">
+      <h4 class="sec-h">Alerts</h4>
+      <p class="sec-p">During your hours of operation, on every hour, the board runs
+        today's report itself and posts one card to Teams listing the cars that have
+        not yet driven their FSD miles. A car at or above the bar is finished and is
+        never posted, and an hour with nothing to chase posts nothing at all.</p>
+
+      <div class="modes">
+        <button class="mode" id="alertsOff" data-alerts="off">
+          <div class="mode-n"><i class="tick"></i>Off</div>
+          <div class="mode-d">Nothing is posted. The webhook and hours below are kept.</div>
+        </button>
+        <button class="mode" id="alertsOn" data-alerts="on">
+          <div class="mode-n"><i class="tick"></i>On</div>
+          <div class="mode-d">Posts on the hour, within the hours and days set below.</div>
+        </button>
+      </div>
+
+      <div class="conn" id="cAlerts"><i class="dot"></i><b>Status</b><span>—</span></div>
+
+      <div class="sec-title">Hours of operation</div>
+      <p class="sec-p">Alerts fire <b>on the hour</b>, and the end hour is included —
+        09:00 to 17:00 posts nine times, and the last one is usually the useful one.
+        Minutes are ignored.</p>
+      <div class="field">
+        <label for="alertStart">Start and end</label>
+        <div class="connect-row">
+          <input id="alertStart" type="time" step="3600" style="flex:1;min-width:0"
+                 aria-describedby="alertHint">
+          <input id="alertEnd" type="time" step="3600" style="flex:1;min-width:0"
+                 aria-describedby="alertHint">
+          <button class="btn btn-dark" id="hoursSave" style="flex:none">Save</button>
+        </div>
+        <div class="chips" id="alertDays" role="group" aria-label="Days to post on"></div>
+        <div class="hint" id="alertHint">Days and times are saved together.</div>
+      </div>
+
+      <div class="sec-title">Where it posts</div>
+      <p class="sec-p">A Power Automate flow URL, from the
+        <b>When a Teams webhook request is received</b> trigger. It is stored in
+        <b>.connections.json</b> on this machine and is never shown again once saved.</p>
+      <div class="field">
+        <label for="hookIn">Teams webhook</label>
+        <div class="connect-row">
+          <input id="hookIn" type="url" autocomplete="off" spellcheck="false"
+                 placeholder="https://…/triggers/manual/paths/invoke?api-version=1&amp;sp=…&amp;sig=…"
+                 style="flex:1;min-width:0" aria-describedby="hookHint">
+          <button class="btn btn-dark" id="hookSave" style="flex:none">Save</button>
+        </div>
+        <div class="hint" id="hookHint">Paste the whole URL. Copied through a terminal it
+          gets cut at the first <b>&amp;</b>, which keeps the address and loses the
+          signature — every post then fails with a permissions error that looks like
+          something else entirely.</div>
+      </div>
+
+      <div class="sec-title">Send one now</div>
+      <p class="sec-p"><b>Preview</b> runs today's report and shows what would go out
+        without posting anything. <b>Send now</b> runs it and posts, ignoring the hours,
+        the days and the switch above — it is an override, and it does not affect the
+        next scheduled post. <b>Test</b> posts a sample card without running a report.</p>
+      <div class="field">
+        <div class="connect-row">
+          <button class="btn btn-ghost" id="alertPreview" style="flex:1">Preview</button>
+          <button class="btn btn-ghost" id="alertTest" style="flex:1">Test</button>
+          <button class="btn btn-dark" id="alertSend" style="flex:1">Send now</button>
+        </div>
+        <div class="hint" id="sendHint">A preview costs a report run, so it takes as long
+          as pressing Load does.</div>
+      </div>
+      <div class="hint" id="alertPreviewBox" hidden></div>
     </section>
 
     <section class="sec" id="secMaintenance">
@@ -1482,7 +1564,14 @@ function progHide(){
 }
 
 function progPaint(p){
-  const meta = PHASE[p.phase] || { t: "Working", s: "" };
+  /* The run in flight may not be yours. Since the board started running its
+     own hourly report, pressing Load on the hour can leave you watching a
+     bar count cars you did not ask for and then jump back to zero. Say whose
+     it is instead. */
+  const meta = (p.kind === "alert" || p.kind === "alert-manual")
+    ? { t: "Waiting for the hourly FSD check",
+        s: "The board is running its own report for the Teams alert. Yours starts the moment it finishes." }
+    : (PHASE[p.phase] || { t: "Working", s: "" });
   const known = p.total > 0 && p.done != null && p.phase !== "enumerate";
   const pct   = known ? Math.min(100, Math.round(p.done / p.total * 100)) : 0;
 
@@ -2576,6 +2665,10 @@ function fillConnections(c){
   // needs no cookie, so a missing one is not a fault there.
   const intrepidOk = S.mode !== "advanced" || (c.intrepid.set && c.intrepid.looksOk);
   $("railWarnConn").hidden = c.garage.signedIn && intrepidOk;
+
+  // Painted from the same summary, so the alerts panel is refreshed by every
+  // caller that already repaints connections rather than needing its own.
+  fillAlerts(c.alerts);
 }
 
 /* Switching sources re-runs whatever is on screen. The user asked for the
@@ -2664,6 +2757,179 @@ async function saveThreshold(value){
     barNote(err.message, true);
   }
 }
+
+/* ────────────────────────── hourly Teams alerts ──────────────────────────
+   The panel's copy of the settings. `days` is the only one held here rather
+   than read off the DOM, because seven chips are a value, not seven
+   independent controls — half a selection must never reach the server. */
+const AL = { on: false, days: [1, 2, 3, 4, 5] };
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+const alertNote = (msg, bad) => { const el = $("alertHint");
+  el.textContent = msg; el.style.color = bad ? "var(--red)" : ""; };
+const hookNote  = (msg, bad) => { const el = $("hookHint");
+  el.innerHTML = msg; el.style.color = bad ? "var(--red)" : ""; };
+const sendNote  = (msg, bad) => { const el = $("sendHint");
+  el.textContent = msg; el.style.color = bad ? "var(--red)" : ""; };
+
+function paintDays(){
+  $("alertDays").innerHTML = DAY_NAMES
+    .map((n, i) => `<button class="chip${AL.days.includes(i) ? " on" : ""}" data-day="${i}"
+                            aria-pressed="${AL.days.includes(i)}">${n}</button>`).join("");
+}
+
+/* Everything the alerts section shows comes from the server's summary, so
+   the panel can never claim to be armed when the scheduler disagrees. */
+function fillAlerts(a){
+  if(!a) return;
+  AL.on   = a.on === true;
+  AL.days = Array.isArray(a.days) ? a.days.slice() : AL.days;
+
+  $("alertsOn").classList.toggle("on", AL.on);
+  $("alertsOff").classList.toggle("on", !AL.on);
+
+  if(document.activeElement !== $("alertStart")) $("alertStart").value = a.start;
+  if(document.activeElement !== $("alertEnd"))   $("alertEnd").value   = a.end;
+  paintDays();
+
+  const ca = $("cAlerts");
+  ca.className = "conn " + (a.armed ? (a.webhook.looksOk ? "ok" : "bad") : "");
+  ca.querySelector("span").textContent = a.armed
+    ? (a.webhook.looksOk
+        ? `posting on the hour ${a.start}–${a.end}, ${a.dayLabel}`
+        : `on, but that webhook looks truncated — nothing will get through`)
+    : `not posting — ${a.why}`;
+
+  hookNote(a.webhook.set
+    ? (a.webhook.looksOk
+        ? `Posting to <b>${esc(a.webhook.hint)}</b>. Save a new one to replace it.`
+        : `Saved, but there is no <b>sig</b> in it — that URL was truncated and every post will fail.`)
+    : `No webhook set, so nothing can be posted.`, a.webhook.set && !a.webhook.looksOk);
+
+  /* Rail dot means "attend to this", so it is shown only when alerts are ON
+     and something about them is broken. Switched off is a decision, not a
+     fault, and does not earn a dot. */
+  $("railWarnAlerts").hidden = !AL.on || (a.armed && a.webhook.looksOk);
+}
+
+async function saveAlerts(patch, note){
+  try{
+    const d = await api("/api/admin/alerts", { password: S.password, ...patch });
+    fillAlerts(d.connections && d.connections.alerts);
+    if(note) alertNote(note);
+    return true;
+  }catch(err){
+    // Repaint from the server rather than leaving the UI showing a change
+    // that did not take.
+    try { const st = await api("/api/state"); fillAlerts(st.connections.alerts); } catch {}
+    alertNote(err.message, true);
+    return false;
+  }
+}
+
+document.querySelectorAll(".mode[data-alerts]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const want = btn.dataset.alerts === "on";
+    if(want === AL.on) return;
+    saveAlerts({ on: want }, want ? "Alerts on." : "Alerts off. The webhook and hours are kept.");
+  });
+});
+
+// Chips write through immediately: a day toggle with a separate Save button
+// is a way to think you changed something and not have.
+$("alertDays").addEventListener("click", e => {
+  const chip = e.target.closest(".chip[data-day]");
+  if(!chip) return;
+  const d = Number(chip.dataset.day);
+  const next = AL.days.includes(d) ? AL.days.filter(x => x !== d) : [...AL.days, d].sort();
+  AL.days = next;
+  paintDays();
+  saveAlerts({ days: next }, next.length ? "Days saved." : "No days selected — nothing will post.");
+});
+
+$("hoursSave").addEventListener("click", () =>
+  saveAlerts({ start: $("alertStart").value, end: $("alertEnd").value }, "Hours saved."));
+
+$("hookSave").addEventListener("click", async () => {
+  const url = $("hookIn").value.trim();
+
+  /* Both checks run here as well as on the server. Catching a truncated
+     paste before the round trip is not about saving the request — it is so
+     the message lands next to the box the mistake is still sitting in. */
+  if(url){
+    if(!/^https:\/\//i.test(url)){
+      hookNote("The webhook URL must start with <b>https://</b>", true); return;
+    }
+    if(!/[?&]sig=/.test(url)){
+      hookNote("That URL has no <b>sig</b> parameter — it was almost certainly cut at the " +
+               "first <b>&amp;</b>. Copy the whole thing from Power Automate.", true);
+      return;
+    }
+  }
+  const ok = await saveAlerts({ webhook: url });
+  if(ok){
+    // Never re-shown, so never re-filled.
+    $("hookIn").value = "";
+    // Saving a webhook must not switch alerts on by itself — pasting a URL
+    // to see whether the field works should not start posting to a channel.
+    if(url && !AL.on) alertNote("Webhook saved. Turn alerts on to start posting.");
+    else if(!url)     alertNote("Webhook cleared. Nothing will be posted.");
+  }
+});
+
+/* Preview and Send share a route and differ by one flag. Preview is the
+   default there, so a mis-click can never put a card in the channel. */
+async function runAlertNow(post){
+  const btn = post ? $("alertSend") : $("alertPreview");
+  const box = $("alertPreviewBox");
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = post ? "Sending…" : "Running…";
+  sendNote(post ? "Running today's report, then posting…" : "Running today's report…");
+  try{
+    const d = await api("/api/admin/alerts/run", { password: S.password, post });
+
+    if(d.skipped){ sendNote(d.reason, true); box.hidden = true; return; }
+
+    if(!d.missing){
+      box.hidden = true;
+      sendNote(`All ${d.total} car(s) delivered today have driven their FSD miles — nothing to post.`);
+      return;
+    }
+    const lines = d.cars.slice(0, 12).map(c =>
+      `${esc(c.vin)} — ${c.unreadable ? "no reading" : c.miles.toFixed(1) + " mi"}` +
+      (c.advisor ? ` · ${esc(c.advisor)}` : "")).join("<br>");
+    box.hidden = false;
+    box.innerHTML = `<b>${d.missing} of ${d.total}</b> not yet driven:<br>${lines}` +
+      (d.missing > 12 ? `<br>…and ${d.missing - 12} more` : "");
+    sendNote(post ? `Posted ${d.missing} car(s) to Teams (HTTP ${d.status}).`
+                  : `Preview only — nothing was posted.`);
+  }catch(err){
+    box.hidden = true;
+    sendNote(err.message, true);
+  }finally{
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+$("alertPreview").addEventListener("click", () => runAlertNow(false));
+$("alertSend").addEventListener("click",    () => runAlertNow(true));
+
+/* Not blockAction: that puts the result INTO the button, which is right for
+   "42 sites cached" and wrong for a sentence. The message belongs in the
+   hint under the row. */
+$("alertTest").addEventListener("click", async () => {
+  const btn = $("alertTest"), label = btn.textContent;
+  btn.disabled = true; btn.textContent = "Sending…";
+  try{
+    const d = await api("/api/admin/alerts/test", { password: S.password });
+    sendNote(`Sample card sent (HTTP ${d.status}).` +
+      (d.alertsOff ? " Alerts are switched off — this went anyway, but real checks will not." : "") +
+      " A 202 only means Power Automate accepted it; check the channel to be sure.");
+  }catch(err){
+    sendNote(err.message, true);
+  }finally{
+    btn.disabled = false; btn.textContent = label;
+  }
+});
 
 /* Re-scores the loaded rows without re-running the report. Silent when there
    is nothing loaded — the setting still saved, there is just nothing to

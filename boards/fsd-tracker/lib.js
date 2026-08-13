@@ -22,6 +22,11 @@ const https  = require("https");
 const crypto = require("crypto");
 
 const credstore = require("./credstore");
+/* Pure helpers only — validation, normalising and card building. Requiring it
+   here starts nothing: alerts.js has no import-time side effects and holds no
+   state, and the timer that actually posts lives in server.js. That split is
+   what keeps a CLI run incapable of writing to a Teams channel. */
+const A = require("./alerts");
 
 const HERE = __dirname;
 
@@ -57,8 +62,20 @@ const CONN_FILE = path.join(HERE, ".connections.json");
 /* null for droveThreshold means "no local choice" — the shipped default in
    config.json applies. Storing 0 here has to stay distinguishable from that,
    because 0 is a legitimate setting: it counts any movement at all. */
+/* The hourly Teams digest settings are FLAT keys rather than a nested
+   `alerts: {}` object, because saveConnections is a shallow merge: a nested
+   object would be replaced wholesale by any patch that touched it, so saving
+   the webhook would silently blank the day list. `alertDays` is an array and
+   that is fine — it is a leaf value, always replaced deliberately.
+
+   `alertsOn` defaults to FALSE. A setting that defaults on is one that starts
+   posting into a shared channel the moment somebody pastes a URL to see
+   whether the field works. See alerts.js for what each of these means. */
 const CONN_DEFAULTS = { intrepidCookie: "", garageCookie: "", mode: "basic", trtId: null,
-                        droveThreshold: null };
+                        droveThreshold: null,
+                        alertsOn: false, alertWebhook: "",
+                        alertStart: "09:00", alertEnd: "17:00",
+                        alertDays: [1, 2, 3, 4, 5] };
 
 /* Stored as a number or null, never a string, so callers can compare without
    worrying which layer they got it from. */
@@ -1814,7 +1831,43 @@ function connectionsSummary(){
       // Advanced without a cookie is the one broken combination.
       required: mode === "advanced"
     },
-    garage: { detail, signedIn }
+    garage: { detail, signedIn },
+    alerts: alertsSummary(c)
+  };
+}
+
+/* ── hourly Teams digest, as the panel needs to see it ──
+   The webhook URL is a credential: whoever holds it can post into the
+   channel. It is NEVER returned here, and the input box is never pre-filled
+   from it. */
+function alertsSummary(c){
+  const url  = String(c.alertWebhook || "").trim();
+  const days = A.normaliseDays(c.alertDays);
+  const on   = c.alertsOn === true;
+
+  return {
+    on,
+    start: A.normaliseTime(c.alertStart, A.DEFAULTS.start),
+    end  : A.normaliseTime(c.alertEnd,   A.DEFAULTS.end),
+    days,
+    dayLabel: A.dayLabel(days),
+    webhook: {
+      set: Boolean(url),
+      /* The HOST, not a masked tail. The Intrepid hint can show its last
+         eight characters because a cookie fragment is useless on its own —
+         the last eight characters of a Power Automate URL are the end of the
+         sig HMAC, which is the credential itself. This says "yes, that is
+         the one you pasted" and hands back none of it. */
+      hint: url ? url.replace(/^(https:\/\/[^/]+)\/.*$/, "$1/…") : "",
+      // The truncated-paste test. See looksLikeFlowUrl in alerts.js for why
+      // this is the most valuable field on the object.
+      looksOk: A.looksLikeFlowUrl(url)
+    },
+    // All the conditions at once, so the panel renders one honest verdict
+    // instead of re-implementing the scheduler's rule in the page.
+    armed: on && Boolean(url) && days.length > 0,
+    why  : on ? (!url ? "no webhook is set" : !days.length ? "no days are selected" : "")
+              : "alerts are switched off"
   };
 }
 

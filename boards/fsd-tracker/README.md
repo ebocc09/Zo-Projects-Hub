@@ -606,6 +606,97 @@ They were registered against a redirect URI nothing serves now.
 
 ---
 
+## Hourly Teams alerts
+
+Admin › **Alerts**. During your hours of operation, on every hour, the board
+runs today's report itself and posts one Adaptive Card to a Power Automate
+webhook listing the cars that have not yet reached the FSD bar. A car at or
+above the bar is finished and is never posted. **An hour with nothing to chase
+posts nothing at all** — a channel that only ever shows work to do is one
+people keep reading.
+
+Settings live in `.connections.json` as five flat keys (`alertsOn`,
+`alertWebhook`, `alertStart`, `alertEnd`, `alertDays`). Flat rather than one
+nested object because `saveConnections` is a shallow merge: a nested object
+would be replaced wholesale by any patch that touched it, so saving the
+webhook would silently blank the day list.
+
+**The end hour is included.** 09:00–17:00 posts nine times, and the 17:00 one
+is usually the useful one. Alerts fire on the hour; the minutes are stored
+because `<input type="time">` emits them, and ignored.
+
+**The webhook URL is a credential.** It is never returned to the page — the
+panel shows the host and nothing else, and the input box is never pre-filled.
+Note that this is *not* the masked-tail treatment the Intrepid cookie gets:
+the last eight characters of a Power Automate URL are the end of the `sig`
+HMAC, which is the secret itself.
+
+> **Paste the whole URL.** Copied through a terminal it gets cut at the first
+> `&`, which keeps the address and loses the signature. Every post then fails
+> `401`, and it reads like a tenant policy problem rather than a truncated
+> paste. Both the panel and the server refuse a URL with no `sig=`.
+
+**Send now** is a manual override: it runs the report and posts immediately,
+ignoring the hours, the days and the switch. It does not affect the next
+scheduled post. **Preview** does the same and posts nothing, which is how the
+whole thing is testable without putting cards in a channel. **Test** posts a
+sample card without running a report, and fires even when alerts are switched
+off — a test button that silently did nothing while off would be
+indistinguishable from a broken webhook.
+
+### What the card carries, and what it never does
+
+VIN, model, miles, handover time, and the delivery advisor when the run was in
+advanced mode. **Never the customer name and never the reference number** —
+both identify the person who took delivery, and this goes to a channel. There
+is an assertion for it.
+
+Capped at 12 cars with an "and N more" line: Teams caps an incoming payload
+around 28 KB and collapses a tall card behind *Show more*, so rows past the
+twelfth are unread by construction.
+
+Cars are listed fewest-miles-first — the inverse of the dashboard's sort,
+because a chase list should lead with the worst case rather than the best
+story.
+
+### Scheduling, and why it behaves the way it does
+
+A 30-second tick compares the current wall-clock hour against the last hour a
+digest was decided for — a *name* like `2026-08-13T14`, not a timestamp. Not a
+`setTimeout` chained to the next boundary: that is stateful about the future,
+so a laptop that sleeps through one fire loses the following hour too, with
+nothing to notice.
+
+Consequences, all of which fall out of the marker rather than being
+special-cased:
+
+| Situation | Behaviour |
+|---|---|
+| Sleep 08:30, wake 11:20 | **One** post, for hour 11. Not three catch-ups for the hours it slept through |
+| Spring forward | 02:00 does not exist locally, so it never produces a key and nothing is attempted for it |
+| **Fall back** | 01:00 happens twice and produces the same name twice, so **only the first posts**. One post per named hour — deliberate, not a bug |
+| Restart at 09:47 | No post until 10:00. A card labelled as the nine o'clock check, sent at 09:47, would be a lie |
+| Restart at 09:02 | Posts within 30 s — the boundary is still in reach |
+| Restart inside a posting hour | Can produce one duplicate. The marker is in memory on purpose: persisting it would race the admin panel on `.connections.json` every hour, and a crash loop that persisted it would *suppress* alerts. A duplicate gets noticed and ignored; a silence does not |
+
+**Only one report runs at a time.** Reports used to be serialised by
+convention — one operator, one tab. An hourly background run makes a second
+report routine, and two concurrent runs share the MCP session, the settled
+measurement cache and its dirty flag, and the module-level notices array,
+which `takeNotices()` drains with a `splice` — so a concurrent run does not
+merely race the warnings, it *steals* them. Acquisition is asymmetric: a user
+run **queues** (the progress panel says it is waiting on the hourly check),
+and the scheduler **skips** and retries on the next tick, because a digest
+four minutes late is worse than one missed hour.
+
+**A failing hour is not retried.** A 401 will still be a 401 in thirty
+seconds, and 120 retries an hour is how a board gets rate-limited. One attempt
+and one warning per hour; the failure surfaces in `/api/state` so the panel can
+show it. **Errors are never posted to Teams** — an alert channel that fills
+with plumbing failures gets muted, and then the real alerts are lost too.
+
+---
+
 ## Configuration
 
 `config.json`:
