@@ -1,9 +1,11 @@
 # The Compiler
 
-A board of tools over the two systems that between them describe a vehicle.
+A board of tools over the systems that between them describe a vehicle.
 **Garage** says what a car *is* — model, tag, ownership, delivery stage.
 **Intrepid** says what is *wrong* with it — service visits, containment
-campaigns, logistics holds. Neither can answer alone, so the board joins them.
+campaigns, logistics holds. The **Service App** says what the work actually
+*is*: the symptom on each ticket, which neither of the other two carries.
+None of them can answer alone, so the board joins them.
 
 Local, zero dependencies, no build step. `node server.js` and open the port.
 
@@ -21,10 +23,14 @@ node server.js            # http://localhost:3131
 
 Or double-click `Start The Compiler.cmd`.
 
-First run needs both sources connected — Admin (code below) › Sources. Both
-are one **Connect** press each: the board opens an isolated Chrome profile,
-you sign in, and it reads the cookie back over CDP. Both sign-ins share the
-same window, so the second Connect usually needs no second sign-in.
+First run needs Garage and Intrepid connected, which happens once on the **Zo
+Projects Hub** and covers every board. The **Service App** connects on this
+board instead — Admin (code below) › Sources › Connect, or the prompt the
+board shows when it opens. All three share one isolated Chrome profile, so the
+second and third Connect usually need no second sign-in.
+
+Garage and Intrepid are required. SCA is not: without it a service visit shows
+as a bare number instead of what it is for, and nothing else changes.
 
 ---
 
@@ -92,7 +98,7 @@ which cars to look at, and run the scan.
 
 | Kind | Source | Meaning |
 |---|---|---|
-| Service visits | `getScaServiceVisitByVin` | An SCA service visit — the SV number, when it opened, when it is due |
+| Service visits | `getScaServiceVisitByVin` | An SCA service visit — the SV number and when it opened, then the ticket itself from SCA and the receiving inspection from the status log |
 | Containment | `bulkGetCampaignContainmentHolds` | An active containment campaign, with its title and action type |
 | Logistics holds | `getLogisticsHoldByVin` | Held in logistics, with the reason spelled out |
 
@@ -100,29 +106,374 @@ Each is a toggle because each costs a call per vehicle. Containment batches
 five VINs to a call; the other two do not. Turning one off on a wide selection
 is a real saving, not a cosmetic filter.
 
+### Where the car is
+
+Every row carries a site pill, in the slot the Title status pill used to have.
+Title is a fetched field most scans never ask for, so that pill was usually
+absent; the site is on every row. Title is still filterable and still exported.
+
+**Garage says which site; the site directory names it.** Garage's `trt_id` is
+the only field that knows a car is standing at Collision rather than at the
+centre it routes to. It does *not* carry the name, and
+`delivery_details.destination_trt_city` is not the name either — that is where
+the car is *going*. One Cypress car reads `trt_id: 7198` (Collision Houston)
+with `destination_trt_city: "Houston - Cypress"`; naming from it would
+confidently print the wrong place. So the name comes from the ~1,850-site
+directory the board already caches for the TRT picker. No new source, and it
+works with SCA disconnected.
+
+**`trt_id` is not complete, and the pill is built around that.** On a 436-car
+Cypress scan: 199 name a real site, 84 carry logistics codes not yet shed
+(8162, 16402 …), and 107 carry nothing. Fed by `trt_id` alone the pill would
+print "TRT 8162" on a fifth of the list and nothing on another quarter. So it
+falls back to `vehicle_routing_location`, which is complete, whenever the
+directory cannot name the `trt_id`. Every row ends up with a site.
+
+A car is **marked** only when `trt_id` named a site and that site is not the
+one being scanned — 33 of 436 at Cypress, including 7 at Collision Houston. A
+car whose `trt_id` is a stale logistics code falls back quietly rather than
+being flagged: it is not known to be elsewhere, only known to have a stale
+code.
+
+> **Caveat worth knowing.** Some logistics codes *do* resolve to real names —
+> 20 Cypress cars mark as "Robo Service Austin Factory" (trt 15047) and one as
+> "Pack Service Fremont Factory". Those are almost certainly stale codes rather
+> than cars in Austin, and nothing in Garage distinguishes a stale code from a
+> real position. The pill reports Garage faithfully; it is not proof of where
+> a car is standing.
+
+### What the visit is actually for
+
+Under each SV number sits the concern the visit was opened for: the symptom,
+its type and category, the estimated hours, and a link to its photos. One line
+per concern, so a car with three of them shows three.
+
+```
+SV02D972BB · opened 8/13/2026 · VRI completed 8/13/2026
+Tesla Service Houston-Cypress
+BACKLITE GLASS [ Crack / Shattered ] · Cosmetic · Logistics Damage · 1.08h · See images (3)
+```
+
+The second line is the **service centre the car is checked in at**, which is
+not always the centre being scanned — a Cypress scan turns up visits at
+Richmond, at Tesla Collision Houston, and one as far off as
+Cleveland-Lyndhurst. **See images** opens the photos attached to that concern.
+
+This comes from **SCA**, not Intrepid, and it is worth knowing why. Intrepid's
+`getScaServiceVisitByVin` returns a visit *header* whose `activities`,
+`noteList`, `severityDescription` and `estimateDetails` are always null and
+whose `activityCount` is always 0 — checked across 21 real visits. A dozen
+guessed detail endpoints on that API all 404. The detail is not hidden in
+Intrepid; it is not in Intrepid.
+
+SCA answers it in two calls per vehicle that has a visit:
+
+```
+GET /case/api/visit/VIN/<vin>?includeActivities=true&includeContact=true&includeTags=true
+GET /case/api/visit/<serviceVisitID>/activities
+```
+
+**Two calls and not one.** The row already holds Intrepid's `serviceVisitID`,
+so the first call looks skippable. It is not: nothing has ever proven
+Intrepid's id is byte-identical to SCA's. The ranges match and the numbers look
+right, which is exactly the kind of evidence that holds until the day it does
+not. Going in by VIN needs no such assumption. The visits are then matched on
+`serviceVisitNumber` — a printed string on both sides — with the id as a
+fallback.
+
+Only vehicles that already have a visit get here, so the cost tracks how many
+cars are in for work rather than the size of the centre: a 443-car scan of
+Cypress with 45 visits spends 90 calls and about two seconds.
+
+### The photos are fetched when you ask, never on a scan
+
+A concern's attachments arrive on the row as **ids and filenames only**. One
+sampled image was **3.4 MB**; a scan that pulled them would move a hundred
+megabytes to draw a list nobody has clicked. **See images** opens a viewer and
+the bytes are fetched then.
+
+The viewer is an ordinary `.modal.wide` — 760px, the same width as the admin
+panel once it is unlocked, which is the state anyone actually reads that panel
+in. It started as a full-screen overlay and that was wrong: these come off a
+phone at 4032×3024, and blown up to fill a monitor they are harder to read, not
+easier. Height is capped at 58vh as well as width, which is the part that
+matters — a portrait photo constrained only by width still runs taller than the
+window, so you would scroll around a single image to see the damage. Photos
+stack down the scrolling body; two across at this width are thumbnails.
+
+Being a real modal rather than a bespoke overlay also means the scrim, the
+Escape key and the close button come for free instead of being reimplemented.
+The one thing it adds to `hideModal()` is emptying itself on close: a phone
+photo decodes to roughly 48 MB of bitmap whatever the 1.6 MB that came down the
+wire, so three left in a hidden div is ~145 MB held for nothing.
+
+They come through the board on `GET /api/sca/photo/<attachmentId>`, not
+straight from SCA, for two reasons: an `<img>` cannot send a bearer token, and
+a credential that never reaches the page cannot leak from one. The board
+streams the upstream response rather than buffering it, and marks it cacheable
+for an hour — an attachment id names one uploaded file forever, so reopening a
+viewer should not refetch megabytes.
+
+Upstream is `document/api`, a different base from every other SCA call here:
+
+```
+GET /document/api/Attachment/downloadfilebyid/<id>?interceptionexcluded=true
+```
+
+There is a `downloadthumbnailfilebyid` twin. It is not used: it 404s wherever
+`thumbnailPath` is null, which was every attachment sampled, so the full image
+is the only size that reliably exists.
+
+### VRI completed — and the field that looks right and is not
+
+Beside each SV number is **when the car cleared receiving inspection**. It
+replaced the estimated completion date, which said less about a visit that has
+been open four months than the inspection that let the car onto the lot.
+
+**It does not come from `vriPassedDate`.** That field is on the COG record,
+it is free, this board already puts it on the Cars on Ground sheet, and it
+reads exactly like the answer. It is stamped at **Ready for Prep** — downstream
+of the inspection, and re-stamped every time a car goes round again. Measured
+on the 33 Cypress service-visit cars carrying both: exact on 17, and **up to 96
+days late** on the rest. One car reads `2026-07-27` against a real inspection on
+`2026-04-23`. ZO-003 hit this first, on a bigger sample, and found it matched
+on 1 of 684.
+
+The honest source is the vehicle status log:
+
+```
+POST /getAllVehicleShipments?trtId=<trt>   {vins:[…]}   → the per-vehicle cog record id
+GET  /getVehicleStatusLogByVinWithPdiTask?vin=<vin>&vehicleShipmentId=<that id>
+```
+
+Take the most recent `Receiving Inspection Completed` entry. Three traps in
+those two lines:
+
+- **The id is `id` on the cog record, not `shipment.ShipmentId`** from the
+  inventory list. The latter is the *transport* shipment — three different VINs
+  came back sharing one — and the status log returns zero rows for it.
+- **The log is newest-first**, so `find()` lands on the most recent inspection.
+  That is the one wanted: a car re-inspected after repair cleared on the
+  re-inspection.
+- **Anchor on "completed".** A `Receiving Inspection Pending` entry records who
+  queued the car, not an inspection anyone did.
+
+`trtId` genuinely filters the batched call — the same VINs return 0 records
+under another centre — so a car whose cog record lives elsewhere shows **no VRI
+on record** rather than a date. Said out loud on the row and counted in the
+notices, because a blank would read as "never inspected" when it means "not
+found here". At Cypress that is 2 of 45.
+
+The batched call is 500 VINs to a request and is already how Cars on Ground
+works, so the cost is one status-log call per car with a visit — about three
+seconds on top of a 45-visit scan.
+
+**SCA is optional.** Without it the board loses these lines and nothing else —
+Cars on Ground, containment and logistics never touch it. A scan with SCA
+disconnected still returns every row; the visits simply show as bare numbers.
+A visit whose lookup failed is silent on the row rather than showing a false
+"no concern", and the count of failures goes in the notices.
+
+### Moving a car to another service centre
+
+Click a row and the **ticket editor** opens — a 1040px panel sized to the Zo
+Hub's unlocked admin panel, holding everything the row lets you do. It began
+as an inline expander and that was wrong: the dropdown fought the cards below
+it for stacking order, the slider had no room, and a screen of half-open cards
+was unreadable. A modal is also one-at-a-time by construction, so the
+bookkeeping that closed other rows is gone.
+
+**Move Ticket** is the first section: the centre the visit is at, an arrow, and
+a type-ahead for where it is going.
+
+```
+PUT /case/api/unscheduledvisit/<serviceVisitID>/<scaLocationID>/<trtid>/location
+```
+
+Two facts about that line cost a session each and neither is guessable.
+
+**It is visit-level, not activity-level.** The obvious call —
+`location/trt/updateactivityscaLocation/{activityId}/{scaLocationId}` — is
+wrong. It answers **HTTP 200 with `success:false`**: *"Activity already in a
+Service Visit. Please move to outstanding to complete action."* SCA's own UI
+renders that picker on the visit page regardless, so the control being there
+proves nothing. **Never read a 200 from SCA as success** — check the envelope's
+`success`, then re-read the record.
+
+**The visit must be unscheduled — `appointmentID: null`.** Cancelling the
+appointment in SCA is what produces that state, and it is the same thing the
+error above means by "move to outstanding". At Cypress this is the common case
+by a distance: of 45 visits with a ticket, **7 are movable and 38 are blocked**
+by an attached appointment. Blocked rows say so and say what to do; they do not
+show a control that would fail.
+
+> **Cancelling the appointment is not cancelling the ticket.** Closing a ticket
+> disturbs billing. Nothing on this board closes a ticket, and nothing on it
+> cancels an appointment either — that stays a deliberate act in SCA.
+
+Ruled out live, so they do not need probing again: `dinmove/moveactivity` is
+site-based and `validatedin` returns "Invalid Value" for vehicles;
+`activitycorrection/move` moves parts and labour lines; and diversion — the
+app's real "send this visit elsewhere" feature — is switched **off** at Cypress
+(`enable-servicevisit-diversion: false`).
+
+**The picker** is `POST /integration/api/trt/trtbyterm {term}`, proxied through
+the board so the bearer stays server-side, two-character minimum and 180ms
+debounce copied from the nav TRT type-ahead. It returns **both** ids the move
+needs — `scaLocationID` and `trtid` — and neither implies the other, so a row
+missing either is not offered. Filtered to Service (1), SemiServiceCenter (41)
+and BodyRepair (30); SCA's own picker omits BodyRepair, which would rule out
+the Collision moves this exists for. Mobile, Energy, Warehouse, Robotics and
+the `DO NOT USE … CLOSED` rows are dropped.
+
+The search is **global** — typing "Richmond" offers Melbourne as readily as
+Houston — so the confirm step names the car, the centre it is leaving and the
+centre it is going to, and nothing saves on select.
+
+**Refusals, all server-side in `scaMoveVisit()`:** the visit must be on that
+VIN, must be open, must be unscheduled, and must not already be at the target.
+Afterwards the visit is re-read and the move is only reported if the record
+actually changed; every ticket's status is compared before and after and a
+change is called out loudly rather than passed over.
+
+### Move Ticket — one slide, booked or not
+
+Pick a destination and a slider appears; drag it the whole way and the visit
+moves. If an appointment is attached it is cancelled
+first, in the same gesture. You never leave the board.
+
+The slider is the confirmation — a button can be caught by a stray click or a
+repeated Enter, an end-to-end drag cannot. It springs back if released short,
+retracts if the destination changes, and `End` does the same from the keyboard.
+There is no confirm dialog on top of it; two confirmations only teach people to
+dismiss both.
+
+**The call, and the two dead ends in front of it.** The move is
+
+```
+PUT /case/api/visit/<svid>/dateTime      body: the visit, spread, with
+    locationDescription, trtid, scaLocationID, inventoryLocationID,
+    scaLocationTypeID, functionID  swapped, and serviceVisitDateTime nulled
+```
+
+which is SCA's own `changeLocationInSV`. Nulling the date in that same write is
+what clears the booking. Two other endpoints look right and are not:
+`updateactivityscaLocation` is activity-level and answers **200 with
+`success:false`** while a concern sits on a visit, and `unscheduledvisit/…/
+location` only works once the visit is already unscheduled.
+
+**The body is spread from `GET /case/api/visit/<svid>`, not from a form**, and
+that distinction is the whole safety argument. SCA's own dialog builds it from
+its form state and gets fields wrong — measured on a real visit, it set
+`carWash` and `charge` from false to **true** out of its defaults. Echoing the
+record leaves them alone, and the result reports it if they move anyway.
+
+**The appointment**, where there is one, is cancelled first on TSS:
+
+```
+POST tss.tesla.com/react/api/proxy/api/Service/CancelAppointment
+```
+
+A different host *and* a different credential: the raw `access_token` cookie
+with no scheme, plus `Calling-Application: TSS-Components (SCA)` and a `UserId`
+header. The SecureToken bearer gets `401 Unauthorized user!`. Connect captures
+that cookie alongside the token so one press covers both.
+
+> **Cancelling the appointment is not cancelling the ticket.**
+> `servicevisit/cancelServiceVisits` reads like the obvious call and is not: it
+> cancels the visit and its open tickets, which disturbs billing. It is not in
+> this codebase and must not come back. Nothing here calls `cancelActivity`
+> either.
+
+Proven end to end on a real booking: appointment `76308000` for 30 Sep
+cancelled, visit moved Cypress → Tesla Collision Houston, visit still open,
+both tickets status 1, `carWash`/`charge`/`transportationMethodID` unchanged.
+
+### Cancel the appointment, without moving
+
+**Cancel appointment only** sits on a booked visit beside the picker. It does
+the cancel half of the move and stops there: TSS releases the slot, the visit
+is written back with its dates nulled, and the car stays exactly where it is.
+
+Both calls are needed. `CancelAppointment` on its own answers `success:true`
+and leaves the booking showing in SCA — measured before this was built, which
+is why the second write is not an optimisation to remove later.
+
+A button rather than a slider, because the two actions are not equally hard to
+undo: an appointment can simply be rebooked, whereas the move is compound. It
+still confirms and still names the date. Every rule the move obeys applies
+here unchanged — undelivered cars only, open visits only, ticket never touched
+— and it additionally checks the **service centre did not move**, since this
+call has no business changing it.
+
+### The rule that guards the cancel
+
+> **Undelivered cars only.** An undelivered car's appointment belongs to Tesla.
+> A delivered car's belongs to a customer who has arranged their day around it,
+> and this board will not cancel one.
+
+**The check is a fresh read from Garage on every call, never a field off the
+request.** That distinction is the whole safeguard: the page could be an hour
+stale, and a stale `delivered:false` is precisely the input that would cancel a
+real booking.
+
+It sits immediately before the cancel, inside the branch that only runs when
+there is an appointment — moving a car with no booking is harmless on any car,
+cancelling somebody's booking is not. It was briefly **lost** when the earlier
+cancel-and-move was deleted, and the rewrite would have shipped without it; that
+was caught on the last edit before it went out. It does not move again.
+
+It **fails closed**. A VIN that errors, is missing from the index, or matches
+more than one record is refused. Not-known reads as not-allowed:
+
+```
+5YJ3E1EA0JF004865   REFUSED — is already delivered
+5YJ3E1EA0JF999999   REFUSED — is not in the Garage index
+7SAYGDET6TA758651   allowed
+```
+
+The panel offers the button only where it would succeed, and says why when it
+does not — a delivered car with a booking gets the reason, not a greyed
+control. Both layers matter: the panel is a courtesy, the server check is the
+guarantee.
+
+**Still never the ticket.** This cancels the *appointment*. `cancelActivity`
+closes the ticket and disturbs billing, and is not called here or anywhere.
+
+**The partial failure is real and is reported as one.** Two writes cannot be
+made atomic over an API with no transaction. If the cancel lands and the move
+then fails, the appointment is gone and the car has not moved — so that is
+what it says, in the row and in the notices, rather than a generic error:
+
+> *The appointment was cancelled, but the move failed — … The car is still at
+> Tesla Service Houston-Cypress and now has no appointment. Move it from the
+> row, or rebook it in the Service App.*
+
+At Cypress today: of 45 visits with a ticket, 7 move directly and 38 need the
+cancel first.
+
 ### The SV number opens the visit in the Service App
 
-An SV number is a link to:
+An SV number is a link. Which link depends on whether SCA answered for that
+car:
 
 ```
-https://serviceapp.tesla.com/service/service-visit-actions/active-service-visit-actions/<serviceVisitID>
+with a ticket     /service/service-home/product-details/<userId>/<vin>/service-visit/<id>
+without one       /service/service-visit-actions/active-service-visit-actions/<id>
 ```
 
-The board still cannot *read* a visit — the concern text lives in SCA and the
-Intrepid header carries none of it. But it can hand the visit to the app that
-can, and that costs nothing: `serviceVisitID` is already on every row, so there
-is no extra call and no new field.
+The first is the page a human lands on from SCA's own search. It was
+unbuildable for a long time and the reason is worth recording: that first
+segment is account-level, not per-vehicle — one value was seen against three
+different VINs, and single VINs against several values — and it appears in
+neither Garage nor Intrepid. Garage's device id is 16 digits and a different
+namespace entirely.
 
-**Why this route and not the one a human lands on.** Searching in SCA gives
-`/service/service-home/product-details/<accountId>/<vin>/service-visit/<id>`,
-and that first segment is unusable here. It is not a vehicle id: one value was
-seen against three different VINs, and single VINs against several values — it
-is account-level, and it appears in neither Garage nor Intrepid. Garage's own
-device id is 16 digits and a different namespace entirely. The
-`active-service-visit-actions` route takes the visit id alone, which is the
-only reason this link can be built at all.
+It turns out to be `userId` on **SCA's own visit header**, which the board now
+fetches anyway for the concern text. So a row with a ticket gets the real page,
+and a row without one keeps the short form, which takes the visit id alone.
 
-Two caveats worth knowing before trusting a click:
+Two caveats on the short form:
 
 - The route is named **active**. Every id checked against it came from a visit
   that was open at the time, so an old closed visit may land somewhere thinner.
@@ -254,30 +605,39 @@ the filename. Exporting 8 rows when someone believed they had 40 is a nasty
 surprise; a file called `…-flagged-…` is not.
 
 ```
-compiler-service-visits-<site>-<flagged|all>[-vin-delivery]-<yyyy-mm-dd>.xlsx
+compiler-service-visits-<site>-<flagged|all>[-vin-delivery|-vin-ticket]-<yyyy-mm-dd>.xlsx
 ```
 
-**Export** opens a chooser first — *which columns*, never which rows. Both
-tools offer the same two presets and both spell the delivery date with the
-same key, so one filter over the full column list serves both; the narrow
-preset never declares its own columns, or a header renamed in one place would
-go stale in the other.
+**Export** opens a chooser first — *which columns*, never which rows. The
+narrow presets never declare their own columns; they filter the full list, or
+a header renamed in one place would go stale in the other.
 
 | Preset | |
 |---|---|
 | **All data** | every column — the sheet you open to work from |
 | **VIN + delivery date** | two columns — the one you paste somewhere else |
+| **VIN + ticket** | VIN, SV number, symptom, type, category, hours, centre, VRI |
+
+**VIN + ticket** is offered on Service Visits only. Cars on Ground has no
+ticket columns to keep, so a preset that filtered to them there would hand back
+a sheet of nothing but VINs; asking for it anyway falls back to every column
+rather than to an empty one.
 
 The preset lands in the filename for the reason the view does: a two-column
-file and a twenty-five-column one both called `…-2026-08-13.xlsx` are
+file and a thirty-four-column one both called `…-2026-08-13.xlsx` are
 indistinguishable in a downloads folder.
 
-One row per vehicle, twenty-five columns: the identity and tag fields, a
+One row per vehicle, thirty-four columns: the identity and tag fields, a
 `Flagged` yes/no, a `Blockers` summary, then a count plus the detail for each
-of the three kinds. **Not one row per hold** — a car with two campaigns is
-still one car, and a sheet that repeats it double-counts the moment anyone
-sums a column. Multiples are joined into the cell *and* counted in their own
-column, so both readings stay available.
+of the three kinds, and — when SCA was connected for the scan — what each
+ticket says. **Not one row per hold** — a car with two campaigns is still one
+car, and a sheet that repeats it double-counts the moment anyone sums a
+column. Multiples are joined into the cell *and* counted in their own column,
+so both readings stay available. `Est. hours` is the sum across a car's
+concerns, as a number, so a centre's booked hours total in the sheet.
+
+Ticket columns come out blank on a scan that ran without SCA, and the chooser
+says so rather than leaving it to be discovered in Excel.
 
 Counts are written as numbers rather than text, so a column sums without
 anyone retyping it — the reason this is xlsx and not CSV. The header row is
@@ -525,12 +885,13 @@ reading a different environment and the run was meaningless.
 | | |
 |---|---|
 | Admin password | `226565` — six-digit gate, same as the other boards. House default; override with `.admin.json` |
-| Garage | `…_s_garage_session` cookie in `.connections.json` |
-| Intrepid | `cogs-authorization` cookie in `.connections.json` |
+| Garage | `…_s_garage_session` cookie, signed in on the Hub |
+| Intrepid | `cogs-authorization` cookie, signed in on the Hub |
+| Service App | 9-hour bearer token, signed in **here**, in `.connections.json` |
 
-Both live in one gitignored file. The admin password is a guard against fat
-fingers rather than an attacker, but it is checked server-side all the same,
-because a client-only gate is no gate at all.
+All of it lands in one gitignored file. The admin password is a guard against
+fat fingers rather than an attacker, but it is checked server-side all the
+same, because a client-only gate is no gate at all.
 
 ### Two cookies, no OAuth, and nothing shared with any other board
 
@@ -568,9 +929,47 @@ opens an isolated Chrome debug profile, waits for the sign-in, and reads the
 cookie over CDP. Pasting by hand still works — DevTools › Application ›
 Cookies on `intrepidapi.tesla.com`.
 
-Both sources are required and there is no degraded mode. A scan missing half
-its sources would answer the question wrongly instead of refusing, which is
-the worse failure.
+Both cookies are required and there is no degraded mode for them. A scan
+missing half its sources would answer the question wrongly instead of
+refusing, which is the worse failure.
+
+### The Service App signs in here, and it is not a cookie
+
+The one credential this board does not read from the Hub. Two reasons, and
+both are about SCA rather than about the Hub:
+
+- **Nothing else uses it.** A Hub row for SCA would be a sign-in exactly one
+  board could ever consume, sitting beside two that all of them do. Keeping it
+  here also leaves `credstore.js` alone — that file is copied into every board,
+  so a key added for one consumer is five edits.
+- **It is a bearer token, not a session cookie.** SCA mints a JWT at
+  `/integration/api/authentication/code/gettoken` and parks it in
+  `localStorage.SecureToken`. `Storage.getCookies` — the whole of the Hub's
+  capture — cannot see localStorage. The grab here attaches to the *page*
+  target and evaluates inside it instead.
+
+Everything else about the sign-in is the Hub's arrangement for the Hub's
+reasons: the same isolated debug profile, the same directory, so a machine
+already signed in for Garage or Intrepid usually connects SCA with no window
+appearing at all. **Admin › Sources › Connect**, or the prompt on the board
+when it opens.
+
+**A decoded token is proof, where a cookie needed a probe.** The Hub probes
+every cookie it captures, because Garage hands anonymous visitors a
+`_garage_session` too — a cookie that exists is not a session that works. A
+bearer JWT cannot be minted without a completed SSO round trip, and it states
+its own expiry, audience and roles. So there is no probe here, and the panel
+can show "9h left" where the cookies can only show "saved".
+
+The token lasts about nine hours, which is a working day, and the board treats
+anything under five minutes remaining as already gone rather than starting a
+scan that will die halfway through.
+
+**Read-only.** The token carries `SCA_All_Default_Create` and `SCA_PartPick`.
+The write paths exist and are mapped — update an activity, change visit motion
+status, add an activity to a visit — but several would 403 on that role and
+every one of them touches a real customer record. Nothing on this board writes
+to SCA.
 
 ---
 
@@ -579,9 +978,14 @@ the worse failure.
 ```
 config.json     port, hosts, concurrency, the shipped admin password
 lib.js          everything that talks to Garage or Intrepid, plus the facets
+sca.js          the Service App: its sign-in, and the two calls that read a ticket
 server.js       thin HTTP layer; no tool logic lives here
 index.html      the board — ZO-1, one file, no build
 ```
+
+`sca.js` is self-contained and stores nothing: it hands a captured token to
+`lib.js`, which stays the only writer of `.connections.json`. Deleting the
+file would cost the board its ticket column and break nothing else.
 
 `FACETS` and `HOLD_KINDS` are defined once in `lib.js` and sent to the page at
 boot, so the filter menu, the query builder and the row labels cannot drift

@@ -17,6 +17,7 @@ const https  = require("https");
 const crypto = require("crypto");
 
 const credstore = require("./credstore");
+const sca       = require("./sca");
 
 const HERE = __dirname;
 
@@ -42,9 +43,23 @@ const CONN_FILE = path.join(HERE, ".connections.json");
      trtId           the centre the board is pointed at. Chosen once and kept
                      until changed; Admin › Maintenance › Reset clears it.
      offsiteTrtId    the overflow lot, if there is one. Same picker, same file.
-                     Null on a board that only has the one site.            */
+                     Null on a board that only has the one site.
+     sca             the Service App bearer token, its expiry and who it
+                     belongs to. The one credential this board signs in for
+                     itself rather than reading from the Hub — sca.js has the
+                     reasoning. Null until somebody presses Connect.        */
+/* `billingAddress` is this centre's own street address, used when a car's
+   billing address is switched over to Tesla. It has to be a setting rather
+   than something derived: every centre has a different one, neither Garage nor
+   Intrepid carries it in a form SCA will accept, and a board pointed at
+   another centre must not inherit Cypress's. Empty until somebody fills it in
+   under Admin › My location. */
+/* `teams` is the incoming webhook a Power Automate flow listens on, plus the
+   token that guards the trigger URL. Empty until somebody pastes a webhook
+   under Admin › Teams. */
 const CONN_DEFAULTS = { intrepidCookie: "", garageCookie: "", trtId: null,
-                        offsiteTrtId: null };
+                        offsiteTrtId: null, sca: null, billingAddress: null,
+                        teams: null };
 
 /* Stored as a number or null, never a string, so callers can compare without
    worrying which layer they got it from. */
@@ -72,6 +87,1332 @@ function saveConnections(patch){
 
   return next;
 }
+
+/* ── the Service App token ──
+   lib.js is the only writer of .connections.json, so the sign-in machinery in
+   sca.js hands its result here rather than reaching for the file itself.
+   Everything about WHY this credential lives on the board instead of the Hub
+   is written up at the top of sca.js. */
+
+function scaSaved(){
+  const s = loadConnections().sca;
+  return s && s.token ? s : null;
+}
+
+/* Throws rather than returning empty, the same shape intrepidCookie() and
+   ensureSession() already use, so the server's error mapper turns it into a
+   401 the panel knows how to answer. */
+function scaToken(){
+  const s = scaSaved();
+  if(!sca.isLive(s)){
+    const err = new Error(s
+      ? "Service App session expired — connect SCA again in Admin › Sources"
+      : "Not connected to the Service App — connect SCA in Admin › Sources");
+    err.needsSca = true;
+    throw err;
+  }
+  return s.token;
+}
+
+const scaConnected = () => sca.isLive(scaSaved());
+
+function scaCommit(got){
+  return saveConnections({
+    // accessToken is the SEPARATE credential TSS wants — see cancelAppointment
+    // in sca.js. Captured by the same Connect so one press covers both.
+    sca: { token: got.token, exp: got.exp, user: got.user, roles: got.roles,
+           accessToken: got.accessToken || "" }
+  });
+}
+
+const scaSignIn      = () => sca.beginSignIn(scaCommit);
+const scaDisconnect  = () => { saveConnections({ sca: null }); return { ok: true }; };
+
+/* Type-ahead over SCA's site directory, for the move picker. */
+const scaSites = term => sca.sites(scaToken(), term);
+
+/* ── this centre's billing address ──
+
+   Stored, not derived. Read back in the shape SCA's saveaddress wants, so the
+   caller does not have to know that shape in two places.
+
+   `stateName` doubles the code because that is what SCA's own call sends, and
+   the lat/long are optional — the captured body carried them, but they are the
+   map pin rather than the address, and an address typed by hand has none. */
+function billingAddress(){
+  const a = loadConnections().billingAddress;
+  if(!a || !a.addressLine1) return null;
+  return {
+    addressID: 0,
+    addressLine1: a.addressLine1 || "", addressLine2: a.addressLine2 || "",
+    city: a.city || "", county: "",
+    stateProvinceID: 0, stateCode: a.stateCode || "", stateName: a.stateCode || "",
+    countryID: 0, countryCode: a.countryCode || "US", countryName: "United States",
+    zip: a.zip || "",
+    ...(a.latitude != null && a.longitude != null
+      ? { latitude: Number(a.latitude), longitude: Number(a.longitude) } : {}),
+    entityType: "PERSON"
+  };
+}
+
+function saveBillingAddress(patch){
+  const clean = {
+    addressLine1: String(patch.addressLine1 || "").trim().slice(0, 120),
+    addressLine2: String(patch.addressLine2 || "").trim().slice(0, 120),
+    city        : String(patch.city || "").trim().slice(0, 80),
+    stateCode   : String(patch.stateCode || "").trim().toUpperCase().slice(0, 3),
+    zip         : String(patch.zip || "").trim().slice(0, 12),
+    countryCode : String(patch.countryCode || "US").trim().toUpperCase().slice(0, 2)
+  };
+  // Clearing it is a legitimate act; a half-filled one is not.
+  if(!clean.addressLine1 && !clean.city && !clean.zip){
+    saveConnections({ billingAddress: null });
+    return { saved: false, cleared: true };
+  }
+  for(const [k, label] of [["addressLine1", "street"], ["city", "city"],
+                           ["stateCode", "state"], ["zip", "ZIP"]])
+    if(!clean[k]) throw new Error(`The ${label} is required`);
+  saveConnections({ billingAddress: clean });
+  return { saved: true, cleared: false, billingAddress: clean };
+}
+
+/* ══════════════════════════ Teams ══════════════════════════
+
+   A card in a Teams chat with an Update button on it, which reposts the VRI
+   list when pressed.
+
+   ── why the button is a link and not a Submit ──
+
+   This board listens on 127.0.0.1. Teams runs in Microsoft's cloud and cannot
+   reach it, so `Action.Submit` / `Action.Execute` — which post back to the
+   flow, and would then need the flow to call in here — has nowhere to land
+   without a public tunnel. `Action.OpenUrl` inverts it: the click happens in
+   the operator's own browser, on the machine the board is running on, and the
+   board does the outbound post itself. No inbound path from the internet
+   exists at any point.
+
+   The cost is honest and worth stating: a browser tab opens on the clicker's
+   machine, and the button only does anything for somebody running the board.
+   Everyone else in the chat can read the list and will get a tab that says so.
+
+   ── the token ──
+
+   The trigger is a GET, because that is what a link is, and any page the
+   operator visits could fire a GET at localhost with an <img> tag. What that
+   would achieve is a VRI list appearing in a team chat, which is noise rather
+   than damage — but noise nobody can explain is its own problem, so the URL
+   carries a token. Minted once, kept with the webhook, and rotated by saving
+   the webhook again. */
+const TEAMS_MAX_ROWS = 25;
+
+/* ── operating hours ──
+
+   The same idea as ZO-002's alert window, and the same vocabulary: a day list
+   indexed by Date#getDay so the index IS the day number, and "HH:MM" strings
+   because that is what <input type="time"> emits.
+
+   One deliberate difference. ZO-002 fires ON THE HOUR, so its end hour is
+   inclusive — 09:00–17:00 posts at 17:00. This runs on a minute interval, so
+   17:00 has to mean *closed at* 17:00 or the centre stays open for an extra
+   hour. End is exclusive here, and that is why the two files compare
+   differently.
+
+   Overnight windows are refused rather than half-supported: they would double
+   the branch count in the one function that has to be provably right, and a
+   delivery centre does not receive cars 20:00 → 02:00. Same call ZO-002 made. */
+const HOURS_DEFAULTS = { start: "07:00", end: "19:00", days: [1, 2, 3, 4, 5] };
+const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+const normaliseTime = (v, fb) => (TIME_RE.test(String(v || "")) ? String(v) : fb);
+const minutesOf = t => Number(String(t).slice(0, 2)) * 60 + Number(String(t).slice(3, 5));
+
+function normaliseDays(v){
+  if(!Array.isArray(v)) return HOURS_DEFAULTS.days.slice();
+  const seen = new Set();
+  for(const d of v){
+    const n = Number(d);
+    if(Number.isInteger(n) && n >= 0 && n <= 6) seen.add(n);
+  }
+  return [...seen].sort((a, b) => a - b);
+}
+
+function teamsHours(t){
+  const c = t || loadConnections().teams || {};
+  return {
+    start: normaliseTime(c.openStart, HOURS_DEFAULTS.start),
+    end  : normaliseTime(c.openEnd,   HOURS_DEFAULTS.end),
+    days : normaliseDays(c.openDays),
+    /* Off by default so nothing about this changes for a board that never
+       opens the setting — the window only bites once somebody turns it on. */
+    on   : c.hoursOn === true
+  };
+}
+
+function isOpenNow(t, now = new Date()){
+  const h = teamsHours(t);
+  if(!h.on) return true;                       // no window set means always open
+  if(!h.days.includes(now.getDay())) return false;
+  const m = now.getHours() * 60 + now.getMinutes();
+  return m >= minutesOf(h.start) && m < minutesOf(h.end);
+}
+
+/* When the centre opens next, so a closed card can say so rather than leaving
+   somebody to work it out. Walks forward a day at a time — seven iterations at
+   worst, and no arithmetic that a month boundary or a clock change can break. */
+function nextOpenAt(t, now = new Date()){
+  const h = teamsHours(t);
+  if(!h.on || !h.days.length) return null;
+  const startMin = minutesOf(h.start);
+  for(let i = 0; i < 8; i++){
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i,
+                       Math.floor(startMin / 60), startMin % 60, 0, 0);
+    if(!h.days.includes(d.getDay())) continue;
+    if(d > now) return d;
+  }
+  return null;
+}
+
+function teamsConfig(){
+  const t = loadConnections().teams;
+  return t && t.webhook ? { webhook: t.webhook, token: t.token || "" } : null;
+}
+
+/* Both URLs are checked the same way, because both are places a vehicle list
+   or a request for one travels to. */
+function checkMicrosoftUrl(raw, what){
+  let u;
+  try { u = new URL(raw); } catch { throw new Error(`The ${what} is not a URL`); }
+  if(u.protocol !== "https:") throw new Error(`The ${what} has to be https`);
+  if(!/(^|\.)(logic\.azure\.com|azure\.com|office\.com|microsoft\.com|webhook\.office\.com|powerplatform\.com)$/i
+       .test(u.hostname))
+    throw new Error(`That host is not Microsoft's (${u.hostname}). ` +
+                    `A Power Automate URL is issued on logic.azure.com or webhook.office.com.`);
+  return u;
+}
+
+function saveTeamsSettings(patch){
+  const cur = loadConnections().teams || {};
+  const next = { ...cur };
+
+  if("hoursOn" in patch) next.hoursOn = patch.hoursOn === true || patch.hoursOn === "true";
+  if("openDays" in patch) next.openDays = normaliseDays(patch.openDays);
+  for(const [k, label] of [["openStart", "opening time"], ["openEnd", "closing time"]]){
+    if(!(k in patch)) continue;
+    const v = String(patch[k] || "").trim();
+    if(!TIME_RE.test(v)) throw new Error(`The ${label} must be HH:MM`);
+    next[k] = v;
+  }
+  /* Validated against the MERGED settings, not the patch: a closing time saved
+     on its own has to be checked against whatever opening time is already
+     stored, or a two-field form becomes a way to persist an impossible
+     window. Straight from ZO-002, which learned it the same way. */
+  {
+    const h = teamsHours(next);
+    if(minutesOf(h.start) >= minutesOf(h.end))
+      throw new Error(`Opening (${h.start}) has to be before closing (${h.end}). ` +
+                      `An overnight window is not supported.`);
+    if(next.hoursOn && !h.days.length)
+      throw new Error("Pick at least one day, or turn operating hours off");
+  }
+
+  if("pushUrl" in patch){
+    const raw = String(patch.pushUrl || "").trim();
+    if(!raw) next.pushUrl = "";
+    else { checkMicrosoftUrl(raw, "push URL"); next.pushUrl = raw; }
+  }
+  if("autoMinutes" in patch){
+    const n = Number(patch.autoMinutes);
+    if(!Number.isFinite(n) || n < 0 || n > 240)
+      throw new Error("The refresh interval has to be between 0 and 240 minutes");
+    next.autoMinutes = Math.round(n);
+  }
+  saveConnections({ teams: (next.webhook || next.pushUrl || next.autoMinutes) ? next : null });
+  startTeamsLoop();
+  return { ok: true, ...teamsSettings() };
+}
+
+function teamsSettings(){
+  const t = loadConnections().teams || {};
+  let host = "";
+  try { host = t.webhook ? new URL(t.webhook).hostname : ""; } catch { host = "saved"; }
+  /* The host of each, never the path. A webhook URL's path IS the credential,
+     so it goes to the page once — when it is typed — and never comes back. The
+     host is enough to see at a glance that the right thing is saved, which is
+     the question somebody actually has when looking at this panel. */
+  let pushHost = "";
+  try { pushHost = t.pushUrl ? new URL(t.pushUrl).hostname : ""; }
+  catch { pushHost = "saved"; }
+
+  const h = teamsHours(t);
+  return {
+    host,
+    pushHost,
+    hasWebhook: Boolean(t.webhook),
+    hasPush   : Boolean(t.pushUrl),
+    autoMinutes: Number(t.autoMinutes) || 0,
+    hoursOn  : h.on,
+    openStart: h.start,
+    openEnd  : h.end,
+    openDays : h.days,
+    openNow  : isOpenNow(t),
+    dayNames : DAY_NAMES
+  };
+}
+
+function saveTeamsWebhook(url){
+  const raw = String(url || "").trim();
+  if(!raw){
+    saveConnections({ teams: null });
+    stopTeamsLoop();
+    return { saved: false, cleared: true };
+  }
+  /* Power Automate and the older Teams connector both hand out https URLs on
+     Microsoft hosts. Refusing anything else keeps a mistyped address from
+     quietly shipping a vehicle list to somebody's server. */
+  const u = checkMicrosoftUrl(raw, "webhook");
+
+  // Kept across a webhook change: the poll URL and the interval are separate
+  // settings and re-typing them because the webhook moved would be a chore.
+  const cur = loadConnections().teams || {};
+  const token = crypto.randomBytes(16).toString("hex");
+  saveConnections({ teams: { ...cur, webhook: raw, token } });
+  startTeamsLoop();
+  return { saved: true, cleared: false, host: u.hostname, token };
+}
+
+/* One outbound POST. Power Automate answers 202 with an empty body on the
+   "When a Teams webhook request is received" trigger, and the older connector
+   answers 200 with the string "1", so anything 2xx counts and the body is not
+   read for meaning. */
+function postToTeams(payload){
+  const cfg = teamsConfig();
+  if(!cfg) throw new Error("No Teams webhook saved — paste one under Admin › Teams");
+  return postToUrl(cfg.webhook, payload);
+}
+
+function postToUrl(url, payload){
+  const body = JSON.stringify(payload);
+  const u = new URL(url);
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: u.hostname, port: 443, path: u.pathname + u.search, method: "POST",
+      headers: { "Content-Type": "application/json",
+                 "Content-Length": Buffer.byteLength(body) }
+    }, res => {
+      let buf = "";
+      res.on("data", c => buf += c);
+      res.on("end", () => {
+        if(res.statusCode >= 200 && res.statusCode < 300) return resolve({ ok: true, status: res.statusCode });
+        reject(new Error(`Teams answered HTTP ${res.statusCode}: ${buf.slice(0, 200)}`));
+      });
+    });
+    req.on("error", err => reject(new Error("Could not reach Teams: " + (err.message || err.code))));
+    req.write(body);
+    req.end();
+  });
+}
+
+/* Power Automate's "Post an interactive card" wants the card itself; the older
+   connector wants it wrapped in an attachment. Sending the wrapped shape suits
+   both — the flow reads `attachments[0].content` and the connector reads the
+   envelope it already knows. */
+const teamsEnvelope = card => ({
+  type: "message",
+  attachments: [{
+    contentType: "application/vnd.microsoft.card.adaptive",
+    contentUrl: null,
+    content: card
+  }]
+});
+
+/* ── the Update button ──
+
+   Always an Action.Submit, because the flow on the other end is always a
+   "Post adaptive card and wait for a response". That action posts the card and
+   PAUSES the run until somebody submits it, so a link button would leave it
+   waiting forever.
+
+   Measured off Ed's own tenant, this is the free path: the Teams connector is
+   tier Standard and the trigger in front of it is `kind: TeamsWebhook`,
+   neither of them premium. The press also happens inside Teams, so no browser
+   opens on anybody's phone.
+
+   Its one quirk suits this board rather than fighting it: a waiting run is
+   consumed by the press, so a posted card is good for ONE press — and every
+   refresh posts a NEW card with its own fresh wait, so the newest card in the
+   chat is always the live one and older ones are visibly spent.
+
+   An earlier version could also emit an Action.OpenUrl pointing either at a
+   press-recording flow or at this board's own /vri/post. Both are gone: the
+   first belonged to a polling design that needed a premium HTTP trigger, and
+   the second could only ever be pressed by somebody sitting at this machine,
+   which is the one person who does not need a card in a chat. */
+const teamsAction = () => ({
+  type: "Action.Submit", title: "Update",
+  // Echoed back so a flow can tell this button from any other card it waits on.
+  data: { action: "vri-update", board: "ZO-004" }
+});
+
+/* The standing card: a title and the button, no data. Posted once and left in
+   the chat to be pressed. */
+function teamsControlCard(siteName){
+  return {
+    $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+    type: "AdaptiveCard", version: "1.4",
+    body: [
+      { type: "TextBlock", text: "VRI List", weight: "Bolder", size: "Large", wrap: true },
+      { type: "TextBlock", wrap: true, isSubtle: true, spacing: "None",
+        text: `${siteName} · cars awaiting receiving inspection, on ground under 24 hours.` },
+      { type: "TextBlock", wrap: true, isSubtle: true, size: "Small",
+        text: "Update posts the current list below. It runs on the machine the " +
+              "Compiler is on, so a tab will open there." }
+    ],
+    actions: [
+      teamsAction()
+    ]
+  };
+}
+
+/* The list itself, posted as its own message so the standing card stays put.
+   A FactSet per car rather than a table: Teams has no table element before
+   Adaptive Cards 1.5, and a monospaced text block wraps badly on a phone. */
+function teamsListCard(siteName, rows, stampedAt){
+  const shown = rows.slice(0, TEAMS_MAX_ROWS);
+  const body = [
+    { type: "TextBlock", text: "VRI List", weight: "Bolder", size: "Large", wrap: true },
+    { type: "TextBlock", wrap: true, isSubtle: true, spacing: "None",
+      text: `${siteName} · ${rows.length} ${rows.length === 1 ? "car" : "cars"} ` +
+            `awaiting VRI, on ground under 24h · ${stampedAt}` }
+  ];
+
+  if(!rows.length){
+    body.push({ type: "TextBlock", wrap: true, spacing: "Medium",
+                text: "**Nothing waiting.** No car has arrived in the last 24 hours " +
+                      "that is still pending inspection." });
+  }else{
+    for(const r of shown){
+      body.push({
+        type: "Container", separator: true, spacing: "Small",
+        items: [
+          { type: "TextBlock", wrap: true, weight: "Bolder", spacing: "None",
+            text: `${r.vin}${r.model ? ` · ${r.model}` : ""}` },
+          { type: "TextBlock", wrap: true, isSubtle: true, size: "Small", spacing: "None",
+            text: [r.bay ? `Bay ${r.bay}` : null,
+                   r.dwell ? `on ground ${r.dwell}` : null,
+                   r.soc != null ? `${r.soc}%` : null,
+                   r.rn || null].filter(Boolean).join("  ·  ") || "—" }
+        ]
+      });
+    }
+    if(rows.length > shown.length){
+      body.push({ type: "TextBlock", wrap: true, isSubtle: true, spacing: "Medium",
+                  text: `…and ${rows.length - shown.length} more. The card shows the ` +
+                        `first ${TEAMS_MAX_ROWS}; open the board for the rest.` });
+    }
+  }
+
+  return {
+    $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+    type: "AdaptiveCard", version: "1.4",
+    body,
+    actions: [teamsAction()]
+  };
+}
+
+/* Gather and post. Same call Cars on Ground makes — the VRI Pending rung and
+   the 24-hour window are the tool's own facets, not a second definition of
+   either. */
+const stampNow = () => new Date().toLocaleString("en-US",
+  { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+async function gatherVri(){
+  const trtId = savedTrtId();
+  if(!trtId){
+    const err = new Error("No centre set — choose one in the board first");
+    err.needsTrt = true;
+    throw err;
+  }
+  const statuses = await cogStatuses();
+  const pending = statuses.find(s => /receiving inspection pending/i.test(s.apiName));
+  if(!pending) throw new Error("Intrepid has no Receiving Inspection Pending status on its ladder");
+
+  const out = await carsOnGround({ trtId, statusIds: [pending.id], maxDwellHours: 24 });
+  return { rows: out.rows, site: (await trtInfo(trtId) || {}).name || ("TRT " + trtId) };
+}
+
+async function postVriList(){
+  const out = await gatherVri();
+  await postToTeams(teamsEnvelope(teamsListCard(out.site, out.rows, stampNow())));
+  // Keep the loop in step: a hand-posted list is the list the chat now shows,
+  // so the interval must not immediately repost the same one.
+  lastVinKey = vinKeyOf(out.rows);
+  lastPostAt = Date.now();
+  return { ok: true, site: out.site, count: out.rows.length,
+           posted: Math.min(out.rows.length, TEAMS_MAX_ROWS) };
+}
+
+/* ══════════════ push ══════════════
+
+   Ed's inversion, and it is the better shape: instead of the board answering a
+   question from the cloud, it leaves the answer somewhere the cloud can already
+   read. The board pushes the finished card into a SharePoint row every few
+   minutes; the Update button's flow reads that row and posts it. Nothing has to
+   reach inwards, and — the part that matters — **nothing in the chain is a
+   premium connector**, which the polling design could not avoid.
+
+   What it trades is freshness: the chat shows the last push rather than a scan
+   taken at the moment of the press. At a three-minute interval that is three
+   minutes of staleness on a queue where cars arrive far slower than that.
+
+   The card is pushed **already rendered, as a string**. The flow then has one
+   job — drop that text into a column — and the layout stays here, where it can
+   be changed without anybody opening Power Automate. Sending the rows instead
+   would move the card design into the flow and split it across two systems.
+
+   The card carries an Action.Submit whatever the button mode says: the flow on
+   the other end is a wait-for-response, and a link button would leave it
+   waiting forever. */
+function pushEnvelope(site, rows, stamp){
+  const card = teamsListCard(site, rows, stamp);
+  // Submit regardless of the configured mode — see above.
+  card.actions = [{ type: "Action.Submit", title: "Update",
+                    data: { action: "vri-update", board: "ZO-004" } }];
+  return {
+    card : JSON.stringify(card),
+    count: rows.length,
+    site,
+    stamp,
+    // The VINs on their own, for a flow that would rather build its own view
+    // than take the rendered card.
+    vins : rows.map(r => r.vin).join(", ")
+  };
+}
+
+/* What sits in the row while the centre is shut.
+
+   Pressing Update out of hours has to answer something. Leaving the last
+   in-hours list there would be worse than saying nothing: it would look
+   current, and somebody would walk out to a bay for a car that was inspected
+   last night. So the row is overwritten once at closing with a card that says
+   plainly it is not being kept up, and names when it will be again.
+
+   It keeps the Update button. Pressing it re-posts this same card, which is
+   the honest answer to "is there anything new" — no. */
+function teamsClosedCard(site, reopen, last){
+  const body = [
+    { type: "TextBlock", text: "VRI List", weight: "Bolder", size: "Large", wrap: true },
+    { type: "TextBlock", wrap: true, isSubtle: true, spacing: "None",
+      text: `${site} · closed` },
+    { type: "TextBlock", wrap: true, spacing: "Medium",
+      text: "**Sorry, can't update — we're closed.** The list is not being " +
+            "refreshed outside operating hours." }
+  ];
+  if(reopen){
+    body.push({ type: "TextBlock", wrap: true, isSubtle: true, spacing: "Small",
+      text: `Back ${reopen}.` });
+  }
+  if(last && last.count != null){
+    body.push({ type: "TextBlock", wrap: true, isSubtle: true, size: "Small",
+      spacing: "Small",
+      text: `Last list before closing: ${last.count} ` +
+            `${last.count === 1 ? "car" : "cars"} awaiting VRI.` });
+  }
+  return {
+    $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+    type: "AdaptiveCard", version: "1.4",
+    body,
+    actions: [teamsAction()]
+  };
+}
+
+async function pushClosedCard(){
+  const t = loadConnections().teams || {};
+  const trtId = savedTrtId();
+  const site = trtId ? ((await trtInfo(trtId) || {}).name || ("TRT " + trtId)) : "This centre";
+  const at = nextOpenAt(t);
+  const reopen = at
+    ? at.toLocaleString("en-US", { weekday: "long", hour: "numeric", minute: "2-digit" })
+    : null;
+  const card = teamsClosedCard(site, reopen, lastPushInfo);
+  await postToUrl(t.pushUrl, {
+    card : JSON.stringify(card),
+    count: 0, site, stamp: stampNow(), vins: "", closed: true
+  });
+  return { site, reopen };
+}
+
+async function pushVri(){
+  const t = loadConnections().teams || {};
+  if(!t.pushUrl) throw new Error("No push URL saved — paste one under Admin › Teams");
+  const out = await gatherVri();
+  const body = pushEnvelope(out.site, out.rows, stampNow());
+  try{
+    await postToUrl(t.pushUrl, body);
+  }catch(err){
+    /* Recorded before rethrowing. A failure that leaves no trace on the panel
+       is worse than one that does: the countdown would keep ticking as though
+       the row were being kept current. */
+    lastPushInfo = { at: Date.now(), ok: false, error: err.message,
+                     count: out.rows.length, site: out.site };
+    lastPushAt = Date.now();   // don't retry every 15s against a dead endpoint
+    throw err;
+  }
+  lastPushAt = Date.now();
+  lastPushInfo = { at: lastPushAt, ok: true, count: out.rows.length,
+                   site: out.site, bytes: body.card.length };
+  return { ok: true, site: out.site, count: out.rows.length, bytes: body.card.length };
+}
+
+/* What the admin panel's countdown reads. Cheap on purpose — it is polled
+   while somebody has the panel open, so it touches nothing but memory. */
+function teamsStatus(){
+  const t = loadConnections().teams || {};
+  const every = Number(t.autoMinutes) || 0;
+  const pushing = Boolean(teamsTimer && t.pushUrl && every);
+  const posting = Boolean(teamsTimer && !t.pushUrl && t.webhook && every);
+
+  /* Seconds remaining rather than a timestamp. The page and the board share a
+     clock today — it is the same machine — but a countdown that would go wrong
+     if that ever stopped being true is a countdown built on an assumption it
+     does not need to make. */
+  let nextInSec = null;
+  if(pushing || posting){
+    const since = pushing ? lastPushAt : lastPostAt;
+    nextInSec = Math.max(0, Math.round((since + every * 60000 - Date.now()) / 1000));
+  }
+
+  /* Closed is reported separately from "not running": one is the centre being
+     shut, the other is nothing being configured, and a panel that showed the
+     same thing for both would send somebody hunting for a fault that is a
+     Sunday. */
+  const openNow = isOpenNow(t);
+  const at = openNow ? null : nextOpenAt(t);
+
+  return {
+    running: Boolean(teamsTimer),
+    pushing, posting, everyMin: every,
+    nextInSec: openNow ? nextInSec : null,
+    openNow,
+    hoursOn: teamsHours(t).on,
+    reopensAt: at ? at.toISOString() : null,
+    reopens: at ? at.toLocaleString("en-US",
+      { weekday: "short", hour: "numeric", minute: "2-digit" }) : null,
+    busy: teamsBusy,
+    last: lastPushInfo
+  };
+}
+
+async function postVriControlCard(){
+  const trtId = savedTrtId();
+  const site = trtId ? ((await trtInfo(trtId) || {}).name || ("TRT " + trtId)) : "No centre set";
+  await postToTeams(teamsEnvelope(teamsControlCard(site)));
+  return { ok: true, site };
+}
+
+/* ══════════════ the live loop ══════════════
+
+   Inspectors are on the lot with phones. They are not on the machine this
+   board runs on, and they may not be on its network at all, so nothing they
+   press can reach it. Every connection here is therefore made BY the board,
+   outwards:
+
+     press   phone → Flow A (cloud) → records that somebody asked
+     poll    board → Flow B (cloud) → "has anybody asked?", and clears
+     post    board → Flow A's webhook → the list appears in the chat
+
+   No inbound path exists at any point, so no tunnel, no exposed port and no
+   change to the 127.0.0.1 binding.
+
+   ── the poll contract ──
+
+   Flow B is Ed's to build; this only needs it to answer JSON. A refresh is
+   taken to have been asked for when the body has a truthy `requested`, or a
+   `pending` above zero. An `id` is honoured if one is sent: the same id twice
+   running counts once, so a flow that fails to clear its own flag repeats a
+   card instead of looping on it. Anything unparseable is treated as "nothing
+   asked" and logged, because a broken poller must not post cards.
+
+   ── why the auto-refresh only posts on a change ──
+
+   Ed asked for both a button and a refresh. A card every few minutes whether
+   or not anything moved would bury the chat, and a buried card is one nobody
+   reads. So the interval gathers, and posts only when the set of VINs differs
+   from the last one posted. A quiet lot produces no messages at all. A press
+   always posts, because somebody asking is itself the reason. */
+
+const TEAMS_POLL_MS = 15000;
+
+let teamsTimer   = null;
+let teamsBusy    = false;
+let lastPushAt   = 0;
+let lastPushInfo = null;   // outcome of the most recent push, for the panel
+let closedPushed = false;  // the closed card is a transition, not a loop
+let lastVinKey   = null;    // what the chat is currently showing
+let lastPostAt   = 0;
+
+/* The identity of a posted list: which cars, not how many. A card is worth
+   reposting when the cars changed, and a count alone would miss one car
+   arriving as another cleared. */
+const vinKeyOf = rows => rows.map(r => r.vin).sort().join(",");
+
+async function teamsTick(log = () => {}){
+  const t = loadConnections().teams;
+  if(!t || teamsBusy) return;
+  if(!t.webhook && !t.pushUrl) return;
+  teamsBusy = true;
+  try{
+    /* ── the push ──
+       Independent of everything below it: this is not a message, it is a row
+       being kept current, so it goes on every interval rather than only when
+       the cars changed. A flow reading a row wants the row to be right, not to
+       have to reason about when it was last worth writing. */
+    const every = Number(t.autoMinutes) || 0;
+    if(t.pushUrl && every > 0){
+      const open = isOpenNow(t);
+
+      /* Closed: the row is overwritten ONCE, then nothing runs until opening.
+         Once, not every fifteen seconds — the flag is what makes this a
+         transition rather than a loop, and it is cleared the moment the centre
+         is open again so the next tick pushes a real list. */
+      if(!open){
+        if(!closedPushed){
+          try{
+            const c = await pushClosedCard();
+            closedPushed = true;
+            log(`teams: closed card pushed (${c.site})` +
+                (c.reopen ? ` · back ${c.reopen}` : ""));
+          }catch(err){
+            log("teams: closed card failed — " + err.message);
+            // Not latched on failure: try again next tick rather than leaving
+            // an in-hours list sitting there all night.
+          }
+        }
+      }else{
+        closedPushed = false;
+        if((Date.now() - lastPushAt) >= every * 60000){
+          try{
+            const p = await pushVri();
+            log(`teams: pushed ${p.count} cars (${p.site}) · ${p.bytes} bytes of card`);
+          }catch(err){
+            log("teams: push failed — " + err.message);
+          }
+        }
+      }
+    }
+
+    /* ── the timed repost, for a board with no push set up ──
+
+       Straight to the chat rather than into a row. Only when there is no push
+       URL: with one, the flow reading the row is what posts, and doing both
+       would put two cards in the chat for every refresh.
+
+       Unlike the push, this only fires when the cars have changed. A row is
+       something to keep right; a message is something not to send twice. */
+    if(!t.webhook || t.pushUrl) return;
+
+    const due = every > 0 && (Date.now() - lastPostAt) >= every * 60000;
+    if(!due) return;
+
+    const out = await gatherVri();
+    const key = vinKeyOf(out.rows);
+    if(key === lastVinKey){ lastPostAt = Date.now(); return; }
+
+    await postToTeams(teamsEnvelope(teamsListCard(out.site, out.rows, stampNow())));
+    lastVinKey = key;
+    lastPostAt = Date.now();
+    log(`teams: VRI list posted · ${out.rows.length} cars (${out.site}) · changed`);
+  }catch(err){
+    log("teams: " + err.message);
+  }finally{
+    teamsBusy = false;
+  }
+}
+
+function startTeamsLoop(log){
+  stopTeamsLoop();
+  const t = loadConnections().teams;
+  /* Something to do means a row to keep pushed, or a timed repost to the chat.
+     Either way it needs an interval — a webhook on its own is a board that
+     posts only when somebody presses a button in the admin panel. */
+  const t2 = t || {};
+  if(!Number(t2.autoMinutes) || !(t2.pushUrl || t2.webhook)) return;
+  // unref so a configured board still exits cleanly on Ctrl-C.
+  teamsTimer = setInterval(() => teamsTick(log), TEAMS_POLL_MS);
+  if(teamsTimer.unref) teamsTimer.unref();
+}
+
+function stopTeamsLoop(){
+  if(teamsTimer) clearInterval(teamsTimer);
+  teamsTimer = null;
+}
+
+/* Who is on a visit right now. Two reads, only ever on a row somebody has
+   opened.
+
+   This DOES return the email and phone. An earlier version withheld them on
+   privacy grounds, which was the wrong call for the job: you cannot judge
+   whether a contact needs changing, or type a replacement, without seeing what
+   is there. It is the same data the operator is looking at in SCA on the next
+   monitor. It stays out of exports and off the scan payload — only a row
+   somebody deliberately opened fetches it. */
+async function scaContacts(vin, serviceVisitId){
+  const token = scaToken();
+  const svid  = Number(serviceVisitId);
+  // sca.isTeslaContact, not a second copy of the rule — the panel and the
+  // guard that refuses a redundant switch must agree about what "Tesla" means.
+  const shape = c => {
+    const x = (c && c.contacts) || null;
+    return {
+      has      : Boolean(x),
+      firstName: (x && x.firstName) || "",
+      lastName : (x && x.lastName)  || "",
+      email    : (x && x.email)     || "",
+      phone    : (x && x.phoneNumber) || "",
+      tesla    : Boolean(x && sca.isTeslaContact(x))
+    };
+  };
+
+  const [main, billing, addr] = await Promise.all([
+    sca.contactOnVisit(token, svid, 1),
+    sca.contactOnVisit(token, svid, 2),
+    sca.addressOnVisit(token, svid, 2)
+  ]);
+  /* The address comes back either bare or wrapped in `address` depending on
+     the call; both shapes have been seen, so both are accepted. */
+  const a = (addr && (addr.address || addr)) || null;
+  return {
+    main: shape(main), billing: shape(billing),
+    address: a && a.addressLine1 ? {
+      has: true,
+      addressLine1: a.addressLine1 || "", addressLine2: a.addressLine2 || "",
+      city: a.city || "", stateCode: a.stateCode || a.stateName || "",
+      zip: a.zip || "", countryCode: a.countryCode || "US"
+    } : { has: false }
+  };
+}
+
+/* ── set the billing address on one visit ──
+
+   Admin › My location is the default for the Tesla switch; this is the same
+   write with an address typed on the row, for the cars that need a different
+   one. Same gate: pre-delivery only. */
+async function scaSetAddress({ vin, serviceVisitId, address }){
+  const token = scaToken();
+  const svid  = Number(serviceVisitId);
+
+  const line1 = String(address.addressLine1 || "").trim();
+  const city  = String(address.city || "").trim();
+  const state = String(address.stateCode || "").trim().toUpperCase();
+  const zip   = String(address.zip || "").trim();
+  for(const [v, label] of [[line1, "street"], [city, "city"], [state, "state"], [zip, "ZIP"]])
+    if(!v) throw new Error(`The ${label} is required`);
+
+  const onVin = (await sca.visitsByVin(token, vin)).some(v => v.serviceVisitID === svid);
+  if(!onVin) throw new Error("That visit is not on this VIN — nothing was changed");
+
+  const visit = await sca.visitById(token, svid);
+  if(!visit || !sca.isOpenVisit(visit))
+    throw new Error("That visit is closed. The board only works on open tickets — nothing was changed");
+
+  const und = await isUndelivered(vin);
+  if(!und.ok)
+    throw new Error(`Refusing to change the billing address: ${vin} ${und.why}. ` +
+      `This is a pre-delivery action only. Nothing was changed.`);
+
+  const uid = visit.userId ?? visit.userID;
+  const asset = uid ? await sca.carAsset(token, uid, vin, svid) : { asset: null, assetId: null };
+
+  const res = await sca.saveAddress(token, svid, 2, {
+    addressID: 0, addressLine1: line1,
+    addressLine2: String(address.addressLine2 || "").trim(),
+    city, county: "", stateProvinceID: 0, stateCode: state, stateName: state,
+    countryID: 0, countryCode: String(address.countryCode || "US").trim().toUpperCase(),
+    countryName: "United States", zip, entityType: "PERSON"
+  }, asset);
+
+  const back = await sca.addressOnVisit(token, svid, 2);
+  const got  = (back && (back.address || back)) || {};
+  if(String(got.addressLine1 || "").trim().toLowerCase() !== line1.toLowerCase())
+    throw new Error(res.message && res.message !== "Success"
+      ? res.message : "The Service App did not change the billing address");
+
+  return { ok: true, now: [line1, city, state, zip].filter(Boolean).join(", ") };
+}
+
+/* ── set a contact by hand ──
+
+   The escape hatch beside the Tesla button: sometimes the right contact is
+   neither the customer on file nor Tesla, and somebody has to type it.
+
+   `contactID: 0` means "a new contact" — inferred from the sibling
+   `saveaddress` call, whose captured body uses `addressID: 0` for a new
+   address. That is the one part of this not lifted from a recording, so the
+   read-back below is what proves it rather than the 200.
+
+   Same gate as the Tesla switch. Editing the contact on a delivered car's
+   visit is not this board's business. */
+async function scaSetContact({ vin, serviceVisitId, contactType, contact }){
+  const token = scaToken();
+  const svid  = Number(serviceVisitId);
+  const type  = Number(contactType) === 2 ? 2 : 1;
+
+  const first = String(contact.firstName || "").trim();
+  const last  = String(contact.lastName  || "").trim();
+  const email = String(contact.email     || "").trim();
+  const phone = String(contact.phone     || "").trim();
+  if(!first && !last) throw new Error("A name is required");
+  if(email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    throw new Error("That email does not look like an address");
+
+  const onVin = (await sca.visitsByVin(token, vin)).some(v => v.serviceVisitID === svid);
+  if(!onVin) throw new Error("That visit is not on this VIN — nothing was changed");
+
+  const visit = await sca.visitById(token, svid);
+  if(!visit || !sca.isOpenVisit(visit))
+    throw new Error("That visit is closed. The board only works on open tickets — nothing was changed");
+
+  const und = await isUndelivered(vin);
+  if(!und.ok)
+    throw new Error(`Refusing to change the contact: ${vin} ${und.why}. ` +
+      `This is a pre-delivery action only. Nothing was changed.`);
+
+  const openBefore = (await sca.activitiesOf(token, svid))
+    .map(a => [a.activityID, a.activityStatusID]);
+
+  const res = await sca.saveContact(token, svid, type, {
+    contactID: 0, firstName: first, lastName: last,
+    email, phoneNumber: phone, preferredLanguage: "en_US"
+  });
+
+  const after = await sca.contactOnVisit(token, svid, type);
+  const got = (after && after.contacts) || null;
+  const same = got &&
+    String(got.firstName || "").trim() === first &&
+    String(got.lastName  || "").trim() === last;
+  if(!same)
+    throw new Error(res.message && res.message !== "Success"
+      ? res.message : "The Service App did not change the contact");
+
+  const openAfter = (await sca.activitiesOf(token, svid))
+    .map(a => [a.activityID, a.activityStatusID]);
+  return {
+    ok: true,
+    now: `${got.firstName || ""} ${got.lastName || ""}`.trim(),
+    ticketsIntact: openBefore.length === openAfter.length &&
+      openBefore.every(([id, st]) => (openAfter.find(([i]) => i === id) || [])[1] === st)
+  };
+}
+
+/* ── switch the main contact to Tesla ──
+
+   A pre-delivery car normally arrives with the customer as the main contact
+   (contactType 1) and Tesla Motors Inventory already on billing (2). Putting
+   Tesla on the main one is a job done by hand on every inventory car, so it
+   gets a button.
+
+   **Pre-delivery only, and that is the point of the whole feature.** Ed's
+   words: it is not available for delivered cars, "aka cars we're not supposed
+   to mess with". Swapping a delivered customer's contact off their own service
+   visit would be wrong in an obvious and embarrassing way. Same fresh-Garage,
+   fails-closed check the appointment cancel uses.
+
+   ── the contact is read off the car, and that is what makes this portable ──
+
+   Never hardcoded, and deliberately not configurable either. Every car is
+   already carrying its own region's inventory contact, so a board at any
+   centre in the world writes the right record without being told what it is —
+   North America's here, somebody else's there.
+
+   A configured setting was built for this and thrown away, which is worth
+   recording so it is not built again. It could not be filled in: SCA's
+   customer directory holds CUSTOMERS, and the inventory record is not one, so
+   searching "Tesla Motors North America" returns nothing. The only place the
+   record exists is the car's own contact list — where this already reads it.
+
+   It varies between cars even within one lot: "Tesla Motors / Inventory" with
+   teslamotorsnorthamerica@tesla.com / +16506817000 on one, "Tesla / Motors
+   Inventory" with …@noemailonfile.tesla.com / +1650-681-9999 on another.
+   Reading per car gets each one right; one saved record would have imposed
+   whichever variant happened to be picked. See teslaContactIn(). */
+async function scaSwitchContactToTesla({ vin, serviceVisitId }){
+  const token = scaToken();
+  const svid  = Number(serviceVisitId);
+
+  const onVin = (await sca.visitsByVin(token, vin)).some(v => v.serviceVisitID === svid);
+  if(!onVin) throw new Error("That visit is not on this VIN — nothing was changed");
+
+  const visit = await sca.visitById(token, svid);
+  if(!visit || visit.serviceVisitID !== svid)
+    throw new Error("Could not read that visit — nothing was changed");
+  if(!sca.isOpenVisit(visit))
+    throw new Error("That visit is closed. The board only works on open tickets — nothing was changed");
+
+  const und = await isUndelivered(vin);
+  if(!und.ok)
+    throw new Error(`Refusing to switch the contact: ${vin} ${und.why}. ` +
+      `This is a pre-delivery action only — a delivered car's contact is the ` +
+      `customer's own. Nothing was changed.`);
+
+  const uid = visit.userId ?? visit.userID;
+  if(!uid) throw new Error("That visit carries no account id, so its contacts cannot be listed");
+
+  const list  = await sca.contactsForCar(token, uid, vin);
+  const tesla = sca.teslaContactIn(list);
+  if(!tesla)
+    throw new Error("No Tesla contact on this car's contact list — nothing to switch to. " +
+                    "Add it in the Service App first.");
+
+  /* ── identity is the email domain, NOT the contactID ──
+
+     Saving a contact onto a visit does not reference the picker's record: SCA
+     copies it and mints a new contactID. Measured on this very car — the
+     picker lists Tesla as 64031153 while the visit carries 64598205 for the
+     same contact. Comparing ids therefore never matches after a save, and an
+     earlier version of this fell straight through the "already Tesla" guard
+     and re-saved a contact that was already correct. */
+  const [before, beforeBilling] = await Promise.all([
+    sca.contactOnVisit(token, svid, 1),
+    sca.contactOnVisit(token, svid, 2)
+  ]);
+  const wasName = before && before.contacts
+    ? `${before.contacts.firstName || ""} ${before.contacts.lastName || ""}`.trim() : "";
+
+  /* ── both types, and refuse only when both are already right ──
+
+     Main (1) and billing (2) get the same record. Putting Tesla on the main
+     contact and leaving the customer as the payer was never the intent.
+
+     The old guard looked at the main contact alone and refused if it was
+     already Tesla — which locked out exactly the car this exists to fix, the
+     one that arrives with Tesla on main and the customer still on billing. */
+  const mainDone    = Boolean(before && before.contacts && sca.isTeslaContact(before.contacts));
+  const billingDone = Boolean(beforeBilling && beforeBilling.contacts &&
+                              sca.isTeslaContact(beforeBilling.contacts));
+  if(mainDone && billingDone)
+    throw new Error(`The main and billing contacts are both already ` +
+                    `${wasName || "Tesla"} — nothing to do`);
+
+  const openBefore = (await sca.activitiesOf(token, svid))
+    .map(a => [a.activityID, a.activityStatusID]);
+
+  /* One call per type, and only for the types that need it. Serial rather than
+     parallel: they are two writes to the same visit, and SCA has not been
+     shown to be safe with both at once. */
+  let res = null;
+  const wrote = [];
+  for(const [type, done] of [[1, mainDone], [2, billingDone]]){
+    if(done) continue;
+    res = await sca.saveContact(token, svid, type, tesla);
+    wrote.push(type);
+  }
+
+  /* Never the response — read it back. Same rule as every other SCA write on
+     this board, and the one that caught a 200/success:false earlier.
+
+     Verified on the email domain for the reason above: the id it comes back
+     with is a fresh one, so an id comparison here would fail on a write that
+     actually worked. */
+  const [after, afterBilling] = await Promise.all([
+    sca.contactOnVisit(token, svid, 1),
+    sca.contactOnVisit(token, svid, 2)
+  ]);
+  const stuck = t => {
+    const c = (t === 1 ? after : afterBilling);
+    return Boolean(c && c.contacts && sca.isTeslaContact(c.contacts));
+  };
+  const failed = wrote.filter(t => !stuck(t));
+  if(failed.length)
+    throw new Error(res && res.message && res.message !== "Success" ? res.message
+      : `The Service App did not change the ${failed.includes(1) ? "main" : "billing"} contact`);
+
+  /* ── and the billing address ──
+
+     Switching the contact to Tesla means the bill goes to the centre, so the
+     centre's address goes with it. It is a configured setting rather than
+     something derived: every centre has a different one, and a board pointed
+     somewhere else must not inherit Cypress's. Admin › My location.
+
+     Skipped, not failed, when unset — the contact switch is the point and it
+     has already succeeded by here. The caller is told which happened. */
+  let addressSet = false, addressNote = "";
+  const addr = billingAddress();
+  if(!addr){
+    addressNote = "No billing address configured — set one in Admin › My location.";
+  }else{
+    try{
+      const asset = await sca.carAsset(token, uid, vin, svid);
+      const ar = await sca.saveAddress(token, svid, 2, addr, asset);
+      const back = await sca.addressOnVisit(token, svid, 2);
+      const line = back && (back.address ? back.address.addressLine1 : back.addressLine1);
+      addressSet = Boolean(ar.ok && line &&
+        String(line).trim().toLowerCase() === addr.addressLine1.trim().toLowerCase());
+      if(!addressSet) addressNote = ar.message && ar.message !== "Success"
+        ? `Billing address not set — ${ar.message}` : "Billing address did not take.";
+    }catch(err){
+      addressNote = "Billing address not set — " + err.message;
+    }
+  }
+
+  const openAfter = (await sca.activitiesOf(token, svid))
+    .map(a => [a.activityID, a.activityStatusID]);
+  const ticketsIntact =
+    openBefore.length === openAfter.length &&
+    openBefore.every(([id, st]) => (openAfter.find(([i]) => i === id) || [])[1] === st);
+
+  return {
+    ok: true,
+    was: wasName,
+    now: `${tesla.firstName || ""} ${tesla.lastName || ""}`.trim(),
+    // Which types were actually written, so the row can say "main and billing"
+    // or "billing only" rather than leaving it to be guessed.
+    wrote,
+    addressSet, addressNote,
+    ticketsIntact
+  };
+}
+
+/* ── cancel the appointment, and nothing else ──
+
+   Same two calls as a move, minus the location swap: TSS releases the slot,
+   then the visit is written back with its dates nulled. The second half is not
+   optional — `CancelAppointment` on its own answers `success:true` and leaves
+   the booking showing in SCA, which was measured before this was built.
+
+   Every rule the move obeys applies here, because this IS the cancel half of
+   it: undelivered cars only, open visits only, the ticket never touched. */
+async function scaCancelAppointment({ vin, serviceVisitId }){
+  const token = scaToken();
+  const svid  = Number(serviceVisitId);
+  const saved = scaSaved() || {};
+
+  const onVin = (await sca.visitsByVin(token, vin)).some(v => v.serviceVisitID === svid);
+  if(!onVin) throw new Error("That visit is not on this VIN — nothing was changed");
+
+  const before = await sca.visitById(token, svid);
+  if(!before || before.serviceVisitID !== svid)
+    throw new Error("Could not read that visit — nothing was changed");
+  if(!sca.isOpenVisit(before))
+    throw new Error("That visit is closed. The board only works on open tickets — nothing was changed");
+  if(before.appointmentID == null && !before.serviceVisitDateTime)
+    throw new Error("There is no appointment on this visit — nothing to cancel");
+
+  const und = await isUndelivered(vin);
+  if(!und.ok)
+    throw new Error(`Refusing to cancel the appointment: ${vin} ${und.why}. ` +
+      `Appointments are only cancellable on undelivered cars, so a customer's booking ` +
+      `cannot be cancelled from this board. Nothing was changed.`);
+
+  const openBefore = (await sca.activitiesOf(token, svid))
+    .map(a => [a.activityID, a.activityStatusID]);
+
+  if(before.appointmentID != null){
+    if(!saved.accessToken)
+      throw new Error("Connect SCA again — the credential the scheduler needs was not captured. " +
+                      "Admin › Sources › Connect.");
+    const c = await sca.cancelAppointment(saved.accessToken, before.appointmentID, svid);
+    if(!c.ok)
+      throw new Error(`Could not cancel the appointment${c.message ? ` — ${c.message}` : ""}. ` +
+                      `Nothing else was attempted.`);
+  }
+
+  // dest null: clear the dates, leave the centre exactly where it is.
+  const res = await sca.moveVisitFull(token, before, null);
+
+  const after = await sca.visitById(token, svid);
+  const cleared = Boolean(after && after.serviceVisitDateTime == null && after.appointmentID == null);
+
+  const openAfter = (await sca.activitiesOf(token, svid))
+    .map(a => [a.activityID, a.activityStatusID]);
+  const ticketsIntact =
+    openBefore.length === openAfter.length &&
+    openBefore.every(([id, st]) => (openAfter.find(([i]) => i === id) || [])[1] === st);
+
+  const sideEffects = [];
+  if(after && before.carWash !== after.carWash) sideEffects.push("car wash");
+  if(after && before.charge  !== after.charge)  sideEffects.push("charge");
+  /* The centre must NOT have moved. This call has no business changing it, so
+     a change here means the PUT did something unasked and is worth shouting
+     about rather than discovering later. */
+  if(after && Number(before.scaLocationID) !== Number(after.scaLocationID))
+    sideEffects.push("service centre");
+
+  if(!cleared) throw new Error(res.message || "The Service App did not clear the appointment");
+
+  return { ok: true, was: before.serviceVisitDateTime || null,
+           at: (after && after.locationDescription) || "", ticketsIntact, sideEffects };
+}
+
+/* ── is this visit movable right now? ──
+
+   Read fresh, for the panel to poll after somebody cancels an appointment in
+   SCA. The board does not cancel appointments itself — see the note on
+   scaMoveVisit — so this is how it notices that the obstacle has gone without
+   making the user re-run a whole scan.
+
+   Cheap: one call, and only ever on a row somebody has opened. */
+async function scaVisitState(vin, serviceVisitId){
+  const svid = Number(serviceVisitId);
+  const v = (await sca.visitsByVin(scaToken(), vin)).find(x => x.serviceVisitID === svid);
+  if(!v) return { found: false };
+  return {
+    found        : true,
+    open         : sca.isOpenVisit(v),
+    appointmentId: v.appointmentID ?? null,
+    bookedFor    : v.serviceVisitDateTime || null,
+    location     : v.locationDescription || "",
+    scaLocationId: v.scaLocationID ?? null,
+    // Movable is the question the panel is really asking, answered once here
+    // rather than reassembled from three fields in the page.
+    movable      : sca.isOpenVisit(v) && v.appointmentID == null
+  };
+}
+
+/* ── is this car still undelivered? ──
+
+   The safeguard on cancelling an appointment, and the reason it is a fresh
+   read rather than a field off the row: the page could be an hour old, or a
+   tab someone left open yesterday, and the whole point of the rule is that a
+   real customer's booking is never cancelled. A stale `delivered:false` is
+   exactly the input that would do it.
+
+   Asked of Garage, which owns the answer, at the moment of the write.
+
+   **Fails closed.** A lookup that errors, finds nothing, or finds more than
+   one car for a VIN returns false — not-known reads as not-allowed. The one
+   thing this must never do is let a delivered car through because a query
+   timed out. */
+async function isUndelivered(vin){
+  try{
+    const page = await tesladexSearch({
+      query : `vin:${vin}`,
+      fields: ["vin", "delivered", "delivery_date_epoch"],
+      size  : 2
+    });
+    const rows = (page && page.results) || [];
+    if(rows.length !== 1) return { ok: false, why: rows.length ? "matches more than one record" : "is not in the Garage index" };
+    const r = rows[0];
+    // Explicitly false, not merely falsy: a missing field is not a promise.
+    if(r.delivered === false) return { ok: true };
+    return { ok: false, why: r.delivered === true ? "is already delivered" : "has no delivery state in Garage" };
+  }catch(err){
+    return { ok: false, why: "could not be checked against Garage (" + err.message + ")" };
+  }
+}
+
+/* ── move a visit to another service centre ──
+
+   Everything about which endpoint and why is in sca.js. What lives HERE is
+   the refusal to do it on the wrong record, because the checks need a read
+   the caller should not have to remember to make:
+
+     - the visit must exist on that VIN, so a mistyped id cannot move a
+       stranger's car
+     - it must be OPEN. Ed's standing rule is that the board only ever works
+       on open tickets
+     - it must be UNSCHEDULED. A booked visit is refused by SCA anyway, but
+       refusing here means the board can say why instead of relaying an error
+     - it must actually be somewhere else, so a no-op does not read as a move
+
+   And afterwards the visit is re-read: `success:true` is SCA's claim, and the
+   only evidence worth reporting is the record itself. */
+async function scaMoveVisit({ vin, serviceVisitId, dest }){
+  const token = scaToken();
+  const svid  = Number(serviceVisitId);
+  const saved = scaSaved() || {};
+
+  /* The whole visit, in the shape the PUT expects — this read is the body's
+     only source. Cross-checked against the VIN so a mistyped id cannot move
+     somebody else's car. */
+  const onVin = (await sca.visitsByVin(token, vin)).some(v => v.serviceVisitID === svid);
+  if(!onVin) throw new Error("That visit is not on this VIN — nothing was changed");
+
+  const before = await sca.visitById(token, svid);
+  if(!before || before.serviceVisitID !== svid)
+    throw new Error("Could not read that visit — nothing was changed");
+  if(!sca.isOpenVisit(before))
+    throw new Error("That visit is closed. The board only works on open tickets — nothing was changed");
+  if(Number(before.scaLocationID) === Number(dest.scaLocationId))
+    throw new Error(`Already at ${before.locationDescription || "that centre"} — nothing to do`);
+
+  const openBefore = (await sca.activitiesOf(token, svid))
+    .map(a => [a.activityID, a.activityStatusID]);
+  if(!openBefore.length)
+    throw new Error("That visit has no open ticket — nothing was changed");
+
+  /* ── the appointment, if there is one ──
+     TSS first, then the PUT clears the date. A failure here stops everything:
+     better a visit that did not move than a booking cancelled for nothing. */
+  let cancelled = false;
+  if(before.appointmentID != null){
+    /* ── the safeguard, and it gates the CANCEL specifically ──
+
+       Ed's rule: only undelivered cars. An undelivered car's appointment
+       belongs to Tesla; a delivered one's belongs to a customer who arranged
+       their day around it. Moving a car with no booking is harmless either
+       way, so this sits inside the appointment branch rather than at the door.
+
+       A fresh read from Garage, never a field off the request — a stale tab's
+       `delivered:false` is exactly the input that would cancel a real booking
+       — and it fails closed on anything it cannot confirm.
+
+       This was briefly lost when the earlier cancel-and-move was deleted. It
+       is not optional and it does not move again. */
+    const und = await isUndelivered(vin);
+    if(!und.ok)
+      throw new Error(`Refusing to cancel the appointment: ${vin} ${und.why}. ` +
+        `Appointments are only cancellable on undelivered cars, so a customer's booking ` +
+        `cannot be cancelled from this board. Nothing was changed.`);
+
+    if(!saved.accessToken)
+      throw new Error("Connect SCA again — the credential the scheduler needs was not captured. " +
+                      "Admin › Sources › Connect.");
+    const c = await sca.cancelAppointment(saved.accessToken, before.appointmentID, svid);
+    if(!c.ok)
+      throw new Error(`Could not cancel the appointment${c.message ? ` — ${c.message}` : ""}. ` +
+                      `Nothing else was attempted.`);
+    cancelled = true;
+  }
+
+  const res = await sca.moveVisitFull(token, before, dest);
+
+  const after = await sca.visitById(token, svid);
+  const moved = Boolean(after && Number(after.scaLocationID) === Number(dest.scaLocationId));
+
+  /* The ticket must come through untouched. It follows the visit to the new
+     location, which is expected and fine; its STATUS changing would not be,
+     and that is the thing that would disturb billing. */
+  const openAfter = (await sca.activitiesOf(token, svid))
+    .map(a => [a.activityID, a.activityStatusID]);
+  const ticketsIntact =
+    openBefore.length === openAfter.length &&
+    openBefore.every(([id, st]) => (openAfter.find(([i]) => i === id) || [])[1] === st);
+
+  /* Two things the PUT could disturb that nothing here asked it to. SCA's own
+     dialog gets these wrong — it flips them true out of its form defaults —
+     so they are watched rather than assumed. */
+  const sideEffects = [];
+  if(after && before.carWash !== after.carWash) sideEffects.push("car wash");
+  if(after && before.charge  !== after.charge)  sideEffects.push("charge");
+
+  if(!moved){
+    const e = new Error((res.message || "The Service App did not move the visit") +
+      (cancelled ? " — but the appointment was already cancelled, so this visit is now unbooked "
+                 + "and still at its old centre." : ""));
+    e.partial = cancelled;
+    throw e;
+  }
+  return {
+    ok: true, cancelled,
+    from: before.locationDescription || "",
+    to  : (after && after.locationDescription) || "",
+    scaLocationId: after && after.scaLocationID,
+    trtId        : after && after.trtid,
+    ticketsIntact,
+    sideEffects
+  };
+}
+
 
 /* The admin password is shared across these dashboards and is a gate against
    fat fingers, not an attacker. Kept out of git all the same; a machine with
@@ -361,6 +1702,44 @@ async function trtInfo(trtId){
   }catch{
     return null;
   }
+}
+
+/* Names for a set of TRTs, in one pass over the cached directory.
+
+   ── why the name does not come from Garage ──
+
+   Garage says which TRT a car is at, and that is the part only Garage knows.
+   It also carries `delivery_details.destination_trt_city`, which looks like
+   the name and is not: it is where the car is *going*. One Cypress car reads
+   `trt_id: 7198` — Collision Houston — with `destination_trt_city: "Houston -
+   Cypress"`. Naming from that field would confidently print the wrong place.
+
+   So the name comes from the site directory this board already caches for the
+   TRT picker. No new source, nothing extra fetched, and it still works with
+   SCA disconnected.
+
+   The one gap is known: **487417, the offsite lot, is not in Intrepid's
+   directory at all** — it exists only in Garage, which is why the picker's
+   name search cannot find it either. It is the board's own configured
+   offsite, so the caller passes that in and it gets labelled rather than
+   printed as a bare number. */
+async function siteNames(trtIds, { offsiteTrtId = null } = {}){
+  const out = new Map();
+  const ids = [...new Set((trtIds || []).filter(Boolean).map(Number))];
+  if(!ids.length) return out;
+
+  let map = {};
+  try { map = await trtDirectory(); } catch { map = {}; }
+
+  for(const id of ids){
+    const hit = map[String(id)];
+    if(hit) out.set(id, hit.name || hit.full || ("TRT " + id));
+    else if(offsiteTrtId && id === Number(offsiteTrtId)) out.set(id, "Offsite lot");
+    // Anything else keeps its number. A bare id is honest about not knowing;
+    // inventing a name from the delivery record would not be.
+    else out.set(id, "TRT " + id);
+  }
+  return out;
 }
 
 /* ───────────────────────────────── Garage ─────────────────────────────────
@@ -1075,7 +2454,14 @@ async function scanVehicles({ trtId, offsiteTrtId, sites = "onsite",
      the rest of the delivery record off this server. */
   const fields = ["vin", "model", "vehicle_type", "ownership", "vehicle_category",
                   "fleet_status", "delivery_stage", "delivered", "delivery_date_epoch",
-                  "delivery_details.scheduled_delivery_date"];
+                  "delivery_details.scheduled_delivery_date",
+                  /* Where the car actually is. `trt_id` is the only field that
+                     distinguishes a car standing at Collision from one at the
+                     centre it routes to — but it is not complete, so the
+                     routing location comes along as the fallback. Both are
+                     free on a query that is already running. See siteNames()
+                     and the site pass below. */
+                  "trt_id", "vehicle_routing_location"];
 
   /* ── who is in scope ── */
   const cars = [];
@@ -1193,7 +2579,12 @@ async function scanVehicles({ trtId, offsiteTrtId, sites = "onsite",
         opened: v.createDate || null,
         due   : v.estimatedCompletionDateTime || null,
         trt   : v.trtid || null,
-        source: v.serviceVisitSourceID || ""
+        source: v.serviceVisitSourceID || "",
+        /* Both filled in below — the ticket from SCA when it is connected, the
+           VRI date from Intrepid's status log. Always present so a row has one
+           shape whether or not either lookup found anything. */
+        ticket: null,
+        vriAt : null
       })),
       campaigns: camps.map(c2 => ({
         title   : c2.title || "",
@@ -1208,12 +2599,237 @@ async function scanVehicles({ trtId, offsiteTrtId, sites = "onsite",
       // "not looked up", which is different from "not known".
       title      : titles ? ((titles.get(c.vin) || {}).title || null) : null,
       refurb     : titles ? ((titles.get(c.vin) || {}).refurb || "") : "",
-      inUseSince : titles ? ((titles.get(c.vin) || {}).inUse || null) : null
+      inUseSince : titles ? ((titles.get(c.vin) || {}).inUse || null) : null,
+      // { at, by, passedDate } once the VRI pass below has run; null when the
+      // car has no receiving inspection on record here.
+      vri        : null,
+      /* Where Garage says the car is. The ids are what Garage knows; the name
+         and which of the two it came from are worked out below. */
+      trtId      : c.trt_id ?? null,
+      vrl        : c.vehicle_routing_location ?? null,
+      site       : "",
+      siteExact  : false
     };
   });
 
+  /* ── naming the site ──
+
+     `trt_id` is the field that knows a car is standing at Collision rather
+     than at the centre it routes to, and it is the reason this is worth
+     showing at all. But it is NOT complete, and the shape of the gap is
+     already documented on this board: of a Cypress scan, a large minority
+     carry logistics codes not yet shed (8162, 16402 …) and a hundred or so
+     carry nothing. Measured on 436 cars: 199 named, 84 on unnamed logistics
+     codes, 107 empty.
+
+     So a pill fed by `trt_id` alone would print "TRT 8162" — a number that
+     tells nobody anything — on a fifth of the list, and nothing at all on
+     another quarter.
+
+     Hence two passes: use `trt_id` when the directory can name it, and fall
+     back to the routing location, which is complete, when it cannot.
+     `siteExact` records which happened, so the page can mark a car that is
+     genuinely elsewhere without also marking every car whose trt_id simply
+     has not caught up. */
+  {
+    const names = await siteNames(
+      rows.flatMap(r => [r.trtId, r.vrl]), { offsiteTrtId });
+    const named = id => {
+      if(!id) return "";
+      const n = names.get(Number(id)) || "";
+      // A bare "TRT 8162" is the directory saying it does not know. Treat that
+      // as no answer rather than as a name.
+      return /^TRT \d+$/.test(n) ? "" : n;
+    };
+    for(const r of rows){
+      const exact = named(r.trtId);
+      r.site = exact || named(r.vrl);
+      r.siteExact = Boolean(exact);
+    }
+  }
+
+  /* ── what the ticket says, from the Service App ──
+
+     Intrepid can say a car HAS a visit and nothing about what the visit is
+     for; that detail lives in SCA and nowhere else. Only rows that already
+     carry a visit get here, so this is bounded by how many cars are actually
+     in for work rather than by the size of the centre: 40 visits in a 600-car
+     scan is 40 trips through here, not 600.
+
+     Skipped in silence when SCA is not connected. The board's other five
+     columns have never needed it and a missing optional source must not turn
+     a working scan into a failed one — the panel is where "connect SCA" gets
+     said, not here. */
+  if(want.has("sv") && scaConnected()){
+    const withVisits = rows.filter(r => r.visits.length);
+    /* Read defensively even though scaConnected() just said yes. This is the
+       only optional source on the board, and the whole point of it being
+       optional is that nothing it can do should be able to fail a scan that
+       Garage and Intrepid already answered. */
+    const tok = (() => { try { return scaToken(); } catch { return null; } })();
+    if(withVisits.length && tok){
+      let seen = 0, failed = 0, dropped = 0;
+      await pool(withVisits, CONFIG.concurrency, async r => {
+        const got = await sca.ticketFor(tok, r.vin).catch(() => null);
+        seen++;
+        if(onProgress) onProgress({ phase: "tickets", done: seen, total: withVisits.length });
+        if(!got){ failed++; return; }
+
+        /* Matched on the visit number rather than the id, because the id is
+           the one thing about these two systems that has never been proven
+           identical. The number is a printed string on both sides.
+
+           A visit SCA does not return keeps ticket:null, which the row renders
+           as "no detail" — deliberately distinct from a visit whose ticket has
+           no activities on it yet. One dead lookup must not read as one clean
+           car. */
+        const match = (list, v) => list.find(g => g.number === v.id)
+                                || list.find(g => String(g.svId) === String(v.svId));
+        for(const v of r.visits) v.ticket = match(got.open, v) || null;
+
+        /* ── a visit SCA has finished with ──
+
+           Enumeration comes from Intrepid, and Intrepid's copy of the status
+           goes stale: 7SAYGDED5TA746273 / SV02D766C2 reads serviceVisitStatusID
+           1 in Intrepid and 2 in SCA for the same visit, so a delivered car sat
+           on the work list with its one concern closed.
+
+           Dropped rather than shown greyed, because this is a list of work to
+           do and Ed's rule on this board has always been open tickets only. A
+           row whose only visit goes this way stops being flagged, which is the
+           point — everything downstream counts r.visits.length.
+
+           Only ever on SCA's explicit say-so. `closed` means SCA knows the
+           visit and calls it done; merely being absent from `open` would also
+           catch a visit SCA has never heard of, and that is a different fact
+           worth keeping on screen rather than quietly deleting. */
+        const before = r.visits.length;
+        r.visits = r.visits.filter(v => v.ticket || !match(got.closed, v));
+        dropped += before - r.visits.length;
+      });
+      if(failed){
+        notes.push(`Service App detail failed for ${failed} of ${withVisits.length} ` +
+                   `${failed === 1 ? "car" : "cars"} — those rows show the visit without its ticket.`);
+      }
+      if(dropped){
+        notes.push(`${dropped} ${dropped === 1 ? "visit" : "visits"} closed in the Service App ` +
+                   `${dropped === 1 ? "was" : "were"} left off — Intrepid still lists ` +
+                   `${dropped === 1 ? "it" : "them"} as open.`);
+      }
+    }
+  }
+
+  /* ── when each of those cars cleared receiving ──
+
+     Same population as the tickets: only cars with a visit, because that is
+     the only row the date is shown on. See vriCompletions() for why this does
+     not just read `vriPassedDate` off the COG record it already has.
+
+     Intrepid is a required source, so unlike the SCA block this is not
+     guarded on a connection — but it is still caught, because a car with no
+     VRI date is a car with no VRI date and not a failed scan. */
+  if(want.has("sv")){
+    const withVisits = rows.filter(r => r.visits.length);
+    if(withVisits.length){
+      const vri = await vriCompletions(trtId, withVisits.map(r => r.vin), onProgress)
+        .catch(() => new Map());
+      for(const r of withVisits){
+        const hit = vri.get(r.vin) || null;
+        r.vri = hit;
+        // Repeated onto each visit so the row renderer can put it beside the
+        // SV number without reaching back up to the vehicle.
+        for(const v of r.visits) v.vriAt = hit ? hit.at : null;
+      }
+      const missing = withVisits.filter(r => !r.vri).length;
+      if(missing){
+        notes.push(`${missing} of ${withVisits.length} cars with a visit have no receiving ` +
+                   `inspection on record at this centre — those show no VRI date.`);
+      }
+    }
+  }
+
   return { query, total: total ?? cars.length, scanned: cars.length,
-           rows, notes, kinds: [...want] };
+           rows, notes, kinds: [...want], sca: scaConnected() };
+}
+
+/* ─────────────────── when the car cleared receiving ───────────────────
+
+   "VRI completed on" for a set of VINs, read from the vehicle status log.
+
+   ── the field that looks right and is not ──
+
+   The COG record carries `vriPassedDate`, it is free, it is already on the
+   Cars on Ground sheet, and it reads exactly like the answer. It is not the
+   answer: it is stamped at **Ready for Prep**, downstream of the inspection,
+   and a car that goes round again gets it re-stamped. Measured on the 33
+   Cypress service-visit cars that have both: exact on 17, and **up to 96 days
+   late** on the rest — one car reads 2026-07-27 against a real inspection on
+   2026-04-23. ZO-003 hit this first and found it matched on 1 of 684; the
+   sample here is kinder and the conclusion is the same. Do not swap this
+   function for the cheap field.
+
+   The honest source is a `Receiving Inspection Completed` entry in
+   `getVehicleStatusLogByVinWithPdiTask`, which needs the per-vehicle cog
+   record id — NOT `shipment.ShipmentId` from the inventory list, which is the
+   transport shipment and is shared by every car on the same truck.
+
+   Two calls, neither of them per vehicle for the first: `getAllVehicleShipments`
+   is batched 500 VINs to a call and is already how Cars on Ground works, then
+   one status-log call per VIN. Only cars that have a service visit are asked
+   about, so this tracks the visit count rather than the size of the centre.
+
+   `trtId` genuinely filters the batched call — the same VINs return 0 records
+   under another centre — so a car whose cog record lives elsewhere resolves to
+   nothing and shows no date. That is the right failure: a blank means "not
+   found", and inventing a date from the cheap field would mean the opposite. */
+
+async function vriCompletions(trtId, vins, onProgress){
+  const out = new Map();
+  if(!trtId || !vins || !vins.length) return out;
+
+  const recs = new Map();
+  for(let i = 0; i < vins.length; i += COG_VIN_CHUNK){
+    const chunk = vins.slice(i, i + COG_VIN_CHUNK);
+    const got = await intrepidPost(
+      `/getAllVehicleShipments?trtId=${encodeURIComponent(trtId)}`, { vins: chunk }).catch(() => null);
+    for(const rec of Array.isArray(got) ? got : []){
+      if(!rec || !rec.vin || !rec.id) continue;
+      /* Two records for one VIN is a car that came, went and came back. The
+         live one is the most recently touched — the same rule carsOnGround
+         uses, and for the same reason. */
+      const prev = recs.get(rec.vin);
+      if(!prev || new Date(rec.updatedDate || 0) >= new Date(prev.updatedDate || 0)) recs.set(rec.vin, rec);
+    }
+  }
+
+  let done = 0;
+  await pool([...recs.values()], CONFIG.concurrency, async rec => {
+    const d = await intrepidGet(`/getVehicleStatusLogByVinWithPdiTask` +
+      `?vin=${encodeURIComponent(rec.vin)}` +
+      `&vehicleShipmentId=${encodeURIComponent(rec.id)}`).catch(() => null);
+    done++;
+    if(onProgress) onProgress({ phase: "vri", done, total: recs.size });
+
+    const logs = (d && d.vehicleStatusLogs) || [];
+    /* Intrepid returns the log NEWEST FIRST, so find() lands on the most
+       recent inspection rather than the first. That is the one wanted: the
+       question is when this car last cleared receiving, and a car re-inspected
+       after repair cleared on the re-inspection.
+
+       Anchored on "completed" — a "Receiving Inspection Pending" entry records
+       who queued the car, not an inspection anybody did. */
+    const vri = logs.find(e => /receiving inspection completed/i.test(e.vehicleCogStatusName || ""));
+    if(!vri) return;
+    out.set(rec.vin, {
+      at: vri.createdDate || null,
+      by: vri.createdBy || "",
+      /* Carried for a caller that wants to show how far off the cheap field
+         is, and as the evidence for why this function exists at all. */
+      passedDate: rec.vriPassedDate || null
+    });
+  });
+
+  return out;
 }
 
 /* holdReasonId → words. One call, cached for the process: the map is a dozen
@@ -1629,13 +3245,44 @@ function connectionsSummary(){
       source : gc.source,
       signedIn: Boolean(garage),
       required: true
-    }
+    },
+    /* SCA is the odd one out in three ways, all of them deliberate: it signs
+       in here rather than on the Hub, it is a bearer token rather than a
+       cookie, and it is NOT required — without it the board loses the ticket
+       text on a Service Visits row and nothing else. So it reports an expiry,
+       which the cookies cannot, and required:false, which the cookies are
+       not. */
+    sca: (() => {
+      const s = scaSaved();
+      const live = sca.isLive(s);
+      const mins = s ? Math.round(sca.msLeft(s.exp) / 60000) : 0;
+      return {
+        set    : live,
+        stale  : Boolean(s) && !live,
+        user   : s ? (s.user || "") : "",
+        expires: s ? s.exp : null,
+        detail : !s      ? "not connected"
+               : !live   ? `expired — ${s.user || "signed in"}`
+               : `${s.user} · ${mins > 90 ? Math.round(mins / 60) + "h" : mins + "m"} left`,
+        required: false
+      };
+    })()
   };
 }
 
 module.exports = {
   CONFIG, loadConnections, saveConnections, adminPassword, savedTrtId, savedOffsiteTrtId,
   intrepidCookie, intrepidGet, intrepidPost, appointmentsOn,
+  scaToken, scaConnected, scaSignIn, scaDisconnect, vriCompletions,
+  scaSites, scaMoveVisit, scaCancelAppointment, scaSwitchContactToTesla, scaContacts,
+  scaSetContact, scaSetAddress,
+  billingAddress, saveBillingAddress,
+  teamsConfig, saveTeamsWebhook, saveTeamsSettings, teamsSettings,
+  postVriList, postVriControlCard, pushVri, teamsStatus, startTeamsLoop, stopTeamsLoop,
+  scaVisitState, isUndelivered,
+  scaPhotoStream: sca.photoStream,
+  scaSignInStatus: sca.signInStatus, scaCancelSignIn: sca.cancelSignIn,
+  scaBrowserStatus: sca.browserStatus,
   appointmentAdvisor, advisorsByRn,
   cogStatuses, carsOnGround, dwellLabel, DWELL_WINDOWS,
   trtInfo, trtDirectory, searchSites,

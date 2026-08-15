@@ -867,6 +867,20 @@ body.no-scroll{overflow:hidden}
 }
 .chip:hover{border-color:var(--ink)}
 .chip.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.chip:disabled{opacity:.4;cursor:not-allowed}
+.chip:disabled:hover{border-color:var(--line)}
+
+/* A field whose CONTROLS do not apply here — used by the Active Mode type
+   picker in engineering, which scans unfiltered. Greyed rather than hidden: a
+   control that disappears reads as a bug, one that dims reads as the scope
+   difference it actually is.
+
+   The dimming is applied to the controls individually rather than to .field,
+   because opacity on the parent would take the hint down with them — and the
+   hint is the part that says why the rest is grey. */
+.field.dim>label,
+.field.dim>.chk-list,
+.field.dim>.chips{opacity:.4;pointer-events:none}
 
 .sep{height:1px;background:var(--line-soft);margin:20px 0}
 .danger-h{
@@ -1666,6 +1680,32 @@ body.no-scroll{overflow:hidden}
 
       <div class="sep"></div>
 
+      <div class="field" id="activeTypesField">
+        <label>Vehicle types to track</label>
+        <div class="chk-list" id="activeTypes"></div>
+        <div class="chips" id="activeTypesPresets">
+          <button class="chip" data-preset="default">Default</button>
+          <button class="chip" data-preset="deliveries">Deliveries only</button>
+          <button class="chip" data-preset="all">Everything undelivered</button>
+        </div>
+        <div class="hint" id="activeTypesHint"></div>
+      </div>
+
+      <div class="field">
+        <label>Safety</label>
+        <label class="chk-row locked" title="This can't be changed">
+          <input type="checkbox" checked disabled>
+          <span>Undelivered only (delivered&nbsp;=&nbsp;false)</span>
+        </label>
+        <div class="hint">
+          Locked on, and enforced by the server rather than by this page — no
+          combination of the boxes above can reach a delivered car. Every
+          category listed is an undelivered one.
+        </div>
+      </div>
+
+      <div class="sep"></div>
+
       <div class="field">
         <label>Geofence filter</label>
         <label class="switch">
@@ -1722,6 +1762,54 @@ const ADMIN_PASSWORD = "226565";
    is no proxy, so fall back to simulation instead of failing. */
 const SERVED = location.protocol === "http:" || location.protocol === "https:";
 
+/* ── The vehicle_type vocabulary ────────────────────────────────────────────
+   Every tag observed on an undelivered car at Houston-Cypress, with a label
+   for the picker and a one-line note saying what the category actually is.
+   Order is the order they appear in the admin list: the two that are always
+   deliveries first, then the rest by how many cars carry the tag.
+
+   This MUST stay a subset of VEHICLE_TYPES in server.js, which rejects
+   anything it does not recognise before the value reaches a Lucene query.
+   A tag added here and not there is refused by the scan with a 400.
+
+   Counts are from 2026-08-14 and are indicative, not load-bearing — they are
+   shown in the picker so the cost of ticking a box is visible before it is
+   ticked, and they go stale as the lot turns over.                          */
+const VEHICLE_TYPE_INFO = [
+  { id: "customer-vehicle",  label: "Customer",      seen: 137,
+    note: "Undelivered cars with a customer attached. The core of the board." },
+  { id: "inventory-vehicle", label: "Inventory",     seen: 22,
+    note: "Undelivered stock, not yet matched to a customer." },
+  { id: "autonomous",        label: "Autonomous",    seen: 29,
+    note: "Tesla-owned autonomy fleet. Charged like anything else, so they do turn up on posts." },
+  { id: "marketing-vehicle", label: "Marketing",     seen: 18,
+    note: "Demo and test-drive cars. Live at the site permanently." },
+  { id: "service-loaner",    label: "Service loaner", seen: 15,
+    note: "Loaner pool. Lives at the site permanently." },
+  { id: "internal-vehicle",  label: "Internal",      seen: 3,
+    note: "Staff and internal-use cars." },
+  { id: "mobileservice",     label: "Mobile service", seen: 2,
+    note: "Mobile-service vans." },
+  { id: "energy",            label: "Energy",        seen: 1,
+    note: "A mistag — one Cybertruck carries it. Here so it can be picked, not just wondered about." }
+];
+
+const VEHICLE_TYPE_IDS = VEHICLE_TYPE_INFO.map(t => t.id);
+const typeLabel = id => (VEHICLE_TYPE_INFO.find(t => t.id === id) || {}).label || id;
+
+/* What production Active Mode mirrors out of the box.
+
+   Customer and inventory are the deliveries. `autonomous` is here because it
+   was measured, not assumed: 29 Tesla-owned Model Ys at Houston-Cypress carry
+   the tag, they were invisible to Active Mode, and unlike loaners or marketing
+   cars they are charged in the same rotation as everything else — which is
+   exactly the "car on a post the board cannot see" this is meant to end.
+
+   The permanent fixtures — loaners, marketing, internal, mobile service — stay
+   off, because tracking a car that never leaves is spent capacity. Every one
+   of them is one tick away in Admin → Active Mode.                          */
+const ACTIVE_TYPES_DEFAULT = ["customer-vehicle", "inventory-vehicle", "autonomous"];
+
 const DEFAULTS = {
   chargeLimit : 80.0,                     // percent
   intervalSec : 300,                      // 5 minutes
@@ -1764,7 +1852,11 @@ const DEFAULTS = {
   // Supercharger stall, and nobody is queuing for a wall connector. Turning
   // it on uses the SAME latchAfter/latchEvery cadence as Superchargers —
   // this is a filter on which vehicles alert, not a second schedule.
-  destAlerts    : false
+  destAlerts    : false,
+
+  // Which vehicle_type tags production Active Mode mirrors. See
+  // ACTIVE_PROD_TYPES for the vocabulary and why this is an allowlist.
+  activeTypes   : ACTIVE_TYPES_DEFAULT.slice()
 };
 
 const REMOVE_AFTER_TICKS = 2;   // intervals to wait after completion
@@ -1964,6 +2056,23 @@ function save(key, val){
 }
 
 let settings = Object.assign({}, DEFAULTS, load(KEY.set, {}));
+
+/* localStorage is a value from last week's build, not a contract. `activeTypes`
+   goes straight into a scan the server validates against its own whitelist, so
+   a stale or hand-edited entry has to be repaired here rather than allowed to
+   400 the scan every sweep with nothing on screen to explain it.
+
+   Preserved order comes from VEHICLE_TYPE_INFO, not from the stored array, so
+   the picker never reorders itself between sessions. An empty result falls back
+   to the default rather than to nothing: zero types is the one value that turns
+   a production scan into "the entire lot", which is the outcome the allowlist
+   exists to prevent.                                                        */
+settings.activeTypes = (() => {
+  const stored = Array.isArray(settings.activeTypes) ? settings.activeTypes : [];
+  const kept = VEHICLE_TYPE_IDS.filter(id => stored.includes(id));
+  return kept.length ? kept : ACTIVE_TYPES_DEFAULT.slice();
+})();
+
 let vehicles = load(KEY.veh, []);
 let notes    = load(KEY.note, []);
 let simState = load(KEY.sim, {});     // vin -> simulated usoe
@@ -3202,29 +3311,39 @@ let overrunWarned = false;             // so the overrun notice fires only once
 
      · Engineering — the whole geofence, unfiltered. The population is small
        and every car there is potentially of interest.
-     · Production  — undelivered customer + inventory cars only. Houston-Cypress
-       holds 256 cars; the loaners, marketing, internal and mobile-service ones
-       live there permanently and would never be charged for a customer, so
-       tracking them is wasted capacity. See ACTIVE_PROD_TYPES.             */
+     · Production  — undelivered cars of the selected types only. The site
+       holds a few hundred; the loaners, marketing, internal and mobile-service
+       ones live there permanently and would never be charged for a customer,
+       so they are off by default and tracking them is spent capacity. Which
+       types are in scope is a setting — see ACTIVE_PROD_TYPES.            */
 let activeMode = false;
 
-/* The production allowlist. Customer and inventory cars are treated the same:
-   both are undelivered stock that gets charged before it goes out. Everything
-   else at the TRT is a fixture, not a delivery.
+/* The production allowlist, now user-editable in Admin → Active Mode and
+   persisted as settings.activeTypes. The default is ACTIVE_TYPES_DEFAULT.
 
-   An allowlist, not a denylist — the index carries types beyond the documented
-   set (one car at Houston is tagged `energy`), and naming what we want is the
-   only way a new tag cannot silently leak into the list.
+   An allowlist, not a denylist — the index carries tags beyond the obvious set
+   (one Cybertruck at Houston is tagged `energy`), and naming what we want is
+   the only way a new tag cannot silently leak into the list. Making it
+   editable does not weaken that: the picker only ever offers ids from
+   VEHICLE_TYPE_INFO, and the server rejects anything outside its own
+   whitelist, so widening the scope stays a deliberate act with a fixed
+   vocabulary rather than an open field.
+
+   What is NOT editable is `delivered:false`. Every category here is an
+   undelivered one; a delivered car is a customer's property and has no reason
+   to be on this board whatever its type says. The server applies that guard to
+   every production scan regardless of what the page asks for, so there is no
+   combination of ticks that can reach a delivered car.
 
    Deliberately NOT filtered on `ownership`. It looks equivalent and is not:
-   99 cars at Houston are vehicle_type customer-vehicle but only 79 are
-   ownership:Customer, and the 20-car gap is Tesla-owned cars with real booked
+   137 cars at Houston are vehicle_type customer-vehicle but far fewer are
+   ownership:Customer, and the gap is Tesla-owned cars with real booked
    delivery dates this week. Filtering on ownership drops live deliveries. */
-const ACTIVE_PROD_TYPES = ["customer-vehicle", "inventory-vehicle"];
+const ACTIVE_PROD_TYPES = () => settings.activeTypes;
 
 /* Scope of the geofence scan for the current environment. Production filters,
    engineering does not — sending no types is what asks for the whole lot. */
-const activeScanTypes = () => isEng() ? null : ACTIVE_PROD_TYPES;
+const activeScanTypes = () => isEng() ? null : ACTIVE_PROD_TYPES();
 
 /* Active Mode's charging-only filter. Session runtime, ON by default: while
    Active Mode is on, auto-added (viaActive) cars are hidden from the list until
@@ -3402,16 +3521,20 @@ function renderActiveSection(){
                                    : "Unavailable in this environment";
 
   /* Say plainly which cars this environment will pick up. The two scopes are
-     very different and the difference is invisible from the list alone. */
+     very different and the difference is invisible from the list alone.
+     Production names the selected types rather than describing them, because
+     the selection is now editable and a fixed sentence would go stale the
+     first time someone changed it. */
   const note = $("activeScopeNote");
   if(note){
     note.innerHTML = isEng()
       ? `<b>Engineering</b> — the whole geofence, unfiltered.`
-      : `<b>Production</b> — undelivered <b>customer</b> and <b>inventory</b> cars only. ` +
-        `Loaners, marketing, internal and mobile-service cars are parked here permanently ` +
-        `and are skipped. Cars that are <b>asleep</b> are tracked but not read: a charging ` +
+      : `<b>Production</b> — undelivered ${typeListHtml(settings.activeTypes)} ` +
+        `cars only. Cars that are <b>asleep</b> are tracked but not read: a charging ` +
         `car is always awake, so a sleeping one cannot have started.`;
   }
+
+  renderActiveTypes();
   $("activeToggleBtn").textContent = activeMode ? "Disable Active Mode" : "Enable Active Mode";
   $("activeToggleBtn").disabled = !activeAvailable();
   $("activeToggleBtn").classList.toggle("solid", !activeMode);
@@ -3423,6 +3546,116 @@ function renderActiveSection(){
     only.disabled = !activeMode || !activeAvailable();
   }
 }
+
+/* "customer, inventory and autonomous" — an English list, bolded, for the
+   places that describe the scope in a sentence. Kept in one place so the
+   scope note and the enable confirmation can never word it differently. */
+function typeListHtml(ids){
+  const names = ids.map(id => `<b>${escHtml(typeLabel(id).toLowerCase())}</b>`);
+  if(!names.length)      return "<b>no</b>";          // unreachable; see the sanitiser
+  if(names.length === 1) return names[0];
+  return names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
+}
+
+/* Build the type picker once, then keep it in sync. Rows come from
+   VEHICLE_TYPE_INFO so the markup cannot drift from the vocabulary the server
+   validates against.
+
+   Engineering disables the whole field rather than hiding it: the section is
+   shared, and a control that vanishes reads as a bug where one greyed out with
+   a reason reads as a scope difference — which is what it is. */
+function renderActiveTypes(){
+  const list = $("activeTypes");
+  if(!list) return;
+
+  if(!list.childElementCount){
+    list.innerHTML = VEHICLE_TYPE_INFO.map(t => `
+      <label class="chk-row" title="${escHtml(t.note)}">
+        <input type="checkbox" value="${escHtml(t.id)}">
+        <span>${escHtml(t.label)}</span>
+      </label>`).join("");
+  }
+
+  const eng = isEng();
+  for(const input of list.querySelectorAll("input")){
+    input.checked  = settings.activeTypes.includes(input.value);
+    input.disabled = eng;
+  }
+  const field = $("activeTypesField");
+  if(field) field.classList.toggle("dim", eng);
+
+  for(const chip of $("activeTypesPresets").querySelectorAll(".chip")){
+    chip.disabled = eng;
+    chip.classList.toggle("on", presetMatches(chip.dataset.preset));
+  }
+
+  const hint = $("activeTypesHint");
+  if(hint){
+    hint.innerHTML = eng
+      ? `Engineering scans the whole geofence, so there is nothing to filter. ` +
+        `This applies to <b>Production</b> only.`
+      : `Which categories the geofence scan mirrors onto the board. Loaners, ` +
+        `marketing, internal and mobile-service cars are off by default — they live ` +
+        `here permanently and are never charged for a customer, so tracking them is ` +
+        `spent capacity. <b>Autonomous</b> is on: those are charged in the same ` +
+        `rotation as deliveries.<br>` +
+        `Changing this while Active Mode is running rescans immediately — cars of a ` +
+        `category you switch off leave the board on that scan.`;
+  }
+}
+
+/* The three presets, as sets rather than as actions, so a chip can light up
+   when the current selection happens to equal it — including when it was
+   reached by ticking boxes one at a time. */
+const ACTIVE_TYPE_PRESETS = {
+  default   : ACTIVE_TYPES_DEFAULT,
+  deliveries: ["customer-vehicle", "inventory-vehicle"],
+  all       : VEHICLE_TYPE_IDS
+};
+
+const presetMatches = name => {
+  const want = ACTIVE_TYPE_PRESETS[name] || [];
+  return want.length === settings.activeTypes.length &&
+         want.every(id => settings.activeTypes.includes(id));
+};
+
+/* Commit a new selection. Order is normalised to VEHICLE_TYPE_INFO's so the
+   stored value is stable, and a rescan is kicked off when the mode is live —
+   without it a widened scope waits out the whole refresh interval, and a
+   narrowed one leaves cars on the board that are no longer in scope. */
+function applyActiveTypes(ids){
+  const next = VEHICLE_TYPE_IDS.filter(id => ids.includes(id));
+
+  /* Zero types is not a narrower filter, it is the absence of one: the scan
+     would fall through to the unfiltered path and mirror the entire lot. The
+     server refuses an empty `types` array for the same reason, so this would
+     fail anyway — better to refuse it here where there is a person to tell. */
+  if(!next.length){
+    notify("error", "<b>Active Mode</b> — keep at least one vehicle type. " +
+                    "An empty selection would scan the entire lot.");
+    renderActiveTypes();
+    return;
+  }
+
+  settings.activeTypes = next;
+  save(KEY.set, settings);
+  renderActiveSection();
+  flashSaved(`Active Mode tracking ${next.length} vehicle type${next.length === 1 ? "" : "s"}`);
+
+  if(activeMode && !isEng()){
+    notify("info", `<b>Active Mode</b> — now tracking ${typeListHtml(next)}. Rescanning.`);
+    tick();
+  }
+}
+
+$("activeTypes").addEventListener("change", () => {
+  applyActiveTypes([...$("activeTypes").querySelectorAll("input:checked")].map(i => i.value));
+});
+
+$("activeTypesPresets").addEventListener("click", e => {
+  const chip = e.target.closest(".chip");
+  if(chip && !chip.disabled) applyActiveTypes(ACTIVE_TYPE_PRESETS[chip.dataset.preset] || []);
+});
 
 /* The ~2s "engaged" flourish. Resolves after the overlay has faded out and been
    removed, so the caller can flip state and start scanning right after. */
@@ -3458,17 +3691,20 @@ async function enableActiveMode(){
 
   const scope = isEng()
     ? `Every refresh scans TRT <b>${settings.mainTrt}</b> and adds or removes vehicles automatically.`
-    : `Every refresh scans TRT <b>${settings.mainTrt}</b> for undelivered <b>customer</b> and ` +
-      `<b>inventory</b> cars, and adds or removes them automatically. Loaners, marketing, ` +
-      `internal and mobile-service cars are skipped.`;
+    : `Every refresh scans TRT <b>${settings.mainTrt}</b> for undelivered ` +
+      `${typeListHtml(settings.activeTypes)} cars, and adds or removes them automatically.`;
 
   const ok = await askConfirm({
     title: "Enable Active Mode",
     text : `The list will be taken over by the <b>${escHtml(ENV_LABEL[envKey])}</b> geofence. ` +
            `${scope} <b>The board is cleared first</b>, so nothing carries in — including ` +
            `vehicles you added by hand.`,
-    facts: vehicles.length ? [["Environment", ENV_LABEL[envKey]],
-                              ["Clearing", String(vehicles.length)]] : [],
+    /* Naming the scope in the facts as well as the sentence: this is the point
+       at which the board is handed over, and how wide the net is set is the
+       one thing worth re-reading before it happens. */
+    facts: [...(isEng() ? [] : [["Tracking", settings.activeTypes.map(typeLabel).join(", ")]]),
+            ...(vehicles.length ? [["Environment", ENV_LABEL[envKey]],
+                                   ["Clearing", String(vehicles.length)]] : [])],
     yes  : vehicles.length ? "Clear and enable" : "Enable",
     no   : "Cancel",
     danger: vehicles.length > 0

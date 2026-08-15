@@ -764,7 +764,12 @@ async function diagnoseEmptyDeliveries(e, trt){
    at Houston-Cypress; any type not in this set is rejected at the route.   */
 const VEHICLE_TYPES = [
   "customer-vehicle", "inventory-vehicle", "service-loaner",
-  "marketing-vehicle", "mobileservice", "internal-vehicle", "autonomous"
+  "marketing-vehicle", "mobileservice", "internal-vehicle", "autonomous",
+  /* `energy` is a real tag on a real car, not a typo: one Cybertruck at
+     Houston-Cypress carries it. Listed so it can be SELECTED rather than
+     merely rejected — a type absent from this vocabulary is unpickable, and
+     an unpickable car is one nobody can explain the absence of. */
+  "energy"
 ];
 
 /* ─────────────────────────── Low-SoC lookup ───────────────────────────
@@ -830,15 +835,20 @@ async function getLowSoc(e, trts, types, maxUsoe){
      · UNFILTERED (`trt_id:N` alone) — the whole lot, which is what engineering
        wants: the population there is small and every car is potentially of
        interest.
-     · FILTERED — `delivered:false` plus a vehicle_type allowlist. Production
-       needs this. Houston-Cypress holds 256 cars, 177 of them undelivered, and
-       58 of those are loaners / marketing / internal / mobile-service that live
-       at the site permanently and will never be charged for a customer.
-       Filtering to customer + inventory takes the tracked pool to 118.
+     · FILTERED — a vehicle_type allowlist on top. Production needs this.
+       Houston-Cypress held 227 undelivered cars when last measured
+       (2026-08-14), and 39 of those are loaners / marketing / internal /
+       mobile-service that live at the site permanently and will never be
+       charged for a customer.
+
+   In production `delivered:false` is applied EITHER WAY — see the query build
+   below. It is a floor, not part of the type filter.
 
    An ALLOWLIST rather than a denylist, deliberately: the index carries types
-   beyond the documented set (one Model 3 at Houston is tagged `energy`), so
+   beyond the obvious set (one Cybertruck at Houston is tagged `energy`), so
    naming what we want is the only way a new tag cannot silently leak in.
+   Which types are named is now a user setting — see ACTIVE_PROD_TYPES and the
+   Active Mode admin section in index.html.
 
    USOE rides along on the SAME query — the same reasoning as `model` in
    getGeofences, but with much more at stake. Tesladex's USOE is the identical
@@ -862,12 +872,20 @@ async function getTrtVins(e, trt, opts = {}){
   const filtered = types.length > 0;
 
   const clauses = [`trt_id:${trt}`];
-  if(filtered){
-    // delivered:false is implied by filtering at all — a delivered car has left
-    // the funnel, and tracking one would put the tool on a real customer's car.
-    clauses.push("delivered:false");
-    clauses.push(`vehicle_type:(${types.join(" OR ")})`);
-  }
+
+  /* `delivered:false` is a PRODUCTION FLOOR, not a consequence of filtering.
+     It used to ride inside the `if(filtered)` branch, which quietly made it
+     caller-controllable: a body with no `types` took the unfiltered path and
+     swept up delivered customer cars along with everything else. Nothing this
+     dashboard does is about a delivered car, so production applies the guard
+     whether or not a type allowlist came with the request, and no client can
+     ask for it to be lifted.
+
+     Engineering stays unfiltered by design — its lot is small, its cars are
+     dev units, and `delivered` is not a meaningful flag there. */
+  if(e.key === "prod") clauses.push("delivered:false");
+
+  if(filtered) clauses.push(`vehicle_type:(${types.join(" OR ")})`);
   const query = clauses.join(" AND ");
 
   for(let from = 0; from < MAX; from += PAGE){

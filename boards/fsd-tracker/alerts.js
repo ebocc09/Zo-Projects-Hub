@@ -307,12 +307,27 @@ function carLine(c){
   };
 }
 
-function digestCard({ site, trtId, date, bar, mode, total, cars, now }){
+function digestCard({ site, trtId, date, bar, mode, total, cars, now, summary }){
   const list   = cars || [];
   const shown  = list.slice(0, DIGEST_MAX);
   const hidden = list.length - shown.length;
   const unread = list.filter(c => c.unreadable).length;
   const under  = list.length - unread;
+
+  /* The day in one number. Taken from summarise() rather than worked out
+     here: that is the board's single definition of FSD adoption, and a card
+     quoting a percentage the dashboard disagreed with would be worse than a
+     card quoting none.
+
+     Note the denominator is `resolved`, not `total` — a car whose mileage
+     could not be read has not failed to drive, it has not been measured, and
+     counting it as a failure would understate a day for a reason that has
+     nothing to do with the day. Those cars are named on their own line
+     instead. */
+  const s        = summary || {};
+  const resolved = Number(s.resolved) || 0;
+  const drove    = Number(s.drove) || 0;
+  const pct      = Number(s.adoption) || 0;
 
   const body = [
     { type: "ColumnSet", columns: [
@@ -332,10 +347,20 @@ function digestCard({ site, trtId, date, bar, mode, total, cars, now }){
       text: `**${site || "TRT " + (trtId == null ? "—" : trtId)}** · ${date}`
           + (now ? ` · checked ${hhmm(now.toISOString())}` : "") },
 
+    /* The headline metric, and the reason anyone opens the card twice: how
+       much of the day is done. Given as a percentage AND as the fraction it
+       came from, because a bare 85% hides whether the day was 39 cars or
+       four — and at four cars a percentage is barely a number at all. */
+    { type: "TextBlock", wrap: true, spacing: "Medium", size: "Medium",
+      weight: "Bolder", color: pct >= 100 ? "Good" : "Default",
+      text: resolved
+        ? `${pct}% done · ${drove} of ${resolved} driven`
+        : `Nothing measurable yet today` },
+
     { type: "TextBlock", wrap: true, spacing: "Small",
-      text: `**${under}** of ${total} delivered today ${under === 1 ? "has" : "have"} not reached `
+      text: `**${under}** ${under === 1 ? "car has" : "cars have"} not reached `
           + `**${trimNum(bar)} mi** on FSD`
-          + (unread ? `, and ${unread} could not be read.` : ".") },
+          + (unread ? `, and ${unread} of ${total} could not be read.` : ".") },
 
     ...shown.map(carLine),
 
@@ -363,7 +388,10 @@ function digestCard({ site, trtId, date, bar, mode, total, cars, now }){
     trtId: trtId == null ? null : trtId,
     site : site || null,
     date, threshold: bar, mode,
-    total, missing: list.length,
+    // The same three numbers the headline is built from, so a flow can chart
+    // the day without parsing a sentence back apart.
+    total, resolved, drove, done: pct,
+    missing: list.length,
     vins : list.slice(0, 50).map(c => c.vin)
   };
 }
@@ -382,6 +410,9 @@ function sampleDigestCard(summary){
     mode : (summary && summary.mode) || "basic",
     total: 6,
     now  : new Date(),
+    // Shaped like a real summarise() result: 6 cars, 5 readable, 3 of those
+    // driven — so the sample shows the percentage working rather than a zero.
+    summary: { resolved: 5, drove: 3, adoption: 60 },
     cars : [
       { vin: "7SAYGDEE0PA000001", model: "Model Y", miles: 0,    unreadable: false,
         advisor: a && a.on ? "Sample Advisor" : "", deliveredAt: new Date().toISOString() },

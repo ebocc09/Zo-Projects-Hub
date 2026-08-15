@@ -58,10 +58,6 @@ function readBody(req){
 
 const authed = body => String(body.password || "") === L.adminPassword();
 
-/* The callback page echoes provider-supplied text, so it gets escaped. */
-const escapeHtml = s => String(s == null ? "" : s).replace(/[&<>"']/g,
-  c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-
 /* ── progress ──
    A scan is one Garage query and then two Intrepid calls per vehicle, so a
    wide selection is minutes of work. A spinner with nothing behind it for
@@ -89,12 +85,18 @@ function jobUpdate(p){
    printing a stack: a dead cookie and a dead Garage token need different
    actions from the person reading the screen. */
 function sendErr(res, err){
-  const code = err.needsTrt ? 400 : (err.needsCookie || err.needsAuth ? 401 : 502);
+  const code = err.needsTrt ? 400
+             : (err.needsCookie || err.needsAuth || err.needsSca ? 401 : 502);
   sendJson(res, code, {
     error      : err.message,
     needsCookie: Boolean(err.needsCookie),
     needsAuth  : Boolean(err.needsAuth),
-    needsTrt   : Boolean(err.needsTrt)
+    needsSca   : Boolean(err.needsSca),
+    needsTrt   : Boolean(err.needsTrt),
+    /* Half of a two-step write landed. Not the same as "it failed" — the page
+       has to say so differently, because something in the world has changed
+       and the next action is not simply "try again". */
+    partial    : Boolean(err.partial)
   });
 }
 
@@ -139,8 +141,25 @@ const server = http.createServer(async (req, res) => {
         cap   : L.SCAN_CAP,
         // Every VIN links to its vitals in Garage. The host is configuration —
         // a board pointed at another region should link there.
-        garageUrl: L.CONFIG.garageUrl.replace(/\/+$/, "")
+        garageUrl: L.CONFIG.garageUrl.replace(/\/+$/, ""),
+        // For Admin › My location, and so the contact panel can say when the
+        // Tesla switch will not be able to set an address.
+        billingAddress: L.loadConnections().billingAddress || null,
+        /* The host only. The path of a webhook URL is the whole credential, so
+           it goes to the page exactly once — when it is typed — and never
+           comes back. */
+        teams: (() => {
+          const t = L.teamsSettings();
+          return (t.hasWebhook || t.hasPush || t.autoMinutes) ? t : null;
+        })()
       });
+    }
+
+    /* ── the Teams loop, for the panel countdown ──
+       Unauthenticated like /api/state and for the same reason: it carries no
+       credential, only whether a timer is running and when it next fires. */
+    if(p === "/api/teams/status" && req.method === "GET"){
+      return sendJson(res, 200, L.teamsStatus());
     }
 
     /* ── where the running scan has got to ── */
@@ -200,6 +219,229 @@ const server = http.createServer(async (req, res) => {
       // A miss is not an error: the number may be valid but absent from the
       // directory, and the caller can still use it.
       return sendJson(res, 200, { trtId: Number(id), found: Boolean(info), info });
+    }
+
+    /* ── the Service App sign-in ──
+       Not behind the admin password, and for the same reason /api/trt is not:
+       connecting a source you need in order to use the tool is a primary
+       interaction rather than an administrative act, and the prompt that
+       offers it appears before anybody has unlocked Admin. It grants no
+       power either — it captures the operator's own SSO session and can
+       reach nothing they could not already open in a browser. */
+    if(p === "/api/sca" && req.method === "GET"){
+      return sendJson(res, 200, {
+        connection: L.connectionsSummary().sca,
+        signin    : L.scaSignInStatus(),
+        browser   : await L.scaBrowserStatus()
+      });
+    }
+
+    if(p === "/api/sca/connect" && req.method === "POST"){
+      // Returns the moment the attempt starts; the page polls /api/sca for
+      // the outcome. See sca.js for why the waiting happens server-side.
+      const st = L.scaSignIn();
+      log(`sca sign-in -> ${st.phase}`);
+      return sendJson(res, 200, { ok: true, signin: st,
+                                  connection: L.connectionsSummary().sca });
+    }
+
+    if(p === "/api/sca/cancel" && req.method === "POST"){
+      return sendJson(res, 200, { ok: true, signin: L.scaCancelSignIn(),
+                                  connection: L.connectionsSummary().sca });
+    }
+
+    /* ── one photo off a concern ──
+       A GET an <img src> can point at, so the page never handles the bearer
+       token and the browser does its own caching. Streamed straight through:
+       these run to several megabytes and there is no reason to hold one in
+       memory on the way past.
+
+       Only ever reached by clicking into a ticket, so it costs nothing on a
+       scan. The id is validated as digits before it is put in a URL. */
+    if(p.startsWith("/api/sca/photo/") && req.method === "GET"){
+      const id = p.slice("/api/sca/photo/".length);
+      if(!/^\d+$/.test(id)) return sendJson(res, 400, { error: "Bad attachment id" });
+      let token;
+      try { token = L.scaToken(); }
+      catch(err){ return sendErr(res, err); }
+
+      const up = await L.scaPhotoStream(token, id);
+      if(up.statusCode !== 200){
+        up.resume();   // drain, or the socket is held open for nothing
+        return sendJson(res, up.statusCode === 401 ? 401 : 502, {
+          error: up.statusCode === 401
+            ? "Service App token expired — connect SCA again"
+            : `Service App returned ${up.statusCode} for that image`,
+          needsSca: up.statusCode === 401
+        });
+      }
+      res.writeHead(200, {
+        "Content-Type": up.headers["content-type"] || "application/octet-stream",
+        ...(up.headers["content-length"] ? { "Content-Length": up.headers["content-length"] } : {}),
+        // Immutable by nature: an attachment id names one uploaded file for
+        // good, so reopening a viewer should not refetch megabytes.
+        "Cache-Control": "private, max-age=3600"
+      });
+      return up.pipe(res);
+    }
+
+    /* ── type-ahead over SCA's site directory ──
+       Same shape as /api/sites, which drives the nav TRT picker, so the page
+       can reuse that debounce and dropdown wholesale. */
+    if(p === "/api/sca/sites" && req.method === "GET"){
+      const q = (url.searchParams.get("q") || "").trim();
+      if(q.length < 2) return sendJson(res, 200, { q, sites: [] });
+      return sendJson(res, 200, { q, sites: await L.scaSites(q) });
+    }
+
+    /* ── move a visit to another service centre ──
+       The board's only write to a service record. Every guard is in
+       L.scaMoveVisit(); this layer just validates shapes and relays SCA's own
+       words when it refuses, because they say more than a generic failure. */
+    if(p === "/api/sca/move" && req.method === "POST"){
+      const body = await readBody(req);
+      const vin  = String(body.vin || "").trim().toUpperCase();
+      const num  = k => (/^\d+$/.test(String(body[k] ?? "").trim()) ? Number(body[k]) : null);
+      const svid = num("serviceVisitId"), loc = num("scaLocationId"), trt = num("trtId");
+
+      if(!L.isVin(vin))     return sendJson(res, 400, { error: "A valid VIN is required" });
+      if(svid === null)     return sendJson(res, 400, { error: "serviceVisitId must be numeric" });
+      if(loc === null)      return sendJson(res, 400, { error: "scaLocationId must be numeric" });
+      // Both ids come from the picker together; one without the other is a bug
+      // in the caller rather than something to guess at.
+      if(trt === null)      return sendJson(res, 400, { error: "trtId must be numeric" });
+
+      /* The destination arrives whole from the picker. It has to: the move
+         needs functionID and inventoryLocationID as well as the two ids, and
+         none of the four can be derived from the others. Re-deriving them
+         server-side would mean a second directory search per move on data the
+         page already holds. */
+      const dest = {
+        scaLocationId      : loc,
+        trtId              : trt,
+        name               : String(body.name || "").slice(0, 120),
+        typeId             : Number(body.typeId),
+        functionId         : Number(body.functionId),
+        inventoryLocationId: Number(body.inventoryLocationId)
+      };
+      for(const k of ["typeId", "functionId", "inventoryLocationId"])
+        if(!Number.isFinite(dest[k])) return sendJson(res, 400, { error: `${k} must be numeric` });
+
+      const out = await L.scaMoveVisit({ vin, serviceVisitId: svid, dest });
+      log(`sca move: ${vin} visit ${svid} · ${out.from} -> ${out.to}` +
+          (out.cancelled ? " (appointment cancelled)" : "") +
+          (out.ticketsIntact ? "" : "  !! TICKET STATUS CHANGED") +
+          (out.sideEffects.length ? "  !! also changed: " + out.sideEffects.join(", ") : ""));
+      return sendJson(res, 200, out);
+    }
+
+    /* ── cancel the appointment, leaving the car where it is ──
+       The cancel half of the move on its own. Same guards, because it is the
+       same write. */
+    if(p === "/api/sca/cancel-appointment" && req.method === "POST"){
+      const body = await readBody(req);
+      const vin  = String(body.vin || "").trim().toUpperCase();
+      const svid = /^\d+$/.test(String(body.serviceVisitId ?? "").trim())
+        ? Number(body.serviceVisitId) : null;
+      if(!L.isVin(vin))  return sendJson(res, 400, { error: "A valid VIN is required" });
+      if(svid === null)  return sendJson(res, 400, { error: "serviceVisitId must be numeric" });
+
+      const out = await L.scaCancelAppointment({ vin, serviceVisitId: svid });
+      log(`sca cancel appt: ${vin} visit ${svid} · was ${out.was || "—"}` +
+          (out.ticketsIntact ? "" : "  !! TICKET STATUS CHANGED") +
+          (out.sideEffects.length ? "  !! also changed: " + out.sideEffects.join(", ") : ""));
+      return sendJson(res, 200, out);
+    }
+
+    /* ── who is on the visit ── */
+    if(p === "/api/sca/contacts" && req.method === "GET"){
+      const vin  = (url.searchParams.get("vin") || "").trim().toUpperCase();
+      const svid = (url.searchParams.get("svid") || "").trim();
+      if(!L.isVin(vin))       return sendJson(res, 400, { error: "A valid VIN is required" });
+      if(!/^\d+$/.test(svid)) return sendJson(res, 400, { error: "svid must be numeric" });
+      return sendJson(res, 200, await L.scaContacts(vin, svid));
+    }
+
+    /* ── set a contact by hand ── */
+    if(p === "/api/sca/set-contact" && req.method === "POST"){
+      const body = await readBody(req);
+      const vin  = String(body.vin || "").trim().toUpperCase();
+      const svid = /^\d+$/.test(String(body.serviceVisitId ?? "").trim())
+        ? Number(body.serviceVisitId) : null;
+      if(!L.isVin(vin)) return sendJson(res, 400, { error: "A valid VIN is required" });
+      if(svid === null) return sendJson(res, 400, { error: "serviceVisitId must be numeric" });
+
+      const out = await L.scaSetContact({
+        vin, serviceVisitId: svid, contactType: body.contactType,
+        contact: {
+          firstName: String(body.firstName || "").slice(0, 80),
+          lastName : String(body.lastName  || "").slice(0, 80),
+          email    : String(body.email     || "").slice(0, 160),
+          phone    : String(body.phone     || "").slice(0, 40)
+        }
+      });
+      // The name is logged; the email and phone are not.
+      log(`sca contact set: ${vin} visit ${svid} type ${body.contactType === 2 ? 2 : 1} -> ${out.now}` +
+          (out.ticketsIntact ? "" : "  !! TICKET STATUS CHANGED"));
+      return sendJson(res, 200, out);
+    }
+
+    /* ── set the billing address on one visit ── */
+    if(p === "/api/sca/set-address" && req.method === "POST"){
+      const body = await readBody(req);
+      const vin  = String(body.vin || "").trim().toUpperCase();
+      const svid = /^\d+$/.test(String(body.serviceVisitId ?? "").trim())
+        ? Number(body.serviceVisitId) : null;
+      if(!L.isVin(vin)) return sendJson(res, 400, { error: "A valid VIN is required" });
+      if(svid === null) return sendJson(res, 400, { error: "serviceVisitId must be numeric" });
+
+      const out = await L.scaSetAddress({
+        vin, serviceVisitId: svid,
+        address: {
+          addressLine1: String(body.addressLine1 || "").slice(0, 120),
+          addressLine2: String(body.addressLine2 || "").slice(0, 120),
+          city        : String(body.city || "").slice(0, 80),
+          stateCode   : String(body.stateCode || "").slice(0, 3),
+          zip         : String(body.zip || "").slice(0, 12),
+          countryCode : String(body.countryCode || "US").slice(0, 2)
+        }
+      });
+      log(`sca address: ${vin} visit ${svid} -> ${out.now}`);
+      return sendJson(res, 200, out);
+    }
+
+    /* ── swap the main contact to Tesla ──
+       Pre-delivery only; the gate is in L.scaSwitchContactToTesla. */
+    if(p === "/api/sca/contact-to-tesla" && req.method === "POST"){
+      const body = await readBody(req);
+      const vin  = String(body.vin || "").trim().toUpperCase();
+      const svid = /^\d+$/.test(String(body.serviceVisitId ?? "").trim())
+        ? Number(body.serviceVisitId) : null;
+      if(!L.isVin(vin)) return sendJson(res, 400, { error: "A valid VIN is required" });
+      if(svid === null) return sendJson(res, 400, { error: "serviceVisitId must be numeric" });
+
+      const out = await L.scaSwitchContactToTesla({ vin, serviceVisitId: svid });
+      log(`sca contact: ${vin} visit ${svid} · ${out.was || "—"} -> ${out.now}` +
+          (out.ticketsIntact ? "" : "  !! TICKET STATUS CHANGED"));
+      return sendJson(res, 200, out);
+    }
+
+    /* ── is this visit movable yet? ──
+       Polled by an open row after somebody cancels an appointment in SCA, so
+       the panel can unlock without a rescan. */
+    if(p === "/api/sca/visit-state" && req.method === "GET"){
+      const vin  = (url.searchParams.get("vin") || "").trim().toUpperCase();
+      const svid = (url.searchParams.get("svid") || "").trim();
+      if(!L.isVin(vin))          return sendJson(res, 400, { error: "A valid VIN is required" });
+      if(!/^\d+$/.test(svid))    return sendJson(res, 400, { error: "svid must be numeric" });
+      return sendJson(res, 200, await L.scaVisitState(vin, svid));
+    }
+
+    if(p === "/api/sca/disconnect" && req.method === "POST"){
+      L.scaDisconnect();
+      log("sca disconnected");
+      return sendJson(res, 200, { ok: true,
+                                  connection: L.connectionsSummary().sca });
     }
 
     /* ── the scan ── */
@@ -269,6 +511,10 @@ const server = http.createServer(async (req, res) => {
         filters,
         reasons,
         notes  : out.notes,
+        // Whether the ticket columns on these rows mean anything. A scan run
+        // before SCA was connected keeps its rows; this is how the page knows
+        // not to read their blank tickets as "nothing wrong with the car".
+        sca    : out.sca,
         summary: L.summarise(out.rows),
         rows   : out.rows
       });
@@ -391,16 +637,30 @@ const server = http.createServer(async (req, res) => {
       const label = String(body.label || "export").replace(/[^0-9A-Za-z_.-]+/g, "-").slice(0, 80);
 
       /* Which columns, not which rows — the row set is still exactly what was
-         on screen. Both tools answer the same two presets, and both spell
-         "the delivery date" with the same key, so one filter serves both.
+         on screen. Both tools answer the delivery preset, and both spell "the
+         delivery date" with the same key, so one filter serves both.
 
-         The narrow preset filters the full column list rather than declaring
-         its own, so a column renamed in one place cannot go stale in the
-         other. VIN leads both sheets, so filtering preserves the order the
-         preset is named after. */
-      const preset = body.preset === "vin-delivery" ? "vin-delivery" : "all";
-      const NARROW = ["vin", "scheduled"];
-      const pick = cols => preset === "all" ? cols : cols.filter(c => NARROW.includes(c.key));
+         Narrow presets filter the full column list rather than declaring their
+         own, so a column renamed in one place cannot go stale in the other.
+         VIN leads every sheet, so filtering preserves the order the preset is
+         named after.
+
+         The ticket preset is Service Visits only — Cars on Ground has no
+         ticket columns to keep, so asking it for them would hand back a sheet
+         of nothing but VINs. It falls back to every column there rather than
+         to an empty one. */
+      const PRESETS = {
+        "vin-delivery": ["vin", "scheduled"],
+        "vin-ticket"  : ["vin", "svNumbers", "svSymptom", "svType", "svCategory",
+                         "svHours", "svWhere", "vriDone"]
+      };
+      const preset = PRESETS[body.preset] ? body.preset : "all";
+      const pick = cols => {
+        const keep = PRESETS[preset];
+        if(!keep) return cols;
+        const out = cols.filter(c => keep.includes(c.key));
+        return out.length > 1 ? out : cols;
+      };
 
       /* Cars on ground writes a different sheet from the same route: one row
          per car either way, but the columns are the car's position in the
@@ -514,6 +774,10 @@ const server = http.createServer(async (req, res) => {
              rather than parsed — running it through `day()` would put it
              through a Date and hand back yesterday for anyone east of UTC. */
           scheduled: r.scheduledFor ? String(r.scheduledFor).slice(0, 10) : "",
+          // Where Garage says the car is, which can differ from the centre the
+          // scan covers — a car at Collision still routes to its home centre.
+          site     : r.site || "",
+          siteTrt  : r.trtId ?? "",
           title    : r.titleLabel || "",
           refurb   : r.refurb || "",
           inUse    : day(r.inUseSince),
@@ -524,6 +788,34 @@ const server = http.createServer(async (req, res) => {
           svNumbers: join(visits, v => v.id),
           svOpened : first(visits, v => day(v.opened)),
           svDue    : first(visits, v => day(v.due)),
+
+          /* What the ticket says, when SCA was connected for the scan. A car
+             with several concerns gets them in one cell separated the same way
+             every other multi-value column here does, rather than spilling
+             into extra rows — the sheet is one row per vehicle and stays that
+             way. Blank throughout on a scan that ran without SCA. */
+          svSymptom : join(visits, v => (v.ticket && v.ticket.activities || [])
+                        .map(a => a.symptom || a.narrative).filter(Boolean).join(" · ")),
+          svCategory: join(visits, v => (v.ticket && v.ticket.activities || [])
+                        .map(a => a.category).filter(Boolean).join(" · ")),
+          svType    : join(visits, v => (v.ticket && v.ticket.activities || [])
+                        .map(a => a.hyper).filter(Boolean).join(" · ")),
+          // A number so a centre's total booked hours sums in the sheet.
+          svHours   : visits.reduce((n, v) => n +
+                        (v.ticket && v.ticket.activities || [])
+                          .reduce((m, a) => m + (a.frtHours || 0), 0), 0),
+          svKeyTag  : first(visits, v => (v.ticket && v.ticket.keyTag) || ""),
+          svWhere   : first(visits, v => (v.ticket && v.ticket.location) || ""),
+          svPhotos  : visits.reduce((n, v) => n +
+                        (v.ticket && v.ticket.activities || [])
+                          .reduce((m, a) => m + ((a.photos || []).length), 0), 0),
+
+          /* When the car cleared receiving, from the status log rather than
+             from `vriPassedDate` — see vriCompletions() in lib.js for the
+             measurements behind that choice. Blank means no inspection on
+             record at this centre, which is not the same as not inspected. */
+          vriDone   : r.vri && r.vri.at ? day(r.vri.at) : "",
+          vriBy     : (r.vri && r.vri.by) || "",
 
           ctCount  : camps.length,
           ctTitles : join(camps, c => c.title),
@@ -548,6 +840,8 @@ const server = http.createServer(async (req, res) => {
           { key: "stage",       header: "Delivery stage",   width: 20 },
           { key: "delivered",   header: "Delivery state",   width: 14 },
           { key: "deliveredOn", header: "Delivered on",     width: 14 },
+          { key: "site",        header: "Site",             width: 22 },
+          { key: "siteTrt",     header: "Site TRT",         width: 10, type: "number", digits: 0 },
           // Blank on a scan that did not ask for title status — see FACETS.title.
           { key: "title",       header: "Title status",     width: 13 },
           { key: "refurb",      header: "Refurb status",    width: 24 },
@@ -560,6 +854,17 @@ const server = http.createServer(async (req, res) => {
           { key: "svNumbers",   header: "SV numbers",       width: 24 },
           { key: "svOpened",    header: "SV opened",        width: 13 },
           { key: "svDue",       header: "SV due",           width: 13 },
+          // From the Service App. Blank on a scan that ran without it.
+          { key: "svSymptom",   header: "Symptom",          width: 40 },
+          { key: "svType",      header: "Concern type",     width: 16 },
+          { key: "svCategory",  header: "Concern category", width: 22 },
+          { key: "svHours",     header: "Est. hours",       width: 11, type: "number", digits: 1 },
+          { key: "svPhotos",    header: "Photos",           width: 8, type: "number", digits: 0 },
+          { key: "svKeyTag",    header: "Key tag",          width: 11 },
+          { key: "svWhere",     header: "Service centre",   width: 26 },
+          // From the status log, not vriPassedDate. Blank = none on record.
+          { key: "vriDone",     header: "VRI completed",    width: 14 },
+          { key: "vriBy",       header: "VRI by",           width: 18 },
           { key: "ctCount",     header: "Containment count", width: 17, type: "number", digits: 0 },
           { key: "ctTitles",    header: "Containment campaigns", width: 46 },
           { key: "ctAction",    header: "Containment action",    width: 24 },
@@ -584,6 +889,76 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+
+    /* ── this centre's billing address ──
+       Admin-gated because it is a board setting rather than a per-car action,
+       and because getting it wrong would put the wrong address on every car
+       switched to Tesla afterwards. */
+    if(p === "/api/admin/billing-address" && req.method === "POST"){
+      const body = await readBody(req);
+      if(!authed(body)) return sendJson(res, 401, { error: "Wrong password" });
+      const out = L.saveBillingAddress(body);
+      log(out.cleared ? "billing address cleared"
+                      : `billing address -> ${out.billingAddress.addressLine1}, ${out.billingAddress.city}`);
+      return sendJson(res, 200, { ok: true, ...out });
+    }
+
+    /* ── Teams ──
+       Admin-gated: the webhook is where a vehicle list gets sent, and the
+       posting buttons put a message in a shared chat. */
+    if(p === "/api/admin/teams-webhook" && req.method === "POST"){
+      const body = await readBody(req);
+      if(!authed(body)) return sendJson(res, 401, { error: "Wrong password" });
+      const out = L.saveTeamsWebhook(body.webhook);
+      // The host, never the URL: the path carries the secret.
+      log(out.cleared ? "teams webhook cleared" : `teams webhook -> ${out.host}`);
+      return sendJson(res, 200, { ok: true, ...out });
+    }
+
+    /* The poll URL and the refresh interval. Saved together with the webhook
+       and applied at once — the loop restarts itself on every save, so a
+       changed interval takes effect without restarting the board. */
+    if(p === "/api/admin/teams-settings" && req.method === "POST"){
+      const body = await readBody(req);
+      if(!authed(body)) return sendJson(res, 401, { error: "Wrong password" });
+      const out = L.saveTeamsSettings({
+        ...( "pushUrl"    in body ? { pushUrl:    body.pushUrl    } : {} ),
+        ...( "hoursOn"    in body ? { hoursOn:    body.hoursOn    } : {} ),
+        ...( "openStart"  in body ? { openStart:  body.openStart  } : {} ),
+        ...( "openEnd"    in body ? { openEnd:    body.openEnd    } : {} ),
+        ...( "openDays"   in body ? { openDays:   body.openDays   } : {} ),
+        ...( "autoMinutes" in body ? { autoMinutes: body.autoMinutes } : {} )
+      });
+      L.startTeamsLoop(log);
+      log(`teams: poll ${out.hasPoll ? "on" : "off"} · refresh ` +
+          `${out.autoMinutes ? out.autoMinutes + "m" : "off"}`);
+      return sendJson(res, 200, out);
+    }
+
+    /* Push the rendered card into the row the button flow reads. */
+    if(p === "/api/admin/teams-push" && req.method === "POST"){
+      const body = await readBody(req);
+      if(!authed(body)) return sendJson(res, 401, { error: "Wrong password" });
+      const out = await L.pushVri();
+      log(`teams: pushed ${out.count} cars (${out.site})`);
+      return sendJson(res, 200, out);
+    }
+
+    if(p === "/api/admin/teams-card" && req.method === "POST"){
+      const body = await readBody(req);
+      if(!authed(body)) return sendJson(res, 401, { error: "Wrong password" });
+      const out = await L.postVriControlCard();
+      log(`teams: VRI card posted (${out.site})`);
+      return sendJson(res, 200, out);
+    }
+
+    if(p === "/api/admin/teams-test" && req.method === "POST"){
+      const body = await readBody(req);
+      if(!authed(body)) return sendJson(res, 401, { error: "Wrong password" });
+      const out = await L.postVriList();
+      log(`teams: VRI list posted · ${out.count} cars (${out.site})`);
+      return sendJson(res, 200, out);
+    }
 
     if(p === "/api/admin/reset" && req.method === "POST"){
       const body = await readBody(req);
@@ -625,5 +1000,17 @@ server.listen(PORT, "127.0.0.1", () => {
   const c = L.connectionsSummary();
   log(`  garage ${c.garage.detail}`);
   log(`  intrepid ${c.intrepid.set ? "cookie saved" : "NO COOKIE — scans will fail"}`);
+  // Not a warning: without it the board loses one column, not the tool.
+  log(`  sca ${c.sca.detail}`);
   if(c.trtId) log(`  trt ${c.trtId}`);
+
+  /* The Teams loop, if it is configured. Started here rather than on first
+     request: the whole point of it is that it runs while nobody is looking at
+     the board, so that inspectors on the lot get a card that keeps up. */
+  const t = L.teamsSettings();
+  if(t.hasWebhook && (t.hasPoll || t.autoMinutes)){
+    L.startTeamsLoop(log);
+    log(`  teams: poll ${t.hasPoll ? "on" : "off"} · refresh ` +
+        `${t.autoMinutes ? t.autoMinutes + "m" : "off"}`);
+  }
 });

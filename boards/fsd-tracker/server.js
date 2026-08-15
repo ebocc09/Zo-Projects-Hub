@@ -173,22 +173,33 @@ async function runAlertCheck({ post = true } = {}){
   const bar  = L.droveThreshold();
   const cars = A.missingCars(out.rows, bar);
   const site = (await L.trtInfo(trt).catch(() => null) || {}).name || null;
+  /* The same summary the dashboard's stat strip is built from, so the card's
+     percentage and the board's own counts come from one calculation. */
+  const sum  = L.summarise(out.rows);
 
   /* Nothing missing: post NOTHING, by design — a channel that only ever
      shows work to do is one people keep reading. But LOG it. "No card
      arrived" has to be distinguishable from "the scheduler is dead", and
      this line is the only thing that distinguishes them. */
   if(!cars.length){
-    log(`alerts: ${out.rows.length} car(s) today, all at or above ${bar} mi — nothing to post`);
+    /* An empty day and a finished day are both "nothing to post", but they
+       are not the same news, and a log line that called an empty morning
+       "all at or above the bar" would read as a completed day. */
+    log(out.rows.length
+      ? `alerts: ${out.rows.length} car(s) today, all at or above ${bar} mi — nothing to post`
+      : `alerts: no deliveries yet today — nothing to post`);
     return { total: out.rows.length, missing: 0, cars: [], posted: false,
-             reason: "all-complete", mode: out.mode, trtId: trt, site, date };
+             reason: "all-complete", mode: out.mode, trtId: trt, site, date,
+             done: sum.adoption, drove: sum.drove, resolved: sum.resolved };
   }
 
   const card = A.digestCard({ site, trtId: trt, date, bar, mode: out.mode,
-                              total: out.rows.length, cars, now: new Date() });
+                              total: out.rows.length, cars, now: new Date(),
+                              summary: sum });
 
   const base = { total: out.rows.length, missing: cars.length, cars, card,
-                 mode: out.mode, trtId: trt, site, date };
+                 mode: out.mode, trtId: trt, site, date,
+                 done: sum.adoption, drove: sum.drove, resolved: sum.resolved };
   if(!post) return { ...base, posted: false, reason: "preview" };
 
   const status = await A.postWithOneRetry(conn.alertWebhook, card);

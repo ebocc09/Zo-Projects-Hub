@@ -167,7 +167,7 @@ Locked, the dialog is a narrow code prompt. Unlocked, it widens into nine sectio
 | **Charging** | Target charge level, refresh interval, what happens to finished vehicles |
 | **Data source** | Live Garage or simulation, endpoint, request throttle, main geofence TRT |
 | **Live vitals** | One-click Garage sign-in for both environments, the live-read switch, and a paste box as a fallback |
-| **Active Mode** | Mirror the main-TRT geofence into the list instead of typing VINs — see [Active Mode](#active-mode) |
+| **Active Mode** | Mirror the main-TRT geofence into the list instead of typing VINs, and pick which vehicle categories it tracks — see [Active Mode](#active-mode) |
 | **Deliveries** | Load a day's scheduled deliveries for the main TRT onto the list |
 | **Low SoC** | Find undelivered cars parked at the TRT below a charge threshold |
 | **Alerts** | Teams webhook and a test sender |
@@ -443,34 +443,69 @@ Available in both environments, with **different scopes**, because the two lots 
 
 | | Engineering | Production |
 |---|---|---|
-| Scanned | the whole geofence | undelivered **customer** + **inventory** only |
-| Typical size | tens of cars | 256 at the TRT, **118** after filtering |
+| Scanned | the whole geofence | undelivered cars of the **selected types** |
+| Typical size | tens of cars | 342 at the TRT, 230 undelivered, **192** at the default selection |
 
-### What production filters out, and why
+### Choosing what gets tracked
 
-Houston-Cypress holds 256 cars. 177 are undelivered, and of those, 58 are service loaners,
-marketing, internal and mobile-service vehicles that live at the site permanently and will never be
-charged for a customer. Tracking them is wasted capacity. Filtering on `vehicle_type` leaves 118:
+**Admin → Active Mode → Vehicle types to track.** Every `vehicle_type` tag observed at the site is
+a tick box, so a car that is on a post but not on the board can be explained — and picked up —
+rather than guessed at. Three presets sit under the list: *Default*, *Deliveries only*
+(customer + inventory), and *Everything undelivered*.
 
-| `vehicle_type` | Count | Tracked |
-|---|---|---|
-| `customer-vehicle` | 99 | yes |
-| `inventory-vehicle` | 19 | yes — undelivered stock, treated the same |
-| `service-loaner` / `marketing-vehicle` / `internal-vehicle` / `mobileservice` | 58 | no |
-| `energy` (one Model 3, mistagged) | 1 | no |
+Measured at Houston-Cypress on 2026-08-14. These eight tags account for **all 230** undelivered
+cars there — nothing at the site falls outside the vocabulary:
 
-The list is an **allowlist, not a denylist** (`ACTIVE_PROD_TYPES` in `index.html`). The index carries
-types beyond the documented set — that mistagged `energy` car is the proof — so naming what you want
-is the only way a new tag cannot silently appear in the list.
+| `vehicle_type` | Count | Default | Why |
+|---|---|---|---|
+| `customer-vehicle` | 140 | **yes** | Undelivered cars with a customer attached |
+| `inventory-vehicle` | 23 | **yes** | Undelivered stock, treated the same |
+| `autonomous` | 29 | **yes** | Tesla-owned autonomy fleet — charged in the same rotation |
+| `marketing-vehicle` | 17 | no | Demo / test-drive, lives here permanently |
+| `service-loaner` | 15 | no | Loaner pool, lives here permanently |
+| `internal-vehicle` | 3 | no | Staff and internal use |
+| `mobileservice` | 2 | no | Mobile-service vans |
+| `energy` | 1 | no | A mistag on one Cybertruck |
 
-> **Do not filter on `ownership`.** It looks equivalent to `vehicle_type` and is not: 99 cars are
-> `vehicle_type:customer-vehicle` but only 79 are `ownership:Customer`. The 20-car gap is
-> Tesla-owned cars with real booked delivery dates this week, so filtering on ownership silently
-> drops live deliveries. This was checked, not assumed.
+The four permanent-fixture categories are off by default because a car that never leaves is never
+charged for a customer, and tracking it is spent capacity. They are one tick away.
+
+> **`autonomous` was the blind spot.** The original allowlist was customer + inventory, and those
+> 29 Tesla-owned Model Ys were invisible to the board while being charged like anything else — the
+> "car on a post the tracker cannot see" this picker exists to end. It is on by default for that
+> reason; untick it if the autonomy fleet is somebody else's problem.
+
+The selection is persisted in `settings.activeTypes` and is **production only** — engineering scans
+unfiltered, so the field is greyed out there with a note saying why. Changing it while Active Mode
+is running rescans immediately: cars of a category you switch off leave the board on that scan,
+rather than lingering until the next interval.
+
+The list is an **allowlist, not a denylist** (`VEHICLE_TYPE_INFO` / `ACTIVE_TYPES_DEFAULT` in
+`index.html`). Making it editable doesn't weaken that — the picker only offers ids from a fixed
+vocabulary, and `server.js` rejects anything outside its own `VEHICLE_TYPES` whitelist with a `400`
+before the value can reach a Lucene query. An empty selection is refused at both ends, because zero
+types is not a narrower filter but the *absence* of one.
+
+### Undelivered is not negotiable
+
+`delivered:false` is a **floor, not a filter setting**. There is no combination of tick boxes that
+reaches a delivered car, and the page cannot ask for one: the guard is applied server-side to every
+production scan in `getTrtVins`, whatever the request body says.
+
+> It did not used to be. `delivered:false` was pushed inside the `if(filtered)` branch, which made
+> it a side effect of sending a type list rather than a rule — a body of `{trt}` alone took the
+> unfiltered path and would have returned all **342** cars at the TRT, the 112 delivered ones
+> included. Nothing this dashboard does concerns a delivered car, so the guard now sits outside that
+> branch and the two scan shapes differ only in whether a type allowlist is added on top.
 
 There is deliberately **no delivery-date cutoff**. A car booked three weeks out still charges before
 it goes anywhere, and if it is on a post today you want to see it today. `vehicle_type` already
 removes the cars that are never going out at all, which is the filter that was actually needed.
+
+> **Do not filter on `ownership`.** It looks equivalent to `vehicle_type` and is not: 140 cars are
+> `vehicle_type:customer-vehicle` but far fewer are `ownership:Customer`. The gap is Tesla-owned
+> cars with real booked delivery dates this week, so filtering on ownership silently drops live
+> deliveries. This was checked, not assumed.
 
 ### Polling
 
@@ -487,14 +522,14 @@ it shows up across *two* of them, and with the charging-only filter on the car s
 settles it in one go, because it carries the vehicle's own previous snapshot and the span to it, so
 `histTrendUsable` can call the car charging immediately.
 
-Request volume was never the binding constraint anyway: 118 cars at the default 4 / 150 ms is about
-**18 seconds** of a five-minute interval. What the scan is still worth doing for is the geofence and
-the seed values — see below.
+Request volume was never the binding constraint anyway: 192 cars at the default 4 / 150 ms is about
+**29 seconds** of a five-minute interval, and even *Everything undelivered* — all 230 — is about
+35 seconds. What the scan is still worth doing for is the geofence and the seed values — see below.
 
-> **Watch live read at this scale.** Cached polling of 118 cars is cheap and touches no vehicles.
-> Turning live read on is a different matter: each read is ~140 KB *and* wakes the car, so a
-> full production lot would be woken every sweep. See the warning under
-> [Running 100+ VINs](#running-100-vins).
+> **Watch live read at this scale.** Cached polling of a couple of hundred cars is cheap and touches
+> no vehicles. Turning live read on is a different matter: each read is ~140 KB *and* wakes the car,
+> so a full production lot would be woken every sweep — and widening the type selection widens that
+> too. See the warning under [Running 100+ VINs](#running-100-vins).
 
 ### Skipping sleeping cars — production only
 
@@ -861,7 +896,7 @@ no proxy on the other end.
 | `GET /api/env` | `{"current":"prod","forced":false,"environments":[{"key":"prod","label":"Production","authenticated":true,"live":{…}},…]}` |
 | `POST /api/env` | Switch environment — `{"env":"eng"}`. `409` when pinned by `GARAGE_ENV`. |
 | `GET /api/auth/status` | `{"authenticated":true,"env":"prod","envLabel":"Production","garage":"…","environments":[…]}` |
-| `POST /api/trtscan` | Active Mode's geofence scan — `{"trt":17589}` for the whole lot, or `{"trt":17589,"types":["customer-vehicle","inventory-vehicle"]}` to filter to undelivered cars of those types. Returns `{count,total,rawRows,filtered,vins,rows}`, where each row is `{vin,usoe,soc,model,vehicleType,deliveryDate}`. Unknown types are rejected with `400` and the allowed list |
+| `POST /api/trtscan` | Active Mode's geofence scan — `{"trt":17589}` for every car at the TRT, or `{"trt":17589,"types":["customer-vehicle","inventory-vehicle"]}` to narrow to those types. **In production `delivered:false` is applied either way** and is not caller-controllable. Returns `{count,total,rawRows,filtered,vins,rows}`, where each row is `{vin,usoe,soc,model,vehicleType,deliveryDate}`. Unknown types are rejected with `400` and the allowed list; an empty `types` array is rejected rather than treated as "no filter" |
 | `GET /api/live` | Live-read state for the **current** environment |
 | `POST /api/live` | `{"cookie":"…"}` and/or `{"enabled":true}` for the current environment |
 | `POST /api/live/test` | `{"vin":"…"}` — one live read, independent of the enabled flag |

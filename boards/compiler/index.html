@@ -55,7 +55,9 @@ a{color:var(--blue)}
    digits floating in a 760px panel reads as a different dialog from the one
    people already know. It widens only once there is something wide to show. */
 #adminModal{width:452px;transition:width .28s cubic-bezier(.3,.9,.3,1)}
-#adminModal.unlocked{width:760px}
+/* The same unlocked size as every other board's admin, so the rail and the
+   pane get the room they were designed around. */
+#adminModal.unlocked{width:1040px;height:min(86vh,780px)}
 .lock-ic{display:grid;place-items:center;width:44px;height:44px;margin:6px auto 14px;
   border:1px solid var(--line-soft);border-radius:50%}
 .lock-ic svg{width:21px;height:21px;color:var(--ink-soft)}
@@ -190,6 +192,151 @@ main{max-width:1180px;margin:0 auto;padding:22px}
 .veh.ct{border-color:rgba(232,33,39,.42)}
 .veh.lg{border-color:rgba(62,106,225,.42)}
 
+/* ── the edit panel ──
+   Spans both columns under the row it belongs to, and is built on click
+   rather than rendered 400 times and hidden. The row keeps its own border
+   colour; the panel is separated by a rule instead of a second box, so an
+   opened row still reads as one row. */
+/* The row opens a modal, so it should read as pressable. */
+.veh[data-vin]{cursor:pointer}
+/* The editor's contents. It used to hang under the row, which is why it once
+   carried a grid span and a top border; in the modal it is simply the body. */
+.veh-edit{font-size:12.5px}
+.veh-edit .ed{margin-bottom:14px}
+.veh-edit .ed:last-child{margin-bottom:0}
+.veh-edit .ed-h{display:flex;align-items:baseline;gap:8px;margin-bottom:7px}
+.veh-edit .ed-h b{font-weight:600}
+.veh-edit .ed-h span{color:var(--ink-mute);font-size:11.5px}
+.veh-edit label{display:block;margin-bottom:6px;font-size:10.5px;font-weight:600;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute)}
+.veh-edit .row2{display:flex;gap:8px;align-items:flex-start}
+.veh-edit .row2 .grow{flex:1;min-width:0;position:relative}
+.veh-edit input{width:100%;padding:9px 11px;border:1px solid var(--line);
+  border-radius:var(--r-sm);font:inherit;font-size:13px;background:var(--paper)}
+.veh-edit input:focus{outline:none;border-color:var(--blue)}
+/* Over the row below rather than pushing it down — the list must not jump
+   while someone is reading the options.
+
+   The z-index alone was not enough: every `.veh` paints in document order, so
+   a later row drew over a dropdown hanging out of an earlier one. The open row
+   is lifted into its own stacking context (see .veh.open) and the list sits
+   above it. */
+.veh-edit .sitelist{position:absolute;left:0;right:0;z-index:40;
+  background:var(--paper);box-shadow:var(--shadow-lg);
+  max-height:300px}
+/* Roomier than the nav picker's: these names run long — "Tesla Collision
+   Houston - Training" — and the cramped version cut them off. */
+.veh-edit .sitelist .site{padding:12px 14px;font-size:13.5px;gap:12px}
+.veh-edit .sitelist .site b{font-weight:600}
+.veh-edit .sitelist .site span{font-size:11.5px}
+/* Why a move is not on offer, said out loud. Never a greyed control with no
+   explanation. */
+.veh-edit .why{color:var(--ink-mute);font-size:11.5px;line-height:1.5}
+.veh-edit .why b{color:var(--ink-soft);font-weight:600}
+/* The contact as it stands, and the fields to replace it. Two columns: these
+   are short values and a single column would run the panel down the page. */
+.veh-edit .ct-block{margin-top:12px;padding-top:10px;border-top:1px dashed var(--line-soft)}
+.veh-edit .ct-block:first-of-type{border-top:0;padding-top:0}
+.veh-edit .ct-label{font-size:10.5px;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-mute);margin-bottom:4px}
+.veh-edit .ct-now{font-size:12.5px;color:var(--ink-soft);line-height:1.6;margin-bottom:8px}
+.veh-edit .ct-now .q{color:var(--ink-mute)}
+.veh-edit .ct-now b{font-weight:600}
+.veh-edit .ct-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-top:10px}
+.veh-edit .ct-grid label{display:block;margin:0;font-size:10.5px;font-weight:600;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute)}
+.veh-edit .ct-grid input{margin-top:5px}
+.veh-edit .done{color:var(--green,#0A7A45);font-weight:600}
+.veh-edit .bad{color:var(--red);font-weight:600}
+/* Current centre, an arrow, then where it is going. Reads as a sentence, and
+   the arrow makes the direction unmistakable before anything is confirmed. */
+.veh-edit .arrow{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.veh-edit .arrow .from{color:var(--ink-soft);font-weight:600}
+.veh-edit .arrow .to{color:var(--ink-mute)}
+.veh-edit .arrow .ar{color:var(--ink-mute)}
+
+/* ── slide to confirm ──
+   A button can be hit by a stray click or a repeated Enter. A slider cannot:
+   it takes a deliberate drag across the whole width, so a move is only ever
+   made on purpose. It appears once a destination is chosen and springs back
+   if released short of the end. */
+/* Deliberately not full width. It has to be long enough that the drag is
+   unmistakably intentional, and short enough that it reads as a control rather
+   than a progress bar spanning the card. */
+.slide{position:relative;height:38px;width:280px;max-width:100%;
+  border-radius:var(--r-md);
+  background:var(--paper-alt);border:1px solid var(--line);overflow:hidden;
+  margin-top:10px;user-select:none}
+.slide .fill{position:absolute;inset:0 auto 0 0;width:0;background:rgba(62,106,225,.14);
+  transition:width .18s ease}
+/* The words sit BESIDE the knob, never under it — paintSlide() moves this box
+   to whichever side of the knob has the room. Centring it across the whole
+   track and letting the knob pass over the top read as two things drawn on top
+   of one another rather than as one control. */
+.slide .lbl{position:absolute;inset:0;display:flex;align-items:center;
+  justify-content:center;white-space:nowrap;overflow:hidden;
+  font-size:12px;font-weight:600;letter-spacing:.04em;color:var(--ink-mute);
+  pointer-events:none;transition:left .18s ease,right .18s ease}
+.slide input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;
+  cursor:grab;-webkit-appearance:none;appearance:none;background:transparent}
+.slide input:active{cursor:grabbing}
+.slide input::-webkit-slider-thumb{-webkit-appearance:none;width:54px;height:38px}
+.slide input::-moz-range-thumb{width:54px;height:38px;border:0;background:transparent}
+/* The grip, drawn where the thumb is so there is something to aim at. */
+.slide .grip{position:absolute;top:3px;left:0;width:46px;height:30px;
+  border-radius:var(--r-sm);background:var(--ink);display:grid;place-items:center;
+  color:#fff;font-size:14px;pointer-events:none;transition:left .18s ease}
+.slide.armed .fill{background:rgba(10,122,69,.18)}
+.slide.armed .grip{background:var(--green,#0A7A45)}
+.slide.busy{opacity:.6;pointer-events:none}
+.slide.done{border-color:var(--green,#0A7A45)}
+.slide.done .lbl{color:var(--green,#0A7A45)}
+
+/* Red the whole way for a slider that takes something away, rather than the
+   usual green-on-arrival: the colour is a warning, and a warning that only
+   appears once you have already dragged to the end is too late to be one. */
+.slide.danger .fill{background:rgba(232,33,39,.12)}
+.slide.danger .grip{background:var(--red)}
+.slide.danger.armed{border-color:var(--red)}
+.slide.danger.armed .fill{background:rgba(232,33,39,.22)}
+.slide.danger.armed .grip{background:var(--red)}
+.slide.danger.armed .lbl{color:var(--red)}
+
+/* The same control, built on demand by confirmBySlide() beside the button it
+   stands in for. It lands inside an ordinary .row2, so it lays out as a row of
+   its own and drops the slider's margin-top — that margin is for the Move
+   panel, where the slider follows a field rather than sitting among buttons. */
+.veh-edit .arm{display:flex;gap:8px;align-items:center}
+.veh-edit .arm .slide{margin-top:0}
+/* Inside the gate it stands in for a .mini, so it takes that button's gap from
+   the notice above it — and its own Cancel gives the gap back, or the two
+   would sit 4px out of line with each other. */
+.veh-edit .gate .arm{margin-top:8px}
+.veh-edit .gate .arm .mini{margin-top:0}
+
+/* ── thumbnails in the card ──
+   A fixed box so a portrait and a landscape photo sit on the same line, and
+   object-fit:cover so neither is squashed to manage it. Detail is one click
+   away in the viewer, so what these have to do is be recognisable, not
+   readable. */
+.veh-edit .thumbs{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px}
+.veh-edit .thumb{padding:0;line-height:0;overflow:hidden;cursor:zoom-in;
+  border:1px solid var(--line);border-radius:var(--r-sm);background:var(--paper-alt)}
+.veh-edit .thumb:hover{border-color:var(--ink)}
+.veh-edit .thumb img{display:block;width:104px;height:78px;object-fit:cover}
+.veh-edit .thumb.bad{display:grid;place-items:center;width:104px;height:78px;
+  padding:6px;text-align:center;line-height:1.4;font-size:10.5px;
+  color:var(--ink-mute);cursor:default}
+
+/* The one step the board will not do for you. */
+.veh-edit .gate{border:1px solid var(--line-soft);border-left:3px solid var(--amber);
+  border-radius:var(--r-md);padding:10px 12px;margin-bottom:10px;
+  font-size:11.5px;color:var(--ink-mute);line-height:1.55}
+.veh-edit .gate b{color:var(--ink-soft);font-weight:600}
+.veh-edit .gate a{color:var(--blue);text-decoration:none;border-bottom:1px solid transparent}
+.veh-edit .gate a:hover{border-bottom-color:currentColor}
+.veh-edit .gate .mini{margin-top:8px}
+
 .vin-row{display:flex;align-items:baseline;gap:9px;min-width:0;flex-wrap:wrap}
 .vin{font-size:15px;font-weight:600;letter-spacing:.055em;font-variant-numeric:tabular-nums;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
@@ -212,6 +359,10 @@ a.vin:hover{color:var(--blue);border-bottom-color:var(--blue)}
 .p-done{background:#DFF6EA;color:#0A7A45}
 .p-err {background:#FDE7E8;color:#A3161B}
 .p-info{background:#F1ECFC;color:#5B3DB1}
+/* The car's site when it is the one being scanned — the common case, so it
+   reads as a label rather than a flag. A car somewhere else takes p-info and
+   stands out against a column of these. */
+.p-site{background:var(--paper-alt);color:var(--ink-mute)}
 
 .holds{display:flex;flex-direction:column;gap:6px;align-items:flex-end;text-align:right}
 .hold-line{font-size:12px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
@@ -219,6 +370,40 @@ a.vin:hover{color:var(--blue);border-bottom-color:var(--blue)}
 a.svl{color:inherit;text-decoration:none;border-bottom:1px solid transparent}
 a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 .hold-note{font-size:11.5px;color:var(--ink-mute);max-width:430px}
+
+/* A button that reads as a link. It has to be a button — it opens a viewer
+   rather than going anywhere, and an <a href="#"> that does neither is a lie
+   to anyone navigating by keyboard. Inherits its size so it sits inside a
+   note line without changing the leading. */
+.lnk{background:none;border:0;padding:0;font:inherit;color:var(--blue);
+  cursor:pointer;border-bottom:1px solid transparent}
+.lnk:hover{border-bottom-color:currentColor}
+/* Absence, said out loud. Dimmer than the line it sits in, because "no VRI on
+   record" is context rather than content. */
+.quiet{color:var(--ink-mute);font-style:italic}
+
+/* ── the photo viewer ──
+   `.modal.wide` is 760px — the same width as the admin panel once it is
+   unlocked, which is the state anyone actually looks at it in. The first
+   version was a full-screen overlay, and a 4032×3024 phone photo blown up to
+   fill a monitor is harder to read, not easier.
+
+   Height is capped as well as width, and that is the part that matters. These
+   come off a phone in portrait about as often as landscape, and a portrait one
+   sized only by width still runs taller than the window — so you would be
+   scrolling around a single photo to see the damage. 58vh leaves one photo
+   fully visible with its caption, and several still scroll past each other.
+
+   Stacked down the scrolling body rather than tiled: two across at this width
+   are thumbnails, and the point is to look at the damage. */
+.shot{margin-bottom:16px;text-align:center}
+.shot:last-child{margin-bottom:0}
+.shot img{display:block;margin:0 auto;max-width:100%;max-height:58vh;
+  width:auto;height:auto;border-radius:var(--r-md);
+  background:var(--paper-alt);border:1px solid var(--line-soft)}
+.shot figcaption{margin-top:6px;font-size:11px;color:var(--ink-mute);
+  display:flex;gap:8px;text-align:left}
+.shot figcaption .n{margin-left:auto;font-variant-numeric:tabular-nums}
 
 .empty{padding:70px 22px;text-align:center;color:var(--ink-mute)}
 .empty h3{margin:0 0 6px;font-size:15px;font-weight:600;color:var(--ink)}
@@ -246,7 +431,13 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
   to  {opacity:1;transform:translate(-50%,-48%)}
 }
 .modal.wide{width:760px}
-.modal-head{display:flex;align-items:center;gap:12px;padding:16px 20px;
+/* The ticket editor. Sized to the Zo Hub's unlocked admin panel, which is the
+   house shape for "a working surface" rather than "a question" — the row-level
+   actions needed the room and were cluttering the list inline. */
+.modal.sheet{width:1040px;height:min(86vh,780px)}
+/* flex:none so the admin's rail-and-pane grid can take the remaining height
+   without squeezing the header. */
+.modal-head{display:flex;align-items:center;gap:12px;padding:16px 20px;flex:none;
   border-bottom:1px solid var(--line-soft)}
 .modal-head h3{margin:0;font-size:13px;font-weight:600;letter-spacing:.11em;text-transform:uppercase}
 .modal-sub{font-size:12px;color:var(--ink-mute)}
@@ -372,16 +563,94 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 .site span{margin-left:auto;font-size:11px;font-weight:600;letter-spacing:.08em;
   color:var(--ink-mute);font-variant-numeric:tabular-nums}
 
-/* ── admin ── */
-.panel{margin-bottom:22px}
-.panel h4{margin:0 0 4px;font-size:13px;font-weight:600;letter-spacing:.11em;text-transform:uppercase}
-.panel p{margin:0 0 12px;font-size:12.5px;color:var(--ink-mute)}
-.row{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line-soft);
-  font-size:13px}
-.row:last-child{border-bottom:none}
-.row .k{font-weight:600;min-width:120px}
-.row .v{color:var(--ink-mute);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
-.row .a{margin-left:auto;display:flex;gap:8px}
+/* ── admin ──
+   A rail of sections beside a scrolling pane, the same shape [[ZO-001]] and
+   [[ZO-002]] use. This board had its own flat stack of .panel blocks with a
+   bespoke .row/.k/.v/.a grid, which is why it read as a different application
+   once you opened it. Copied rather than imported, like every other shared
+   thing in this repo — see the hub README. */
+.admin{display:grid;grid-template-columns:218px 1fr;min-height:0;flex:1}
+.admin-rail{
+  display:flex;flex-direction:column;
+  border-right:1px solid var(--line-soft);
+  background:var(--paper-alt);
+  padding:10px 0;overflow-y:auto;min-height:0;
+}
+.rail-item{
+  position:relative;display:flex;align-items:center;gap:10px;
+  width:100%;padding:10px 16px;text-align:left;
+  font-size:12.5px;font-weight:500;color:var(--ink-soft);
+  transition:background .15s,color .15s;
+}
+.rail-item svg{width:16px;height:16px;flex:none;opacity:.62}
+.rail-item:hover{background:rgba(23,26,32,.05);color:var(--ink)}
+.rail-item.on{background:var(--paper);color:var(--ink);font-weight:600}
+.rail-item.on svg{opacity:1}
+.rail-item.on::before{
+  content:"";position:absolute;left:0;top:6px;bottom:6px;width:2px;background:var(--ink);
+}
+/* A section carrying something the operator should notice — a cookie that just
+   expired, a source that was never connected. */
+.rail-item .warn{
+  width:6px;height:6px;border-radius:50%;background:var(--red);
+  margin-left:auto;flex:none;
+}
+.rail-item .warn.ok{background:var(--green);animation:livePulse 2s ease-in-out infinite}
+@keyframes livePulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(18,187,106,.5)}
+  70%    {box-shadow:0 0 0 5px rgba(18,187,106,0)}
+}
+.rail-foot{
+  margin-top:auto;padding:14px 16px 4px;
+  font-size:10.5px;line-height:1.5;color:var(--ink-mute);
+}
+.admin-pane{overflow-y:auto;padding:26px 32px 30px;min-width:0;min-height:0}
+/* Long-form hints stay readable rather than stretching the full width. */
+.admin-pane .sec{max-width:620px}
+.sec{display:none}
+.sec.on{display:block;animation:secIn .2s ease}
+@keyframes secIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.sec-h{margin:0 0 4px;font-size:15px;font-weight:600;letter-spacing:-.01em}
+.sec-p{margin:0 0 18px;font-size:12.5px;color:var(--ink-mute);line-height:1.5}
+.sec-title{
+  margin:22px 0 12px;padding-top:18px;border-top:1px solid var(--line-soft);
+  font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-mute);
+}
+.sec-title:first-child{margin-top:0;padding-top:0;border-top:none}
+.sep{height:1px;background:var(--line-soft);margin:20px 0}
+
+/* One source and its state. The dot carries whether it is up; the text says
+   what it is and when it expires. */
+.conn{
+  display:flex;align-items:center;gap:9px;
+  padding:11px 12px;border:1px solid var(--line-soft);border-radius:var(--r-md);
+  margin-bottom:12px;font-size:12.5px;
+}
+.conn .dot{width:8px;height:8px;border-radius:50%;background:var(--ink-mute);flex:none}
+.conn.ok .dot{background:var(--green)}
+.conn.bad .dot{background:var(--red)}
+.conn b{font-weight:600}
+.conn span{color:var(--ink-mute);margin-left:auto;text-align:right;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:58%}
+/* Buttons for a source go under it, not inside the row — the row's text is
+   already using the right-hand side to say when the token expires. */
+.connect-row{display:flex;gap:8px;margin:-4px 0 12px}
+
+.btn-block{
+  width:100%;height:42px;border-radius:var(--r-sm);
+  font-size:12px;font-weight:600;letter-spacing:.11em;text-transform:uppercase;
+  border:1px solid var(--line);background:var(--paper);
+  transition:.15s;margin-bottom:9px;
+}
+.btn-block:hover{border-color:var(--ink);background:var(--paper-alt)}
+.btn-block.red{color:var(--red);border-color:rgba(232,33,39,.4)}
+.btn-block.red:hover{background:#FDF3F3;border-color:var(--red)}
+.btn-block:disabled{opacity:.45;cursor:default;color:var(--ink-mute)}
+.btn-block:disabled:hover{background:var(--paper);border-color:var(--line)}
+/* Two fields side by side, the house two-up. */
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:900px){ .admin{grid-template-columns:1fr} }
 .mini{height:32px;padding:0 14px;border-radius:var(--r-sm);border:1px solid var(--line);
   font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
   transition:border-color .2s,background .15s}
@@ -390,9 +659,17 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 .mini.dark:hover{background:#000}
 .mini.danger{color:var(--red);border-color:rgba(232,33,39,.4)}
 .mini.danger:hover{background:#FDF3F3;border-color:var(--red)}
-#adminBody{display:none}
-#admin.unlocked #adminBody{display:block}
-#admin.unlocked #gate{display:none}
+/* A disabled .mini kept its hover: the border and the background still moved
+   under the pointer on a button that could not do anything, which reads as a
+   live control ignoring you. Inert instead — and last in the block, so it wins
+   over .dark and .danger, neither of which should keep their colour once the
+   button is dead.
+
+   Greying out is only honest because each of these says why in its own label
+   ("Main contact is Tesla"), never by going quiet. */
+.mini:disabled{opacity:.45;cursor:default;color:var(--ink-mute);
+  background:transparent;border-color:var(--line)}
+.mini:disabled:hover{background:transparent;border-color:var(--line)}
 
 .spin{width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;
   border-radius:50%;display:inline-block;animation:sp .7s linear infinite;vertical-align:-1px}
@@ -481,6 +758,10 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 
 <main>
   <div id="prog" hidden></div>
+  <!-- Its own slot rather than a notice: notices are cleared on every scan,
+       and a prompt that vanished the first time you ran anything would never
+       be seen again. -->
+  <div id="scaPrompt"></div>
   <div id="notes"></div>
 
   <div class="list-head" id="listHead" hidden>
@@ -542,6 +823,29 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 
 <!-- ═════════════════════════ OVERLAYS ═════════════════════════ -->
 <div class="scrim" id="scrim"></div>
+
+<!-- The ticket editor: everything the row lets you do, in one surface.
+     Opened by clicking a row. Built on open rather than rendered per row —
+     the pickers need wiring, and 400 of them would be paid for on every render
+     to serve the one row anybody opens. -->
+<div class="modal sheet" id="ticketModal" role="dialog" aria-label="Edit ticket">
+  <div class="modal-head"><h3>Ticket</h3>
+    <span class="modal-sub" id="ticketCtx"></span>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body" id="ticketBody"></div>
+</div>
+
+<!-- The photos on a concern. An ordinary .modal, so it is the size of the
+     admin panel and inherits the scrim, Escape and close-button behaviour
+     rather than reimplementing all three. -->
+<div class="modal wide" id="shots" role="dialog" aria-label="Concern photos">
+  <div class="modal-head"><h3>Photos</h3>
+    <span class="modal-sub" id="shotsTitle"></span>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body" id="shotsBody"></div>
+</div>
 
 <!-- Service Visits -->
 <div class="modal wide" id="svModal" role="dialog" aria-label="Service Visits">
@@ -661,8 +965,7 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
   <div class="modal-head"><h3>Admin</h3>
     <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
   </div>
-  <div class="modal-body" id="admin">
-    <div id="gate">
+    <div class="modal-body" id="gate">
       <div class="lock-ic">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
              stroke-linecap="round" stroke-linejoin="round">
@@ -682,50 +985,228 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
       <button class="btn btn-dark" id="unlock" style="width:100%">Unlock</button>
     </div>
 
-    <div id="adminBody">
-      <div class="panel">
-        <h4>Sources</h4>
-        <p>Both are required. A scan with one of them missing would answer the
-           question wrongly rather than refuse, so it refuses.</p>
-        <div class="row">
-          <div class="k">Garage</div>
-          <div class="v" id="aGarage">—</div>
-        </div>
-        <div class="row">
-          <div class="k">Intrepid</div>
-          <div class="v" id="aIntrepid">—</div>
-        </div>
-        <div class="hub-note">
-          Sign-ins live on the <b>Zo Projects Hub</b>. One session there covers every
-          board, including this one.
-          <a href="http://localhost:3100" target="_blank" rel="noopener">Open the Hub</a>
-        </div>
+  <!-- Unlocked: rail of sections beside a scrolling pane. Same shape, same
+       class names and the same switcher as the other boards — a section is
+       markup only, as long as the rail's data-sec matches the section's id
+       with a "sec" prefix. -->
+  <div class="admin" id="settings" hidden>
 
+    <nav class="admin-rail" aria-label="Settings sections">
+      <button class="rail-item on" data-sec="connections">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 2v6M15 2v6M7 8h10v5a5 5 0 0 1-10 0z"/><path d="M12 18v4"/>
+        </svg>
+        Connections
+        <span class="warn" id="railWarnConn" hidden></span>
+      </button>
+      <!-- data-sec must be all lowercase: the switcher compares
+           sec.id.toLowerCase() === "sec" + key, so "seclocation" matches
+           "location" and would never match "Location". -->
+      <button class="rail-item" data-sec="location">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/>
+        </svg>
+        My location
+      </button>
+      <button class="rail-item" data-sec="teams">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-4-.9L3 21l1.9-4.6A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z"/>
+        </svg>
+        Teams
+        <span class="warn" id="railWarnTeams" hidden></span>
+      </button>
+      <button class="rail-item" data-sec="checks">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 6 9 17l-5-5"/>
+        </svg>
+        Checks
+      </button>
+      <button class="rail-item" data-sec="maintenance">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/>
+        </svg>
+        Maintenance
+      </button>
+      <div class="rail-foot">
+        Credentials are stored in <b>.connections.json</b>, which is gitignored
+        and never leaves this machine.
+      </div>
+    </nav>
+
+    <div class="admin-pane">
+
+    <section class="sec on" id="secConnections">
+      <h4 class="sec-h">Sources</h4>
+      <p class="sec-p">Garage and Intrepid are both required. A scan with one of
+        them missing would answer the question wrongly rather than refuse, so it
+        refuses. The Service App is optional: without it a service visit shows
+        as a number instead of what it is for.</p>
+
+      <div class="conn" id="aGarageRow"><i class="dot"></i><b>Garage</b><span id="aGarage">—</span></div>
+      <div class="conn" id="aIntrepidRow"><i class="dot"></i><b>Intrepid</b><span id="aIntrepid">—</span></div>
+      <div class="conn" id="aScaRow"><i class="dot"></i><b>Service App</b><span id="aSca">—</span></div>
+      <div class="connect-row">
+        <button class="mini" id="scaConnect">Connect</button>
+        <button class="mini" id="scaForget" hidden>Forget</button>
       </div>
 
-      <div class="panel">
-        <h4>Checks</h4>
-        <p>Tesladex is tested separately from Garage: a live session is not the
-           same permission as reading the vehicle index.</p>
-        <div class="row"><div class="k">Intrepid</div><div class="v" id="tIntrepid">—</div></div>
-        <div class="row"><div class="k">Garage</div><div class="v" id="tGarage">—</div></div>
-        <div class="row"><div class="k">Tesladex</div><div class="v" id="tTesladex">—</div></div>
-        <button class="mini" id="runTests" style="margin-top:12px">Run checks</button>
+      <div class="hub-note">
+        Sign-ins live on the <b>Zo Projects Hub</b>. One session there covers every
+        board, including this one.
+        <a href="http://localhost:3100" target="_blank" rel="noopener">Open the Hub</a>
+        <!-- The exception, said here rather than left as an inconsistency
+             somebody has to work out for themselves. -->
+        <div style="margin-top:8px">The <b>Service App</b> connects here instead:
+           it is a nine-hour token rather than a session cookie, and this is
+           the only board that speaks to it.</div>
+      </div>
+    </section>
+
+    <!-- ── my location ──
+         Switching a car's contact to Tesla sends the bill to the centre, so
+         the centre's own address goes with it. There is more than one centre
+         and neither Garage nor Intrepid carries this in a form SCA accepts,
+         so it is typed once here rather than derived per car. -->
+    <section class="sec" id="secLocation">
+      <h4 class="sec-h">My location</h4>
+      <p class="sec-p">The billing address used when a car's contact is switched
+        to Tesla. Yours, not Cypress's — a board pointed at another centre needs
+        its own.</p>
+
+      <div class="field"><label>Street</label>
+        <input type="text" id="baLine1" autocomplete="off"></div>
+      <div class="field"><label>Line 2</label>
+        <input type="text" id="baLine2" autocomplete="off"></div>
+      <div class="row2">
+        <div class="field"><label>City</label>
+          <input type="text" id="baCity" autocomplete="off"></div>
+        <div class="field"><label>State</label>
+          <input type="text" id="baState" maxlength="3" autocomplete="off"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>ZIP</label>
+          <input type="text" id="baZip" maxlength="12" autocomplete="off"></div>
+        <div class="field"><label>Country</label>
+          <input type="text" id="baCountry" maxlength="2" autocomplete="off"></div>
       </div>
 
-      <div class="panel">
-        <h4>Maintenance</h4>
-        <p>The site directory is ~1,850 records cached for a week. Reset forgets
-           the centre and both session cookies — everything this board stores.</p>
-        <div class="row">
-          <div class="k">Site directory</div><div class="v" id="mTrt">cached</div>
-          <div class="a"><button class="mini" id="refreshTrt">Refresh</button></div>
-        </div>
-        <div class="row">
-          <div class="k">Board</div><div class="v">Forget centre and both cookies</div>
-          <div class="a"><button class="mini danger" id="resetBoard">Reset</button></div>
-        </div>
+      <div class="conn" id="baRow"><i class="dot"></i><b>Saved</b><span id="baState2">—</span></div>
+      <button class="btn-block" id="baSave">Save address</button>
+    </section>
+
+    <!-- ── Teams ──
+         A card that lives in a chat with an Update button on it. The button is
+         a link back to this board rather than a Submit, because Teams runs in
+         Microsoft's cloud and this board listens on 127.0.0.1 — see the
+         write-up in lib.js. -->
+    <section class="sec" id="secTeams">
+      <h4 class="sec-h">Teams</h4>
+      <p class="sec-p">Posts a <b>VRI List</b> card to a Teams chat: the cars
+        awaiting receiving inspection that arrived in the last 24 hours. The
+        card carries an <b>Update</b> button that reposts the current list.</p>
+
+      <div class="field">
+        <label>Incoming webhook</label>
+        <input type="text" id="twUrl" autocomplete="off"
+               placeholder="https://…logic.azure.com/… or …webhook.office.com/…">
+        <div class="hint">In Teams: the chat's <b>⋯</b> menu › <b>Workflows</b> ›
+          <i>Post to a channel when a webhook request is received</i>. Copy the
+          URL it gives you. Saving a new one mints a new button token, so any
+          card already in the chat stops working — post a fresh one.</div>
       </div>
+      <div class="conn" id="twRow"><i class="dot"></i><b>Webhook</b><span id="twState">—</span></div>
+      <button class="btn-block" id="twSave">Save webhook</button>
+
+      <!-- ── push ──
+           The board leaves the finished card in a SharePoint row and the
+           button's flow reads it. Nothing reaches inward and nothing in the
+           chain is premium, which is why this is the path that works. -->
+      <div class="sec-title">Push to a row</div>
+      <p class="sec-p">Keeps a SharePoint row loaded with the finished card, so
+        the Update button's flow can answer from it without this board being
+        involved. Pushed on the interval below, every time — a row is something
+        to keep right, not a message.</p>
+      <div class="field">
+        <label>Push URL</label>
+        <input type="text" id="twPush" autocomplete="off"
+               placeholder="https://…powerplatform.com/… (the flow that writes the row)">
+        <div class="hint">Receives
+          <code>{card, count, site, stamp, vins}</code> — <code>card</code> is
+          the whole Adaptive Card already rendered, as text, for a single
+          multi-line column. It always carries a Submit button, because the
+          flow reading the row waits for one.</div>
+      </div>
+
+      <div class="field">
+        <label>Push every (minutes, 0 = off)</label>
+        <input type="text" id="twEvery" inputmode="numeric" autocomplete="off">
+        <div class="hint">With no push URL this reposts to the chat instead,
+          and then only when the cars have changed.</div>
+      </div>
+
+      <!-- ── operating hours ──
+           Same vocabulary as ZO-002's alert window: days indexed by getDay,
+           HH:MM strings, overnight windows refused. -->
+      <div class="sec-title">Operating hours</div>
+      <p class="sec-p">Outside them the board stops scanning, and the row is
+        overwritten once with a card saying the list is not being kept up and
+        when it will be again. Pressing Update out of hours answers with that,
+        rather than with last night's list looking current.</p>
+      <div class="row2">
+        <button class="mini" id="twHoursOn">Only during hours</button>
+        <button class="mini" id="twHoursOff">Around the clock</button>
+      </div>
+      <div class="field" style="margin-top:12px">
+        <label>Days</label>
+        <div class="row2" id="twDays" style="grid-template-columns:repeat(7,1fr);gap:6px"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Opens</label>
+          <input type="time" id="twOpen" autocomplete="off"></div>
+        <div class="field"><label>Closes</label>
+          <input type="time" id="twClose" autocomplete="off"></div>
+      </div>
+      <div class="conn" id="thRow"><i class="dot"></i><b>Hours</b><span id="thState">—</span></div>
+
+      <!-- One save for both, because they are one setting in two boxes: a URL
+           with no interval pushes nothing, and an interval with no URL has
+           nowhere to push. -->
+      <button class="btn-block" id="twSettings">Save push URL and interval</button>
+      <div class="conn" id="tuRow"><i class="dot"></i><b>Push</b><span id="tuState">—</span></div>
+      <div class="conn" id="tnRow"><i class="dot"></i><b>Next push</b><span id="tnState">—</span></div>
+      <button class="btn-block" id="twPushNow">Push the row now</button>
+
+      <div class="sec-title">The card</div>
+      <p class="sec-p">Post it once and leave it in the chat.</p>
+      <button class="btn-block" id="twCard">Post the VRI card</button>
+      <button class="btn-block" id="twNow">Post the list now</button>
+      <div class="why" id="twMsg" style="margin-top:4px"></div>
+    </section>
+
+    <section class="sec" id="secChecks">
+      <h4 class="sec-h">Checks</h4>
+      <p class="sec-p">Tesladex is tested separately from Garage: a live session
+        is not the same permission as reading the vehicle index.</p>
+
+      <div class="conn" id="tIntrepidRow"><i class="dot"></i><b>Intrepid</b><span id="tIntrepid">—</span></div>
+      <div class="conn" id="tGarageRow"><i class="dot"></i><b>Garage</b><span id="tGarage">—</span></div>
+      <div class="conn" id="tTesladexRow"><i class="dot"></i><b>Tesladex</b><span id="tTesladex">—</span></div>
+      <button class="btn-block" id="runTests">Run checks</button>
+    </section>
+
+    <section class="sec" id="secMaintenance">
+      <h4 class="sec-h">Maintenance</h4>
+      <p class="sec-p">The site directory is ~1,850 records cached for a week.
+        Reset forgets the centre, both session cookies and the Service App
+        token — everything this board stores.</p>
+
+      <div class="conn" id="mTrtRow"><i class="dot"></i><b>Site directory</b><span id="mTrt">cached</span></div>
+      <button class="btn-block" id="refreshTrt">Refresh the site directory</button>
+
+      <div class="sep"></div>
+      <button class="btn-block red" id="resetBoard">Forget centre, cookies and SCA</button>
+    </section>
+
     </div>
   </div>
 </div>
@@ -753,7 +1234,12 @@ const S = {
      someone reopens the menu and changes it without pressing Run, and the
      export must be named after the second one. */
   cogDwell:0, cogWindow:0,
-  exportPreset:"all"
+  exportPreset:"all",
+  /* The Service App. `conns` is the last full connections payload, so the
+     sign-in poll can repaint one source without refetching the other two;
+     `scaPhase` is the sign-in state machine's phase as of the last poll. */
+  conns:null, sca:null, scaPhase:"idle", scaDetail:null, scaDismissed:false,
+  rowsHaveSca:false, scanTrtId:null
 };
 
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
@@ -779,15 +1265,44 @@ async function api(path, body){
   return data;
 }
 
-/* ── overlays ── */
-let openModalEl = null;
-function showModal(el){
-  if(openModalEl) openModalEl.classList.remove("on");
-  openModalEl = el; el.classList.add("on"); $("scrim").classList.add("on");
+/* ── overlays ──
+
+   A stack rather than a single open modal. The photo viewer is opened from two
+   places that are themselves modals — a row in the Service Visits list and the
+   ticket card — and closing it has to put the one underneath back rather than
+   leave an empty screen. Callers that pass no `over` still replace whatever is
+   up, so a stack of one behaves exactly as this did before. */
+const modalStack = [];
+
+/* Emptied on close rather than left hidden, for two different reasons:
+   - the photo viewer, because a phone photo decodes to roughly 48 MB of bitmap
+     regardless of the 1.6 MB that came down the wire, so three of them left in
+     a hidden div is ~145 MB held for nothing;
+   - the ticket card, because it holds a chosen destination and a half-dragged
+     slider, and reopening a row should not resume somebody else's abandoned
+     decision.
+   Every other modal here is text and can stay as it is. */
+function emptyModal(el){
+  if(el.id === "shots") $("shotsBody").innerHTML = "";
+  if(el.id === "ticketModal") $("ticketBody").innerHTML = "";
 }
+
+function showModal(el, over){
+  const top = modalStack[modalStack.length - 1];
+  if(top === el) return;
+  if(top) top.classList.remove("on");
+  if(!over) while(modalStack.length) emptyModal(modalStack.pop());
+  modalStack.push(el);
+  el.classList.add("on");
+  $("scrim").classList.add("on");
+}
+
 function hideModal(){
-  if(openModalEl) openModalEl.classList.remove("on");
-  openModalEl = null; $("scrim").classList.remove("on");
+  const top = modalStack.pop();
+  if(top){ top.classList.remove("on"); emptyModal(top); }
+  const back = modalStack[modalStack.length - 1];
+  if(back){ back.classList.add("on"); return; }
+  $("scrim").classList.remove("on");
 }
 $("scrim").addEventListener("click", hideModal);
 document.addEventListener("click", e => {
@@ -1159,6 +1674,7 @@ function progWatch(){
       if(!d.running) return;
       const label = { starting:"Starting", enumerate:"Reading the index",
                       title:"Title status", containment:"Containment", holds:"Service visits",
+                      tickets:"Reading the tickets", vri:"Receiving inspections",
                       statuses:"Reading the ladder", inventory:"Cars on ground",
                       cog:"COG status",
                       identify:"Finding these cars in Garage", wake:"Waking them up",
@@ -1427,20 +1943,891 @@ function vinLink(r){
     title="${esc(r.vin)} — open this car's vitals in Garage">${esc(r.vin)}</a>`;
 }
 
-// The Service App keys this page on the visit id alone. That is the whole
-// reason the link is possible: `svId` is already on the row. The page a human
-// lands on from search — /product-details/<accountId>/<vin>/service-visit/<id>
-// — needs an account id that is in neither Garage nor Intrepid, so it is out.
-const SCA_VISIT_URL =
-  "https://serviceapp.tesla.com/service/service-visit-actions/active-service-visit-actions/";
+/* Two ways into the Service App, and which one you get depends on whether SCA
+   answered for this car.
 
-function svLink(v){
+   The short form keys on the visit id alone. It was the only form available
+   while the account id in the canonical route — /product-details/<accountId>/
+   <vin>/service-visit/<id> — could not be found: it is in neither Garage nor
+   Intrepid, and Garage's 16-digit device id is a different namespace entirely.
+
+   It turns out to be `userId` on SCA's own visit header, so a row whose ticket
+   loaded gets the page a human would have landed on from search, and the rest
+   keep the short form. */
+const SCA_HOST       = "https://serviceapp.tesla.com";
+const SCA_VISIT_URL  = SCA_HOST + "/service/service-visit-actions/active-service-visit-actions/";
+const scaVisitHref = (v, vin) => (v.ticket && v.ticket.userId)
+  ? `${SCA_HOST}/service/service-home/product-details/${encodeURIComponent(v.ticket.userId)}` +
+    `/${encodeURIComponent(vin)}/service-visit/${encodeURIComponent(v.svId)}`
+  : SCA_VISIT_URL + encodeURIComponent(v.svId);
+
+function svLink(v, vin){
   const label = esc(v.id);
   if(!v.svId) return `<b>${label}</b>`;
   return `<b><a class="svl" target="_blank" rel="noreferrer"
-    href="${SCA_VISIT_URL}${encodeURIComponent(v.svId)}"
+    href="${esc(scaVisitHref(v, vin))}"
     title="${label} — open this visit in the Service App">${label}</a></b>`;
 }
+
+/* ── the ticket, inline ──
+   The point of the whole SCA integration: what the visit is actually FOR,
+   without opening a tab per car.
+
+   No new markup vocabulary — `.hold-line` and `.hold-note` are what campaigns
+   and logistics already use for exactly this shape, a bold thing with a
+   quieter line under it. A ticket that reads differently from a containment
+   hold would be a second pattern for no gain.
+
+   `ticket === null` on a visit means SCA was off, or did not answer for this
+   car. That is deliberately silent on the row: the reason is a property of the
+   scan, not of the vehicle, and it is already said once in the notices. An
+   empty `activities` array is a different fact — a visit genuinely carrying no
+   concern yet — and that one is worth saying on the row. */
+function ticketLines(v){
+  if(!v.ticket) return "";
+  const t = v.ticket;
+  const acts = t.activities || [];
+
+  // Where the car is checked in. Usually the centre being scanned, so it is a
+  // quiet line rather than a headline — but a car sitting at Collision or at
+  // another centre is exactly the thing worth spotting, and that is the case
+  // this earns its place for.
+  const where = t.location
+    ? `<div class="hold-note">${esc(t.location)}</div>` : "";
+
+  if(!acts.length){
+    return where + `<div class="hold-note">No concern logged on this visit yet</div>`;
+  }
+
+  return where + acts.map((a, i) => {
+    const head = a.symptom || a.narrative || "Concern";
+    // Only the facts that differ between tickets. Repeating "Cosmetic" when
+    // the category already says "Logistics Damage" is noise, so the bits are
+    // filtered and de-duplicated rather than laid out in fixed columns.
+    const bits = [];
+    if(a.hyper && a.hyper !== head) bits.push(a.hyper);
+    if(a.category && a.category !== a.hyper) bits.push(a.category);
+    if(a.frtHours != null) bits.push(a.frtHours + "h");
+
+    /* The photos are a link rather than a count, because a count is a fact
+       you cannot act on. The ids ride on the button and the bytes are fetched
+       only when it is pressed — one of these images was 3.4 MB, so a list
+       that loaded them would be unusable. */
+    const shots = a.photos || [];
+    const see = shots.length
+      ? `<button class="lnk see-shots" data-shots="${esc(JSON.stringify(shots))}"
+           data-title="${esc(head)}">See ${shots.length === 1 ? "image" : "images"} (${shots.length})</button>`
+      : "";
+
+    return `<div class="hold-note"><b>${esc(head)}</b>${
+      bits.length ? " · " + esc(bits.join(" · ")) : ""}${see ? " · " + see : ""}</div>`;
+  }).join("");
+}
+
+/* ── the photo viewer ──
+
+   The images come through the board on /api/sca/photo/<id> rather than
+   straight from SCA, so the bearer token stays server-side and the browser
+   caches them itself. Nothing is fetched until this opens.
+
+   One <img> per attachment, dropped in immediately: the browser loads them in
+   parallel and paints each as it arrives, which beats awaiting all of them and
+   showing nothing for several seconds. A failed one says so in place rather
+   than leaving a gap that reads as a missing photo. */
+function showShots(shots, title, over){
+  // Concern first, count second: which ticket these belong to is the thing
+  // worth reading, and at this width the head has room for one line.
+  $("shotsTitle").textContent = (title || "Concern") +
+    " · " + (shots.length === 1 ? "1 image" : shots.length + " images");
+
+  $("shotsBody").innerHTML = shots.map((s, i) => `
+    <figure class="shot">
+      <img src="/api/sca/photo/${encodeURIComponent(s.id)}" alt="${esc(s.name || "image")}">
+      <figcaption>${esc(s.name || "image")}<span class="n">${i + 1} of ${shots.length}</span></figcaption>
+    </figure>`).join("");
+
+  for(const img of $("shotsBody").querySelectorAll("img")){
+    img.addEventListener("error", () => {
+      const fig = img.closest(".shot");
+      if(fig) fig.innerHTML = `<figcaption>Could not load this image —
+        the Service App session may have expired.</figcaption>`;
+    });
+  }
+  showModal($("shots"), over);
+}
+
+/* Delegated, because the rows are rewritten wholesale on every render and a
+   listener per button would be rebound on each one. */
+document.addEventListener("click", e => {
+  const btn = e.target.closest(".see-shots");
+  if(!btn) return;
+  let shots = [];
+  try { shots = JSON.parse(btn.dataset.shots || "[]"); } catch { /* leave empty */ }
+  // Over the Service Visits list, not instead of it: closing the photos should
+  // put you back on the row you were reading.
+  if(shots.length) showShots(shots, btn.dataset.title, true);
+});
+
+/* ── the edit panel ──
+
+   Click a row to open it. Built on click rather than rendered into all 400
+   rows and hidden: the pickers need wiring, and 400 of those would be paid
+   for on every render to serve the one row anybody opens.
+
+   Only the service centre is editable, and only where SCA will accept it.
+   The three reasons it might not be are each said in full, because a control
+   that is simply absent is indistinguishable from one that is broken:
+
+     - SCA not connected            the board cannot see the visit at all
+     - an appointment is attached   SCA refuses; the appointment has to be
+                                    cancelled in SCA first, and cancelling the
+                                    APPOINTMENT is not cancelling the TICKET
+     - nothing to edit              a visit with no ticket loaded
+
+   Closed visits never reach here: sca.js drops them on the way in. */
+
+function editPanelHtml(r){
+  if(!S.conns || !S.conns.sca || !S.conns.sca.set){
+    return `<div class="veh-edit"><div class="why">Connect the <b>Service App</b>
+      to move this car between centres.</div></div>`;
+  }
+  const withTicket = r.visits.filter(v => v.ticket);
+  if(!withTicket.length){
+    return `<div class="veh-edit"><div class="why">No Service App ticket loaded for
+      this car, so there is nothing to move. Re-run the scan with SCA connected.</div></div>`;
+  }
+
+  return `<div class="veh-edit">${withTicket.map(v => {
+    const t = v.ticket;
+    const head = `<div class="ed-h"><b>${esc(v.id)}</b>
+        <span>${esc(t.location || "no centre on record")}</span></div>`;
+
+    /* An appointment in the way. On an UNDELIVERED car it can be cancelled as
+       part of the move; on a delivered one it cannot, because that booking
+       belongs to a customer rather than to Tesla.
+
+       The delivered state shown here comes from the scan and decides only what
+       the panel OFFERS. The server checks it again against Garage before
+       writing anything, so a stale tab cannot talk it into cancelling a real
+       customer's appointment. */
+    /* ── the one step the board will not take ──
+
+       A booked visit cannot be moved until the appointment is cancelled, and
+       the board does not cancel appointments. Not for want of the endpoint —
+       it is
+         POST tss.tesla.com/react/api/proxy/api/Service/CancelAppointment
+       on a different app with different auth, captured off SCA's own UI — but
+       that call alone does not clear the booking. SCA's UI follows it with a
+       PUT of the WHOLE visit object, whose body it builds from its own form
+       state rather than from the record: it sends carWash true where the
+       record says false, transportationMethodID 1 where the record says 4,
+       and six fields that are not on the record at all. There is no honest
+       source for that body, and a whole-object PUT writes whatever is wrong
+       in it.
+
+       So the panel sends you to SCA for that one click, links straight to the
+       visit, and re-checks when you come back. Two clicks, against the
+       alternative of this board quietly rewriting fields it does not
+       understand. */
+    const booked = t.appointmentId != null;
+
+    /* ── the images, in the card ──
+
+       The row links to the viewer; this puts the same photos where the ticket
+       is being read, so a concern and the damage it describes are one glance
+       rather than two overlays. Shown on open, at Ed's call — a strip you have
+       to ask for is a strip nobody sees.
+
+       It costs something, and the cost is worth knowing before anyone
+       "optimises" it: there is no thumbnail endpoint on SCA —
+       `downloadthumbnailfilebyid` 404s wherever `thumbnailPath` is null, which
+       was every attachment sampled — so each of these is the FULL image scaled
+       down by the browser, and one was 3.4 MB. `loading="lazy"` keeps the ones
+       below the fold off the wire until they are scrolled to; beyond that,
+       opening a card with photos on it downloads them.
+
+       A ticket with none says so. A silently absent section is
+       indistinguishable from a section that failed to load. */
+    const shotActs = (t.activities || []).filter(a => (a.photos || []).length);
+    const allShots = shotActs.flatMap(a => a.photos);
+    const images = `
+      <div class="shots-in" style="margin-top:14px;padding-top:12px;
+           border-top:1px solid var(--line-soft)">
+        <div class="ed-h"><b>Images</b><span>${allShots.length
+          ? `${allShots.length} on ${shotActs.length === 1 ? "one concern"
+                                     : shotActs.length + " concerns"}` : ""}</span></div>
+        ${allShots.length ? `<div class="thumbs"
+             data-shots="${esc(JSON.stringify(allShots))}"
+             data-title="${esc(v.id)}">${allShots.map(s => `
+          <button class="thumb" title="${esc(s.name || "image")}">
+            <img src="/api/sca/photo/${encodeURIComponent(s.id)}"
+                 alt="${esc(s.name || "image")}" loading="lazy">
+          </button>`).join("")}</div>`
+        : `<div class="why">No images available on this ticket.</div>`}
+      </div>`;
+
+    /* Ids are per visit so several open rows cannot collide. */
+    const k = "mv" + v.svId;
+    return `<div class="ed" data-sv="${v.svId}" data-vin="${esc(r.vin)}"
+                 data-booked="${booked ? 1 : 0}">
+      <div class="ed-h"><b>Move Ticket</b><span>${esc(v.id)}</span></div>
+      ${booked ? `<div class="gate">
+          Booked${t.booked ? ` for <b class="when">${esc(fmtDate(t.booked))}</b>` : ""}. Moving it will
+          <b>cancel the TSS booking</b> first — that releases the appointment
+          slot, and the <b>ticket is not touched</b>.
+          <div><button class="mini danger mv-cancel">Cancel TSS Booking</button></div>
+        </div>` : ""}
+      <div class="arrow">
+        <span class="from">${esc(t.location || "no centre on record")}</span>
+        <span class="ar">&rarr;</span>
+        <span class="to">choose a centre</span>
+      </div>
+      <div class="mv-pick">
+        <div class="grow" style="position:relative">
+          <input id="${k}" class="mv-q" autocomplete="off" placeholder="Start typing a centre">
+          <div class="sitelist mv-list" hidden></div>
+        </div>
+        <div class="slide" hidden>
+          <div class="fill"></div>
+          <div class="lbl">Slide to move</div>
+          <div class="grip">&rarr;</div>
+          <input type="range" min="0" max="100" value="0" step="1" aria-label="Slide to confirm the move">
+        </div>
+      </div>
+      <div class="why mv-msg" style="margin-top:7px"></div>
+      ${images}
+
+      <!-- ── contact ──
+           Loaded when the row opens rather than carried on every scan row:
+           it is two calls per visit and only the opened one is being looked
+           at. Names only — the board has no reason to put a customer's email
+           or phone on screen. -->
+      <!-- ── contact ──
+           Three things SCA keeps separately and all three are editable: the
+           main contact (contactType 1), the billing contact (2), and the
+           billing address (2, its own call). Each shows what is there, and
+           each has a manual form hidden until asked for so the common case —
+           one press of Switch to Tesla — stays one press. -->
+      <div class="contact" style="margin-top:14px;padding-top:12px;
+           border-top:1px solid var(--line-soft)">
+        <div class="ed-h"><b>Contact</b><span class="ct-state">reading…</span></div>
+
+        <div class="ct-block" data-kind="main">
+          <div class="ct-label">Main contact</div>
+          <div class="ct-now">reading…</div>
+          <div class="row2">
+            <button class="mini ct-go" disabled>Switch contact &rarr; Tesla</button>
+            <button class="mini ct-manual">Enter manually</button>
+          </div>
+          <div class="ct-form" hidden>
+            <div class="ct-grid">
+              <label>First name<input class="f-first" autocomplete="off"></label>
+              <label>Last name<input class="f-last" autocomplete="off"></label>
+              <label>Email<input class="f-email" autocomplete="off" inputmode="email"></label>
+              <label>Phone<input class="f-phone" autocomplete="off" inputmode="tel"></label>
+            </div>
+            <div class="row2" style="margin-top:9px">
+              <button class="mini ct-save">Save main contact</button>
+              <button class="mini ct-cancel">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="ct-block" data-kind="billing">
+          <div class="ct-label">Billing contact</div>
+          <div class="ct-now">reading…</div>
+          <div class="row2">
+            <button class="mini ct-manual">Enter manually</button>
+          </div>
+          <div class="ct-form" hidden>
+            <div class="ct-grid">
+              <label>First name<input class="f-first" autocomplete="off"></label>
+              <label>Last name<input class="f-last" autocomplete="off"></label>
+              <label>Email<input class="f-email" autocomplete="off" inputmode="email"></label>
+              <label>Phone<input class="f-phone" autocomplete="off" inputmode="tel"></label>
+            </div>
+            <div class="row2" style="margin-top:9px">
+              <button class="mini ct-save">Save billing contact</button>
+              <button class="mini ct-cancel">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="ct-block" data-kind="address">
+          <div class="ct-label">Billing address</div>
+          <div class="ct-now">reading…</div>
+          <div class="row2">
+            <!-- Fills the form from Admin › My location rather than saving
+                 straight off: the address still gets looked at before it goes. -->
+            <button class="mini ad-mine">Use my location</button>
+            <button class="mini ct-manual">Enter manually</button>
+          </div>
+          <div class="ct-form" hidden>
+            <div class="ct-grid">
+              <label style="grid-column:1/-1">Street<input class="f-line1" autocomplete="off"></label>
+              <label style="grid-column:1/-1">Line 2<input class="f-line2" autocomplete="off"></label>
+              <label>City<input class="f-city" autocomplete="off"></label>
+              <label>State<input class="f-state" maxlength="3" autocomplete="off"></label>
+              <label>ZIP<input class="f-zip" maxlength="12" autocomplete="off"></label>
+              <label>Country<input class="f-country" maxlength="2" autocomplete="off"></label>
+            </div>
+            <div class="row2" style="margin-top:9px">
+              <button class="mini ct-save">Save billing address</button>
+              <button class="mini ct-cancel">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="why ct-msg" style="margin-top:7px"></div>
+      </div>
+    </div>`;
+  }).join("")}</div>`;
+}
+
+/* One wiring pass per opened panel. Mirrors wireSiteSearch() above — same
+   180ms debounce, same two-character floor, same .site rows — but pointed at
+   SCA's directory rather than Intrepid's, and it has to keep BOTH ids: the
+   move needs scaLocationId and trtId together and neither implies the other. */
+/* ── painting a slider ──
+
+   One painter for both sliders — the Move one built into the panel and the
+   ones confirmBySlide() produces — so the two cannot drift apart.
+
+   The knob is placed by hand rather than left to the browser: a range input
+   draws its thumb centred on the value, which puts half of it outside the
+   track at each end. `v/100 * (track - GRIP_W)` keeps it flush instead.
+
+   The words go beside the knob, on whichever side has more room. They used to
+   be centred across the whole track with the knob sliding over the top, and
+   since the label painted last, the text drew ON the knob — at rest the first
+   letter sat inside a near-black block, and mid-drag the knob's arrow showed
+   through the middle of the word. */
+const GRIP_W = 46, LBL_PAD = 12;
+function paintSlide(slide, v, words){
+  const fill  = slide.querySelector(".fill");
+  const grip  = slide.querySelector(".grip");
+  const lbl   = slide.querySelector(".lbl");
+  // clientWidth, not the 280px in the stylesheet: the track is max-width:100%
+  // and a narrow modal can squeeze it.
+  const track = slide.clientWidth || 280;
+  const left  = v / 100 * (track - GRIP_W);
+  const armed = v > 92;
+
+  fill.style.width = v + "%";
+  grip.style.left  = left + "px";
+  slide.classList.toggle("armed", armed);
+  lbl.textContent = armed ? words.end : (v > 5 ? "Keep going…" : words.rest);
+
+  const ahead = (track - left - GRIP_W) >= left;
+  lbl.style.left  = ahead ? (left + GRIP_W + LBL_PAD) + "px" : "0px";
+  lbl.style.right = ahead ? "0px" : (track - left + LBL_PAD) + "px";
+}
+
+/* ── slide to confirm, on demand ──
+
+   The Move Ticket slider earned its place: a drag from end to end cannot be
+   done by a stray click or a repeated Enter. Everything else in the editor was
+   using window.confirm, which is the browser's dialog rather than the board's
+   and reads as an interruption.
+
+   This is the same control, produced where it is needed. It replaces the
+   button that armed it and puts it back if you change your mind, so there is
+   never a stray slider sitting on screen with nothing behind it.
+
+   Resolves true once the drag completes, false if cancelled.
+
+   `opts.tone` is "danger" for a slider that takes something away, and
+   `opts.end` overrides the word shown at the far end. Labels are kept short:
+   the message above the slider has already said what is about to happen, and
+   a sentence in the track leaves the knob nowhere to sit. */
+function confirmBySlide(button, label, opts = {}){
+  return new Promise(resolve => {
+    const words = { rest: label, end: opts.end || "Release to confirm" };
+    const wrap = document.createElement("div");
+    wrap.className = "arm";
+    // Knob last, so it passes OVER the words rather than under them during the
+    // moment the label is gliding from one side of it to the other.
+    wrap.innerHTML = `
+      <div class="slide${opts.tone === "danger" ? " danger" : ""}">
+        <div class="fill"></div>
+        <div class="lbl">${esc(label)}</div>
+        <div class="grip">&rarr;</div>
+        <input type="range" min="0" max="100" value="0" step="1" aria-label="${esc(label)}">
+      </div>
+      <button class="mini arm-no">Cancel</button>`;
+    /* The row the button sits in usually holds others — a form's own Cancel
+       among them, which would stand next to the slider's Cancel meaning
+       something different. They go for as long as the slider is up, and only
+       the ones that were visible come back. */
+    const stowed = [...button.parentElement.children].filter(n => n !== button && !n.hidden);
+    for(const n of stowed) n.hidden = true;
+    button.hidden = true;
+    button.after(wrap);
+
+    const slide = wrap.querySelector(".slide");
+    const range = wrap.querySelector("input");
+
+    /* Always tidied here, whichever way it ends: the slider is removed and
+       the button comes back, so the caller only has to show its own progress
+       and can never leave a stray slider on screen. */
+    const finish = ok => {
+      wrap.remove();
+      button.hidden = false;
+      for(const n of stowed) n.hidden = false;
+      resolve(ok);
+    };
+
+    const paint = v => paintSlide(slide, v, words);
+
+    range.addEventListener("input", () => paint(Number(range.value)));
+    // `change` fires on release, which is exactly when "did they mean it" is
+    // answered. Short of the end it springs back rather than counting.
+    range.addEventListener("change", () => {
+      if(Number(range.value) < 100){ range.value = 0; paint(0); return; }
+      finish(true);
+    });
+    range.addEventListener("keyup", e => {
+      if(e.key === "End" && Number(range.value) === 100) finish(true);
+    });
+    wrap.querySelector(".arm-no").addEventListener("click", () => finish(false));
+    paint(0);
+  });
+}
+
+function wireEditPanel(panel){
+  for(const ed of panel.querySelectorAll(".ed[data-sv]")){
+    const input = ed.querySelector(".mv-q");
+    const list  = ed.querySelector(".mv-list");
+    const msg   = ed.querySelector(".mv-msg");
+    const slide = ed.querySelector(".slide");
+    const range = slide.querySelector("input[type=range]");
+    const lbl   = slide.querySelector(".lbl");
+    let timer = null, picked = null;
+
+    /* ── the slider ──
+       Springs back unless it is taken the whole way. `input` paints, `change`
+       decides — change fires on release, which is exactly when the question
+       "did they mean it" gets answered. */
+    const MOVE_WORDS = { rest: "Slide to move", end: "Release to move" };
+    const paint = v => paintSlide(slide, v, MOVE_WORDS);
+    const reset = () => { range.value = 0; paint(0); };
+
+    range.addEventListener("input", () => paint(Number(range.value)));
+    range.addEventListener("change", () => {
+      if(Number(range.value) < 100){ reset(); return; }
+      doMove();
+    });
+
+    /* Keyboard: End takes it all the way, which is a deliberate keystroke and
+       the accessible equivalent of dragging to the end. */
+    range.addEventListener("keyup", e => {
+      if(e.key === "End" && Number(range.value) === 100) doMove();
+    });
+
+    /* ── the images ──
+       Rendered with the card, so there is nothing to open — only the viewer to
+       reach. A thumbnail opens it OVER this card, so closing the photo comes
+       back to the ticket rather than to the list. */
+    const thumbs = ed.querySelector(".thumbs");
+    if(thumbs){
+      let shots = [];
+      try { shots = JSON.parse(thumbs.dataset.shots || "[]"); } catch { /* leave empty */ }
+      for(const b of thumbs.querySelectorAll(".thumb")){
+        // One that could not load says so in place. A blank box reads as
+        // "there is nothing there", which is the opposite of what happened.
+        b.querySelector("img").addEventListener("error", () => {
+          b.classList.add("bad");
+          b.textContent = "Could not load";
+        });
+        b.addEventListener("click", () => {
+          if(b.classList.contains("bad")) return;
+          showShots(shots, thumbs.dataset.title, true);
+        });
+      }
+    }
+
+    /* ── contact ──
+       Reads who is on the visit when the row opens, then offers the swap only
+       where it would do something. The button is disabled until the read comes
+       back, so it can never fire against an unknown state. */
+    const ctState = ed.querySelector(".ct-state");
+    const ctGo    = ed.querySelector(".ct-go");
+    const ctMsg   = ed.querySelector(".ct-msg");
+
+    const blocks = {};
+    for(const el of ed.querySelectorAll(".ct-block")) blocks[el.dataset.kind] = el;
+
+    const val = (el, cls) => el.querySelector(cls).value.trim();
+    const set = (el, cls, v) => { el.querySelector(cls).value = v || ""; };
+
+    const contactLine = c => {
+      if(!c.has) return "— none on record";
+      const name = `${c.firstName} ${c.lastName}`.trim() || "(no name)";
+      const rest = [c.email, c.phone].filter(Boolean).join("  ·  ");
+      return `<b>${esc(name)}</b>${c.tesla ? " (Tesla)" : ""}${rest ? `  ·  ${esc(rest)}` : ""}`;
+    };
+    const addressLine = a => a.has
+      ? `<b>${esc([a.addressLine1, a.addressLine2].filter(Boolean).join(", "))}</b>` +
+        `  ·  ${esc([a.city, a.stateCode, a.zip].filter(Boolean).join(" "))}`
+      : "— none on record";
+
+    /* Repaint every block from one read. Forms are prefilled with what is
+       there, so an edit is an edit rather than retyping a person to change
+       their phone number. */
+    const paintContacts = d => {
+      ctState.textContent = d.main.tesla ? "main is Tesla" : "main is the customer";
+
+      blocks.main.querySelector(".ct-now").innerHTML = contactLine(d.main);
+      set(blocks.main, ".f-first", d.main.firstName);
+      set(blocks.main, ".f-last",  d.main.lastName);
+      set(blocks.main, ".f-email", d.main.email);
+      set(blocks.main, ".f-phone", d.main.phone);
+      /* Both, because the switch writes both. A car with Tesla on the main
+         contact and the customer still on billing is exactly the one that
+         needs pressing, and testing the main contact alone locked it out. */
+      const bothTesla = d.main.tesla && d.billing.tesla;
+      ctGo.disabled = bothTesla;
+      ctGo.textContent = bothTesla ? "Both contacts are Tesla" : "Switch contacts → Tesla";
+
+      blocks.billing.querySelector(".ct-now").innerHTML = contactLine(d.billing);
+      set(blocks.billing, ".f-first", d.billing.firstName);
+      set(blocks.billing, ".f-last",  d.billing.lastName);
+      set(blocks.billing, ".f-email", d.billing.email);
+      set(blocks.billing, ".f-phone", d.billing.phone);
+
+      blocks.address.querySelector(".ct-now").innerHTML = addressLine(d.address);
+      set(blocks.address, ".f-line1",   d.address.addressLine1);
+      set(blocks.address, ".f-line2",   d.address.addressLine2);
+      set(blocks.address, ".f-city",    d.address.city);
+      set(blocks.address, ".f-state",   d.address.stateCode);
+      set(blocks.address, ".f-zip",     d.address.zip);
+      set(blocks.address, ".f-country", d.address.countryCode || "US");
+    };
+
+    const reread = async () => {
+      try{
+        paintContacts(await api(`/api/sca/contacts?vin=${encodeURIComponent(ed.dataset.vin)}` +
+                                `&svid=${encodeURIComponent(ed.dataset.sv)}`));
+      }catch{ /* the message already says what went wrong */ }
+    };
+
+    // Show/hide each form. One listener per block, same behaviour.
+    for(const [kind, el] of Object.entries(blocks)){
+      const form = el.querySelector(".ct-form");
+      el.querySelector(".ct-manual").addEventListener("click", () => {
+        form.hidden = !form.hidden;
+        if(!form.hidden) form.querySelector("input").focus();
+      });
+      el.querySelector(".ct-cancel").addEventListener("click", () => { form.hidden = true; });
+    }
+
+    /* Prefills from Admin › My location. Deliberately does not save: the
+       address is still looked at before it goes onto a car. */
+    const mine = blocks.address.querySelector(".ad-mine");
+    mine.addEventListener("click", () => {
+      const a = S.billingAddress;
+      if(!a){
+        ctMsg.className = "why ct-msg bad";
+        ctMsg.textContent = "No billing address set — Admin › My location.";
+        return;
+      }
+      blocks.address.querySelector(".ct-form").hidden = false;
+      set(blocks.address, ".f-line1",   a.addressLine1);
+      set(blocks.address, ".f-line2",   a.addressLine2);
+      set(blocks.address, ".f-city",    a.city);
+      set(blocks.address, ".f-state",   a.stateCode);
+      set(blocks.address, ".f-zip",     a.zip);
+      set(blocks.address, ".f-country", a.countryCode || "US");
+      ctMsg.className = "why ct-msg";
+      ctMsg.textContent = "Filled from your location — check it, then save.";
+    });
+
+    /* One save handler for all three. The three differ only in what they
+       send and what they say, so they share the confirm, the read-back and
+       the error handling rather than having three copies that drift. */
+    const SAVES = {
+      main: {
+        label: "main contact",
+        gather: el => ({ firstName: val(el, ".f-first"), lastName: val(el, ".f-last"),
+                         email: val(el, ".f-email"), phone: val(el, ".f-phone") }),
+        describe: b => `${b.firstName} ${b.lastName}`.trim(),
+        send: b => api("/api/sca/set-contact", { vin: ed.dataset.vin,
+                serviceVisitId: Number(ed.dataset.sv), contactType: 1, ...b })
+      },
+      billing: {
+        label: "billing contact",
+        gather: el => ({ firstName: val(el, ".f-first"), lastName: val(el, ".f-last"),
+                         email: val(el, ".f-email"), phone: val(el, ".f-phone") }),
+        describe: b => `${b.firstName} ${b.lastName}`.trim(),
+        send: b => api("/api/sca/set-contact", { vin: ed.dataset.vin,
+                serviceVisitId: Number(ed.dataset.sv), contactType: 2, ...b })
+      },
+      address: {
+        label: "billing address",
+        gather: el => ({ addressLine1: val(el, ".f-line1"), addressLine2: val(el, ".f-line2"),
+                         city: val(el, ".f-city"), stateCode: val(el, ".f-state"),
+                         zip: val(el, ".f-zip"), countryCode: val(el, ".f-country") }),
+        describe: b => [b.addressLine1, b.city, b.stateCode, b.zip].filter(Boolean).join(", "),
+        send: b => api("/api/sca/set-address", { vin: ed.dataset.vin,
+                serviceVisitId: Number(ed.dataset.sv), ...b })
+      }
+    };
+
+    for(const [kind, el] of Object.entries(blocks)){
+      el.querySelector(".ct-save").addEventListener("click", async () => {
+        const spec = SAVES[kind];
+        const body = spec.gather(el);
+        const what = spec.describe(body);
+        if(!what){
+          ctMsg.className = "why ct-msg bad";
+          ctMsg.textContent = kind === "address" ? "A street, city, state and ZIP are required."
+                                                 : "A name is required.";
+          return;
+        }
+        const btn = el.querySelector(".ct-save");
+        ctMsg.className = "why ct-msg";
+        ctMsg.textContent = `Set the ${spec.label} to ${what}?`;
+        if(!await confirmBySlide(btn, "Slide to save")){
+          ctMsg.textContent = "";
+          return;
+        }
+        btn.disabled = true;
+        const wasLabel = btn.textContent;
+        btn.textContent = "Saving";
+        ctMsg.className = "why ct-msg";
+        ctMsg.textContent = "";
+        try{
+          const d = await spec.send(body);
+          ctMsg.className = "why ct-msg done";
+          ctMsg.textContent = `The ${spec.label} is now ${d.now}.` +
+            (d.ticketsIntact === false ? " WARNING: a ticket status changed." : "");
+          el.querySelector(".ct-form").hidden = true;
+          await reread();                       // never from what was sent
+        }catch(err){
+          ctMsg.className = "why ct-msg bad";
+          ctMsg.textContent = err.message;
+        }finally{ btn.disabled = false; btn.textContent = wasLabel; }
+      });
+    }
+
+    (async () => {
+      try{
+        paintContacts(await api(`/api/sca/contacts?vin=${encodeURIComponent(ed.dataset.vin)}` +
+                                `&svid=${encodeURIComponent(ed.dataset.sv)}`));
+      }catch(err){
+        ctState.textContent = "could not be read";
+        ctMsg.className = "why ct-msg bad";
+        ctMsg.textContent = err.message;
+      }
+    })();
+
+    ctGo.addEventListener("click", async () => {
+      ctMsg.className = "why ct-msg";
+      /* "the Tesla contact on this car", not a name: which record it is comes
+         off the car and differs between them, so naming one here would be a
+         guess. What it actually wrote is reported afterwards. */
+      ctMsg.textContent = "Set the main and billing contacts to the Tesla contact on this car?" +
+        (S.billingAddress ? " The billing address will be set to your location too." : "");
+      if(!await confirmBySlide(ctGo, "Slide to switch to Tesla")){
+        ctMsg.textContent = "";
+        return;
+      }
+      ctGo.disabled = true;
+      const was = ctGo.textContent;
+      ctGo.textContent = "Switching";
+      ctMsg.className = "why ct-msg";
+      ctMsg.textContent = "";
+      try{
+        const d = await api("/api/sca/contact-to-tesla", {
+          vin: ed.dataset.vin, serviceVisitId: Number(ed.dataset.sv)
+        });
+        /* Name the types that were written. "Main and billing" and "billing
+           only" are different outcomes, and the row should not make you
+           re-read the panel to tell them apart. */
+        const wrote = d.wrote || [];
+        const which = wrote.length === 2 ? "Main and billing contacts are"
+                    : wrote.includes(2)  ? "Billing contact is"
+                    : "Main contact is";
+        ctMsg.className = "why ct-msg done";
+        ctMsg.textContent = `${which} now ${d.now}${d.was ? ` (was ${d.was})` : ""}.` +
+          (d.addressSet ? " Billing address set." : (d.addressNote ? " " + d.addressNote : "")) +
+          (d.ticketsIntact ? " Ticket untouched." : " WARNING: a ticket status changed.");
+        // Repaint from a fresh read, not from what was sent.
+        try { paintContacts(await api(`/api/sca/contacts?vin=${encodeURIComponent(ed.dataset.vin)}` +
+                                      `&svid=${encodeURIComponent(ed.dataset.sv)}`)); } catch {}
+      }catch(err){
+        ctMsg.className = "why ct-msg bad";
+        ctMsg.textContent = err.message;
+        ctGo.disabled = false;
+      }finally{ ctGo.textContent = was; }
+    });
+
+    /* ── cancel the TSS booking, leave the car and the ticket put ──
+       Named for the system that owns it. "Cancel appointment" was read as
+       cancelling the visit, and cancelling the visit is the thing that closes
+       the ticket and disturbs billing — a different call, deleted from this
+       board entirely. The slider is red for the same reason: this one takes
+       something away.
+
+       It slides rather than asks because it is a real booking coming off a
+       real car, and the question names the date for the same reason. */
+    const cancelBtn = ed.querySelector(".mv-cancel");
+    if(cancelBtn) cancelBtn.addEventListener("click", async () => {
+      // b.when, not the first b in the gate — the notice bolds two phrases of
+      // its own, and an unbooked-but-dated car would have named one of those.
+      const when = ed.querySelector(".gate b.when");
+      msg.className = "why mv-msg";
+      msg.textContent = `Cancel the TSS booking${when ? ` for ${when.textContent}` : ""}? ` +
+        `That releases the slot only — the car stays where it is, the visit ` +
+        `stays open and the ticket is not touched.`;
+      if(!await confirmBySlide(cancelBtn, "Slide to cancel booking",
+                               { tone: "danger", end: "Release to cancel" })){
+        msg.textContent = "";
+        return;
+      }
+      cancelBtn.disabled = true;
+      const was = cancelBtn.textContent;
+      cancelBtn.textContent = "Cancelling";
+      msg.className = "why mv-msg";
+      msg.textContent = "";
+      try{
+        const d = await api("/api/sca/cancel-appointment", {
+          vin: ed.dataset.vin, serviceVisitId: Number(ed.dataset.sv)
+        });
+        msg.className = "why mv-msg done";
+        msg.textContent = `TSS booking cancelled${d.was ? ` (was ${fmtDate(d.was)})` : ""}. ` +
+          `Visit still open at ${d.at}.` +
+          (d.ticketsIntact ? " Ticket untouched." : " WARNING: a ticket status changed.") +
+          ((d.sideEffects || []).length ? " Also changed: " + d.sideEffects.join(", ") + "." : "");
+        // No booking left to warn about, and the move no longer needs to cancel.
+        ed.dataset.booked = "0";
+        const g = ed.querySelector(".gate");
+        if(g) g.remove();
+      }catch(err){
+        msg.className = "why mv-msg bad";
+        msg.textContent = err.message;
+        cancelBtn.disabled = false;
+      }finally{ cancelBtn.textContent = was; }
+    });
+
+    input.addEventListener("input", () => {
+      // Changing the destination retracts the slider: what you are about to
+      // confirm must always be what the box says.
+      picked = null; slide.hidden = true; reset();
+      ed.querySelector(".arrow .to").textContent = "choose a centre";
+      msg.textContent = "";
+      clearTimeout(timer);
+      const q = input.value.trim();
+      if(q.length < 2){ list.hidden = true; return; }
+      timer = setTimeout(async () => {
+        try{
+          const d = await api("/api/sca/sites?q=" + encodeURIComponent(q));
+          if(!d.sites.length){
+            list.innerHTML = "";
+            list.hidden = true;
+            msg.textContent = "No service centre matches that.";
+            return;
+          }
+          list.innerHTML = d.sites.map(s =>
+            `<div class="site" data-loc="${s.scaLocationId}" data-trt="${s.trtId}"
+                  data-type="${s.typeId}" data-fn="${s.functionId}" data-inv="${s.inventoryLocationId}"
+                  data-name="${esc(s.name)}"><b>${esc(s.name)}</b><span>${s.trtId}</span></div>`).join("");
+          list.hidden = false;
+        }catch(err){ list.hidden = true; msg.textContent = err.message; }
+      }, 180);
+    });
+
+    list.addEventListener("click", e => {
+      const el = e.target.closest(".site");
+      if(!el) return;
+      picked = { loc: Number(el.dataset.loc), trt: Number(el.dataset.trt), name: el.dataset.name,
+                 typeId: Number(el.dataset.type), functionId: Number(el.dataset.fn),
+                 inventoryLocationId: Number(el.dataset.inv) };
+      input.value = picked.name;
+      list.hidden = true;
+      msg.textContent = "";
+      // The destination is set, so the confirm appears. Not before: there is
+      // nothing to slide towards until there is somewhere to go.
+      ed.querySelector(".arrow .to").textContent = picked.name;
+      slide.hidden = false;
+      reset();
+    });
+
+    /* The slide has been taken the whole way. No confirm dialog on top of it:
+       dragging a control from end to end IS the confirmation, and stacking a
+       second one would teach people to dismiss both. */
+    async function doMove(){
+      if(!picked){ reset(); return; }
+      slide.classList.add("busy");
+      lbl.textContent = "Moving…";
+      msg.className = "why mv-msg";
+      msg.textContent = "";
+      try{
+        /* All four destination fields go up together: the move needs
+           functionID and inventoryLocationID as well as the two ids, and none
+           of them can be derived from the others. */
+        const d = await api("/api/sca/move", {
+          vin: ed.dataset.vin, serviceVisitId: Number(ed.dataset.sv),
+          scaLocationId: picked.loc, trtId: picked.trt, name: picked.name,
+          typeId: picked.typeId, functionId: picked.functionId,
+          inventoryLocationId: picked.inventoryLocationId
+        });
+        slide.classList.remove("busy");
+        slide.classList.add("done");
+        lbl.textContent = "Moved";
+        msg.className = "why mv-msg done";
+        msg.textContent = (d.cancelled ? `Appointment cancelled. Now at ${d.to}.`
+                                       : `Now at ${d.to}.`) +
+          (d.ticketsIntact ? " Ticket untouched." : " WARNING: a ticket status changed.") +
+          ((d.sideEffects || []).length ? " Also changed: " + d.sideEffects.join(", ") + "." : "");
+        // The booking is gone, so the notice about it no longer applies.
+        const g = ed.querySelector(".gate");
+        if(g && d.cancelled) g.remove();
+        // Repaint from the re-read, never from what was sent.
+        ed.querySelector(".arrow .from").textContent = d.to;
+        ed.querySelector(".arrow .to").textContent = "";
+        const row = S.rows.find(x => x.vin === ed.dataset.vin);
+        const vis = row && row.visits.find(v => String(v.svId) === ed.dataset.sv);
+        if(vis && vis.ticket) vis.ticket.location = d.to;
+        input.value = "";
+        input.disabled = true;
+        range.disabled = true;
+      }catch(err){
+        slide.classList.remove("busy");
+        reset();
+        msg.className = "why mv-msg bad";
+        // SCA's own refusal, relayed rather than reworded.
+        msg.textContent = err.message;
+      }
+    }
+  }
+}
+
+/* Delegated: the list is rewritten wholesale on every render, so a listener
+   per row would be rebound each time. Clicks on links are left alone.
+
+   Opens a modal rather than expanding the row. Inline was cluttered — the
+   dropdown fought the cards below it for stacking order, the slider had no
+   room, and a screen of half-open cards was unreadable. A modal is also one at
+   a time by construction, so the accordion bookkeeping goes away. */
+document.addEventListener("click", e => {
+  const veh = e.target.closest(".veh");
+  if(!veh || !veh.dataset.vin) return;
+  /* Links and the row's own controls are not "open this row". The photos
+     button broke on exactly this once the editor moved into a modal: it opened
+     its viewer, and then this handler ran on the same click and replaced the
+     viewer with the editor — showModal() holds one overlay at a time — so the
+     button looked dead. */
+  if(e.target.closest("a, button")) return;
+
+  const r = S.rows.find(x => x.vin === veh.dataset.vin);
+  if(!r) return;
+  $("ticketCtx").textContent = `${r.vin}  ·  ${labelFor("model", r.model)}` +
+    (r.site ? `  ·  ${r.site}` : "");
+  $("ticketBody").innerHTML = editPanelHtml(r);
+  wireEditPanel($("ticketBody"));
+  showModal($("ticketModal"));
+});
 
 function rowHtml(r){
   const cls = r.campaigns.length ? "ct" : (r.visits.length ? "sv" : (r.logistics.length ? "lg" : ""));
@@ -1451,9 +2838,23 @@ function rowHtml(r){
   if(r.logistics.length) pills.push(`<span class="pill p-info"><i></i>Logistics</span>`);
   if(!pills.length)      pills.push(`<span class="pill p-done">Clear</span>`);
 
-  // Only present when the title facet was used — it is a fetched field, not
-  // an indexed one, so a scan that did not ask for it has nothing to show.
-  if(r.title) pills.push(`<span class="pill p-info">${esc(labelFor("title", r.title))}</span>`);
+  /* Where the car is, in place of the Title status pill that used to sit here.
+     Title is a fetched field that most scans never ask for, so that pill was
+     usually absent; the site is on every row. Title is still filterable and
+     still in the export — it just no longer has the slot.
+
+     Quiet when the car is at the centre being scanned, which on a Cypress scan
+     is most of them, and marked when it is not. The whole value of this pill
+     is spotting the car that is somewhere else. */
+  if(r.site){
+    /* Marked only when Garage's trt_id NAMED a site and that site is not the
+       one being scanned. A car whose trt_id is an unshed logistics code falls
+       back to its routing location and is deliberately not marked — it is not
+       known to be elsewhere, it is only known to have a stale code. */
+    const away = r.siteExact && S.scanTrtId && Number(r.trtId) !== Number(S.scanTrtId);
+    pills.push(`<span class="pill ${away ? "p-info" : "p-site"}"${
+      away ? ' title="Garage places this car at another site"' : ""}>${esc(r.site)}</span>`);
+  }
 
   const bits = [
     r.delivered ? "Delivered" : "Undelivered",
@@ -1464,10 +2865,18 @@ function rowHtml(r){
   ].filter(Boolean);
 
   const lines = [];
+  /* Opened, then when the car cleared receiving. The estimated completion date
+     used to sit in the second slot and was dropped for this — a due date on a
+     visit that has been open four months says less than the inspection that
+     let the car onto the lot in the first place. It is still in the export.
+
+     A car with no receiving inspection on record says so rather than showing
+     a blank, which would read as "not inspected" when it means "not found". */
   for(const v of r.visits){
-    lines.push(`<div class="hold-line">${svLink(v)}${
+    lines.push(`<div class="hold-line">${svLink(v, r.vin)}${
       v.opened ? " · opened " + esc(fmtDate(v.opened)) : ""}${
-      v.due ? " · due " + esc(fmtDate(v.due)) : ""}</div>`);
+      v.vriAt ? " · VRI completed " + esc(fmtDate(v.vriAt))
+              : ' · <span class="quiet">no VRI on record</span>'}</div>` + ticketLines(v));
   }
   for(const c of r.campaigns){
     lines.push(`<div class="hold-line"><b>${esc(c.title)}</b></div>` +
@@ -1479,7 +2888,10 @@ function rowHtml(r){
       (h.note ? `<div class="hold-note">${esc(h.note)}</div>` : ""));
   }
 
-  return `<div class="veh ${cls}">
+  /* data-vin makes the row expandable — the click handler above looks the car
+     up by it. Only the Service Visits row carries it; a car on ground has
+     nothing to edit. */
+  return `<div class="veh ${cls}" data-vin="${esc(r.vin)}">
     <div>
       <div class="vin-row">${vinLink(r)}
         <span class="mdl">${esc(labelFor("model", r.model))}</span>
@@ -1737,20 +3149,31 @@ function paintTrunkResult(d){
    you open to work from. VIN + delivery date is the one you paste into
    something else — a message, a whiteboard, another system's import — and for
    that, twenty-four columns of context is the thing in the way. */
+/* `sv` marks a preset that only makes sense on the Service Visits sheet. Cars
+   on Ground has no ticket columns, so offering the choice there would be a
+   button that quietly hands back the same sheet as All data. */
 const EXPORT_PRESETS = [
   { v: "all",          label: "All data",             sub: "every column" },
-  { v: "vin-delivery", label: "VIN + delivery date",  sub: "two columns" }
+  { v: "vin-delivery", label: "VIN + delivery date",  sub: "two columns" },
+  { v: "vin-ticket",   label: "VIN + ticket",         sub: "what each visit is for", sv: true }
 ];
 
 function paintExportPresets(){
+  const opts = EXPORT_PRESETS.filter(o => !o.sv || S.tool === "sv");
+  // A preset that just stopped being offered must not stay selected, or the
+  // sheet would come out narrowed by a choice with no button showing.
+  if(!opts.some(o => o.v === S.exportPreset)) S.exportPreset = "all";
+
   $("exportPresets").innerHTML = `
     <div class="facet-head"><span>Columns</span></div>
-    <div class="opts">${EXPORT_PRESETS.map(o =>
+    <div class="opts">${opts.map(o =>
       `<button class="opt export-opt${S.exportPreset === o.v ? " on" : ""}" data-preset="${o.v}"
         >${esc(o.label)} <small>${esc(o.sub)}</small></button>`).join("")}</div>
     <div class="hint">The rows are the same either way — whatever is on screen now.
       ${S.tool === "cog" ? "Delivery date is Intrepid's scheduled date."
-                         : "Delivery date is the scheduled appointment from the Garage index."}</div>`;
+                         : "Delivery date is the scheduled appointment from the Garage index."}
+      ${S.tool === "sv" && !S.rowsHaveSca
+        ? "Ticket columns will be blank — this scan ran without the Service App." : ""}</div>`;
 }
 
 $("exportPresets").addEventListener("click", e => {
@@ -1809,7 +3232,7 @@ $("runExport").addEventListener("click", async () => {
     /* The preset lands in the name for the same reason the view and the
        window do: a two-column file and a twenty-four-column one both called
        `…-2026-08-13.xlsx` are indistinguishable in a downloads folder. */
-    if(S.exportPreset !== "all") payload.label += "-vin-delivery";
+    if(S.exportPreset !== "all") payload.label += "-" + S.exportPreset;
     payload.preset = S.exportPreset;
 
     const res = await fetch("/api/export", {
@@ -1852,6 +3275,15 @@ function render(data){
   S.rows = data.rows || [];
   S.reasons = data.reasons || {};
   S.summary = data.summary;
+  /* Whether THESE rows carry ticket detail, which is not the same question as
+     whether SCA is connected right now: connecting after a scan does not go
+     back and fill in rows that are already on screen. The export hint reads
+     this one, so it describes the sheet it is about to write. */
+  S.rowsHaveSca = Boolean(data.sca);
+  /* The centre THESE rows were scanned against, which the site pill compares
+     each car to. Taken from the scan rather than from S.trtId: changing the
+     nav picker afterwards must not silently relabel rows already on screen. */
+  S.scanTrtId = data.trtId || null;
   const s = data.summary;
 
   paintStats([
@@ -1956,7 +3388,7 @@ function renderCog(data){
 /* ── admin ── */
 $("adminBtn").addEventListener("click", () => {
   showModal($("adminModal"));
-  if(!$("admin").classList.contains("unlocked")) setTimeout(() => otpBoxes[0].focus(), 60);
+  if(!$("adminModal").classList.contains("unlocked")) setTimeout(() => otpBoxes[0].focus(), 60);
 });
 
 /* ── the six-digit gate ──
@@ -2029,7 +3461,8 @@ async function tryUnlock(){
     S.password = code;
     otpClear(false);
     $("gateErr").textContent = "";
-    $("admin").classList.add("unlocked");
+    $("gate").hidden = true;
+    $("settings").hidden = false;
     $("adminModal").classList.add("unlocked");
     paintConnections(d.connections);
   }catch(err){
@@ -2042,20 +3475,165 @@ async function tryUnlock(){
 }
 $("unlock").addEventListener("click", tryUnlock);
 
+/* Rail-driven sections: the rail item and the pane section share a key, so
+   adding a section is markup only. */
+document.querySelectorAll(".rail-item[data-sec]").forEach(item => {
+  item.addEventListener("click", () => {
+    const key = item.dataset.sec;
+    document.querySelectorAll(".rail-item[data-sec]").forEach(i => i.classList.toggle("on", i === item));
+    document.querySelectorAll(".admin-pane .sec").forEach(sec =>
+      sec.classList.toggle("on", sec.id.toLowerCase() === "sec" + key));
+  });
+});
+
 function paintConnections(c){
   if(!c) return;
+  // Kept so the SCA poll can repaint one source without the caller having to
+  // refetch the other two.
+  S.conns = c;
+  paintScaPrompt();
   const say = (s, expect) => s.set
     ? `${s.detail} ${s.hint}` + (s.looksOk ? "" : ` — does not look like ${expect}`)
     : "not connected";
-  $("aGarage").textContent   = say(c.garage,   "a Garage session cookie");
-  $("aIntrepid").textContent = say(c.intrepid, "a cogs cookie");
-  // Both required, so the footer says which of the two is missing rather than
-  // a single word that could mean either.
-  $("fSrc").textContent = c.garage.set && c.intrepid.set
+  /* The dot carries whether the source is up, the text says what it is. Only
+     the two required ones can be "bad": an unconnected Service App is a choice,
+     not a fault, so it stays neutral rather than going red. */
+  const paintRow = (row, text, state) => {
+    $(row).classList.toggle("ok",  state === "ok");
+    $(row).classList.toggle("bad", state === "bad");
+    $(row.replace(/Row$/, "")).textContent = text;
+  };
+  paintRow("aGarageRow",   say(c.garage,   "a Garage session cookie"),
+           c.garage.set ? (c.garage.looksOk ? "ok" : "bad") : "bad");
+  paintRow("aIntrepidRow", say(c.intrepid, "a cogs cookie"),
+           c.intrepid.set ? (c.intrepid.looksOk ? "ok" : "bad") : "bad");
+
+  /* SCA carries its own detail string from the server — expiry arithmetic
+     belongs where the token is decoded, not in two places. A sign-in in
+     flight overrides it: what the user wants to read mid-flow is what the
+     browser is doing, not what the store still says. */
+  S.sca = c.sca;
+  const busy = SCA_BUSY.includes(S.scaPhase);
+  paintRow("aScaRow", busy ? (S.scaDetail || "Connecting…") : c.sca.detail,
+           c.sca.set ? "ok" : (c.sca.stale ? "bad" : "off"));
+  $("scaConnect").textContent = busy ? "Cancel"
+    : (c.sca.set ? "Reconnect" : (c.sca.stale ? "Connect again" : "Connect"));
+  $("scaForget").hidden = !(c.sca.set || c.sca.stale) || busy;
+
+  /* The rail's dot, so a missing source is visible from the section list rather
+     than only once Connections is open. Red for a required source that is not
+     there; green — the house's slow pulse — when everything the board needs is
+     connected. SCA is deliberately not counted: it is optional. */
+  const warn = $("railWarnConn");
+  const coreOk = c.garage.set && c.intrepid.set;
+  warn.hidden = false;
+  warn.classList.toggle("ok", coreOk);
+  warn.title = coreOk ? "Garage and Intrepid are connected"
+                      : "A required source is not connected";
+
+  // Both cookies are required, so the footer says which of the two is missing
+  // rather than a single word that could mean either. SCA is appended rather
+  // than folded in: it is not the same kind of absence.
+  const core = c.garage.set && c.intrepid.set
     ? "Garage + Intrepid"
     : (!c.garage.set && !c.intrepid.set ? "No sources connected"
       : (c.garage.set ? "Garage · no Intrepid" : "Intrepid · no Garage"));
+  $("fSrc").textContent = core + (c.sca.set ? " + SCA" : "");
 }
+
+/* ── connecting the Service App ──
+   The waiting happens on the server (see sca.js), so this only polls and
+   paints. Polling stops the moment the attempt settles: a page left open
+   overnight should not talk to its own server every two seconds forever. */
+const SCA_BUSY = ["verifying", "opening", "waiting"];
+let scaPoll = null;
+
+function stopScaPoll(){ if(scaPoll){ clearInterval(scaPoll); scaPoll = null; } }
+
+async function refreshSca(){
+  try{
+    const d = await api("/api/sca");
+    S.scaPhase  = d.signin.phase;
+    S.scaDetail = d.signin.detail;
+    paintConnections({ ...S.conns, sca: d.connection });
+    if(!SCA_BUSY.includes(d.signin.phase)){
+      stopScaPoll();
+      if(d.signin.phase === "connected"){
+        note(`Service App connected — ${d.connection.user}. Run a scan to see ticket detail.`);
+      }else if(d.signin.error){
+        note("Service App: " + d.signin.error, true);
+      }
+    }
+  }catch{ stopScaPoll(); }
+}
+
+async function connectSca(){
+  if(SCA_BUSY.includes(S.scaPhase)){
+    await api("/api/sca/cancel", {});
+    S.scaPhase = "cancelled";
+    stopScaPoll();
+    return refreshSca();
+  }
+  clearNotes();
+  dismissScaPrompt();
+  try{
+    const d = await api("/api/sca/connect", {});
+    S.scaPhase  = d.signin.phase;
+    S.scaDetail = d.signin.detail;
+    paintConnections({ ...S.conns, sca: d.connection });
+    stopScaPoll();
+    scaPoll = setInterval(refreshSca, 2000);
+    refreshSca();
+  }catch(err){
+    note("Could not start the Service App sign-in: " + err.message, true);
+  }
+}
+
+/* ── the prompt on open ──
+
+   Asked for in as many words: open the board and it tells you the Service App
+   is not connected, with the button to fix it right there rather than four
+   clicks away in Admin.
+
+   It does NOT gate the board, and that is a deliberate departure from the
+   letter of the ask. Cars on Ground, containment and logistics holds have
+   never touched SCA; a hard gate would break three working things to warn
+   about a fourth. So it says exactly what is lost — the ticket text, nothing
+   else — and can be dismissed. Making it a gate is one line here if the
+   softer version turns out to be too easy to ignore.
+
+   A stale token gets a different sentence from no token at all. "Expired" and
+   "never connected" need the same button but describe different situations,
+   and telling someone to connect when they already did reads as the board
+   having forgotten. */
+function paintScaPrompt(){
+  const el = $("scaPrompt");
+  const c  = S.conns && S.conns.sca;
+  if(!c || c.set || S.scaDismissed || SCA_BUSY.includes(S.scaPhase)){
+    el.innerHTML = "";
+    return;
+  }
+  el.innerHTML = `<div class="note">
+    <b>${c.stale ? "The Service App session has expired." : "Not connected to the Service App."}</b>
+    Service visits will list as bare numbers — no symptom, no category, no hours.
+    Everything else on the board works without it.
+    <div style="margin-top:9px">
+      <button class="mini" id="scaPromptGo">${c.stale ? "Connect again" : "Connect"}</button>
+      <button class="mini" id="scaPromptNo">Not now</button>
+    </div>
+  </div>`;
+  $("scaPromptGo").addEventListener("click", connectSca);
+  $("scaPromptNo").addEventListener("click", () => { S.scaDismissed = true; paintScaPrompt(); });
+}
+
+function dismissScaPrompt(){ S.scaDismissed = true; paintScaPrompt(); }
+
+$("scaConnect").addEventListener("click", connectSca);
+$("scaForget").addEventListener("click", async e => {
+  const d = await api("/api/sca/disconnect", {});
+  paintConnections({ ...S.conns, sca: d.connection });
+  note("Service App disconnected. Service visits will show without ticket detail.");
+});
 
 async function admin(path, extra, btn){
   const restore = btn ? btn.textContent : null;
@@ -2069,11 +3647,16 @@ async function admin(path, extra, btn){
 
 
 $("runTests").addEventListener("click", async e => {
-  for(const id of ["tIntrepid","tGarage","tTesladex"]) $(id).textContent = "checking…";
+  for(const id of ["tIntrepid","tGarage","tTesladex"]){
+    $(id).textContent = "checking…";
+    // Neither yet: a check in flight is not a pass and not a failure.
+    $(id + "Row").classList.remove("ok", "bad");
+  }
   const d = await admin("/api/admin/test", { trtId: S.trtId }, e.target);
   const show = (id, r) => {
     $(id).textContent = (r.ok ? "ok · " : "failed · ") + r.detail;
-    $(id).style.color = r.ok ? "var(--ink-mute)" : "var(--red)";
+    $(id + "Row").classList.toggle("ok", !!r.ok);
+    $(id + "Row").classList.toggle("bad", !r.ok);
   };
   show("tIntrepid", d.intrepid); show("tGarage", d.garage); show("tTesladex", d.tesladex);
 });
@@ -2081,11 +3664,268 @@ $("runTests").addEventListener("click", async e => {
 $("refreshTrt").addEventListener("click", async e => {
   const d = await admin("/api/admin/refresh-trt", {}, e.target);
   $("mTrt").textContent = `${d.sites.toLocaleString()} sites cached`;
+  $("mTrtRow").classList.add("ok");
 });
+
+/* ── my location ── */
+function paintBilling(a){
+  S.billingAddress = a || null;
+  $("baLine1").value   = (a && a.addressLine1) || "";
+  $("baLine2").value   = (a && a.addressLine2) || "";
+  $("baCity").value    = (a && a.city) || "";
+  $("baState").value   = (a && a.stateCode) || "";
+  $("baZip").value     = (a && a.zip) || "";
+  $("baCountry").value = (a && a.countryCode) || "US";
+  $("baState2").textContent = a
+    ? [a.addressLine1, a.city, a.stateCode, a.zip].filter(Boolean).join(", ")
+    : "not set — switching a contact to Tesla will leave the billing address alone";
+  // Green when set, neutral when not — never red. No address is a working
+  // state; it only means one less field gets written.
+  $("baRow").classList.remove("bad");
+  $("baRow").classList.toggle("ok", !!a);
+}
+
+$("baSave").addEventListener("click", async e => {
+  try{
+    const d = await admin("/api/admin/billing-address", {
+      addressLine1: $("baLine1").value, addressLine2: $("baLine2").value,
+      city: $("baCity").value, stateCode: $("baState").value,
+      zip: $("baZip").value, countryCode: $("baCountry").value
+    }, e.target);
+    paintBilling(d.billingAddress || null);
+    note(d.cleared ? "Billing address cleared." : "Billing address saved.");
+  }catch(err){
+    // The server validates; relay it rather than duplicating the rules here.
+    $("baState2").textContent = err.message;
+    $("baRow").classList.remove("ok");
+    $("baRow").classList.add("bad");
+  }
+});
+
+/* ── Teams ──
+   The webhook is never shown back: the path is the secret, and a panel that
+   redisplays it invites it into a screenshot. The host is enough to tell you
+   which chat it points at. */
+function paintTeams(t){
+  S.teams = t || null;
+  const on = Boolean(t && t.hasWebhook);
+
+  $("twUrl").value = "";
+  $("twUrl").placeholder = on
+    ? `saved · ${t.host} — paste a new one to replace it`
+    : "https://…logic.azure.com/… or …webhook.office.com/…";
+  $("twState").textContent = on ? `${t.host} · button token set` : "not set";
+  $("twRow").classList.remove("bad");
+  $("twRow").classList.toggle("ok", on);
+
+  $("twPush").value = "";
+  $("twPush").placeholder = t && t.hasPush
+    ? "saved — paste a new one to replace it, or a space to clear it"
+    : "https://…powerplatform.com/… (the flow that writes the row)";
+  /* Host first, the same as the webhook row above it. Seeing "not set" where a
+     URL was just typed is the question this row exists to answer, and the
+     interval alone did not answer it. */
+  $("tuState").textContent = t && t.hasPush
+    ? `${t.pushHost}  ·  ${t.autoMinutes ? `every ${t.autoMinutes} min`
+                                         : "interval is 0, so nothing is pushed"}`
+    : "not set";
+  $("tuRow").classList.toggle("ok", Boolean(t && t.hasPush && t.autoMinutes));
+  $("twPushNow").disabled = !(t && t.hasPush);
+
+  $("twEvery").value = t && t.autoMinutes ? String(t.autoMinutes) : "0";
+
+  /* ── operating hours ──
+     Day chips are painted from the server's own day-name list and index, so
+     the page never has a second opinion about which number is Monday. */
+  const hOn = Boolean(t && t.hoursOn);
+  $("twHoursOn").classList.toggle("dark", hOn);
+  $("twHoursOff").classList.toggle("dark", !hOn);
+  $("twOpen").value  = (t && t.openStart) || "07:00";
+  $("twClose").value = (t && t.openEnd)   || "19:00";
+
+  const chosen = new Set((t && t.openDays) || [1, 2, 3, 4, 5]);
+  const names  = (t && t.dayNames) || ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  $("twDays").innerHTML = names.map((n, i) =>
+    `<button class="mini${chosen.has(i) ? " dark" : ""}" data-day="${i}"
+             style="padding:0 4px">${esc(n)}</button>`).join("");
+  for(const b of $("twDays").querySelectorAll("[data-day]")){
+    // Toggled on the page and saved with the rest, so a half-picked week is
+    // never persisted by a stray click.
+    b.addEventListener("click", () => b.classList.toggle("dark"));
+  }
+
+  $("thState").textContent = !hOn
+    ? "off — the board runs around the clock"
+    : `${(t.openDays || []).map(d => names[d]).join(" ") || "no days"}  ·  ` +
+      `${t.openStart}–${t.openEnd}  ·  ${t.openNow ? "open now" : "closed now"}`;
+  $("thRow").classList.toggle("ok", !hOn || Boolean(t && t.openNow));
+
+  // Posting straight to the chat needs the webhook first.
+  for(const id of ["twCard", "twNow"]) $(id).disabled = !on;
+  /* The rail dot when something is configured but nothing keeps it current:
+     a row that stops being pushed, or a chat with no interval behind it. The
+     chat would then be showing whatever was last posted by hand, which is the
+     failure this whole section exists to avoid. */
+  const stale = (on || (t && t.hasPush)) && !(t && t.autoMinutes);
+  $("railWarnTeams").hidden = !stale;
+  $("railWarnTeams").title = stale
+    ? "Nothing refreshes on its own — the interval is 0" : "";
+}
+
+$("twSave").addEventListener("click", async e => {
+  const msg = $("twMsg");
+  try{
+    await admin("/api/admin/teams-webhook", { webhook: $("twUrl").value }, e.target);
+    // Repaint from the server rather than from what was sent: the poll URL and
+    // the interval survive a webhook change and the panel must show that.
+    const st = await api("/api/state");
+    paintTeams(st.teams);
+    msg.className = "why done";
+    msg.textContent = st.teams
+      ? "Saved. Post a fresh card — any card already in the chat has the old token."
+      : "Webhook cleared. Nothing will be posted.";
+  }catch(err){
+    msg.className = "why bad";
+    msg.textContent = err.message;
+    $("twRow").classList.remove("ok");
+    $("twRow").classList.add("bad");
+  }
+});
+
+/* ── the countdown ──
+
+   One second-ticking interval for the life of the page, which does nothing at
+   all unless the Teams section is actually on screen. Cheaper than starting
+   and stopping a timer from four different places — the rail, the close
+   button, Escape and the scrim — and it cannot be left running by a path
+   somebody forgets to hook.
+
+   The server sends SECONDS remaining, not a timestamp, and the page turns that
+   into a local deadline it counts down against. Re-asked every ten seconds, so
+   a push that happens while the panel is open is noticed rather than waited
+   out. */
+let tnDeadline = null, tnEvery = 0, tnTick = 0;
+
+function tnFmt(sec){
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m ? `${m}m ${String(s).padStart(2, "0")}s` : `${s}s`;
+}
+
+setInterval(async () => {
+  const visible = $("adminModal").classList.contains("on") &&
+                  $("secTeams").classList.contains("on");
+  if(!visible){ tnDeadline = null; tnTick = 0; return; }
+
+  // Ask the board every tenth second; count down locally in between.
+  if(tnTick % 10 === 0){
+    try{
+      const st = await api("/api/teams/status");
+      tnEvery = st.everyMin;
+      tnDeadline = st.nextInSec == null ? null : Date.now() + st.nextInSec * 1000;
+      S.teamsRun = st;
+    }catch{ /* leave the last reading up rather than blanking the row */ }
+  }
+  tnTick++;
+
+  const st = S.teamsRun || {};
+  const row = $("tnRow"), out = $("tnState");
+  let text, ok = false;
+
+  if(st.busy){ text = "pushing now…"; ok = true; }
+  /* Closed is its own answer, not a stalled countdown. Reported before the
+     other cases because "not running" would send somebody looking for a fault
+     that is actually a Sunday. */
+  else if(st.hoursOn && !st.openNow){
+    text = st.reopens ? `closed — back ${st.reopens}` : "closed";
+    ok = true;
+  }
+  else if(tnDeadline == null){
+    text = st.running ? "nothing scheduled" : "not running — the interval is 0";
+  }else{
+    const left = Math.max(0, Math.round((tnDeadline - Date.now()) / 1000));
+    text = `in ${tnFmt(left)}`;
+    ok = true;
+    // Past due for more than a tick means the loop is wedged, not merely late.
+    if(left === 0) text = "due now";
+  }
+
+  // What the last one did, so a silent failure cannot hide behind a countdown.
+  const l = st.last;
+  if(l){
+    const when = new Date(l.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    text += l.ok ? `  ·  last ${l.count} cars at ${when}`
+                 : `  ·  LAST ONE FAILED at ${when}: ${l.error}`;
+    if(!l.ok) ok = false;
+  }
+
+  out.textContent = text;
+  row.classList.toggle("ok", ok);
+  row.classList.toggle("bad", Boolean(l && !l.ok));
+}, 1000);
+
+/* The two hour chips only toggle on the page; they save with everything else.
+   A window is three settings — the switch, the days and the times — and saving
+   one of them the moment it is clicked is how you end up with Tuesday-only. */
+for(const [id, on] of [["twHoursOn", true], ["twHoursOff", false]]){
+  $(id).addEventListener("click", () => {
+    $("twHoursOn").classList.toggle("dark", on);
+    $("twHoursOff").classList.toggle("dark", !on);
+  });
+}
+
+$("twSettings").addEventListener("click", async e => {
+  const msg = $("twMsg");
+  try{
+    const d = await admin("/api/admin/teams-settings", {
+      // Blank means "leave it"; a space means "clear it". Sending "" on every
+      // save would wipe the push URL whenever somebody changed the interval.
+      ...($("twPush").value ? { pushUrl: $("twPush").value.trim() } : {}),
+      autoMinutes: $("twEvery").value,
+      hoursOn  : $("twHoursOn").classList.contains("dark"),
+      openStart: $("twOpen").value,
+      openEnd  : $("twClose").value,
+      openDays : [...$("twDays").querySelectorAll("[data-day].dark")]
+                   .map(b => Number(b.dataset.day))
+    }, e.target);
+    paintTeams(d);
+    msg.className = "why done";
+    msg.textContent = !d.autoMinutes
+      ? "Interval off — nothing runs on its own."
+      : d.hasPush
+        ? `Pushing the row every ${d.autoMinutes} min.`
+        : `Reposting to the chat every ${d.autoMinutes} min, when the cars change.`;
+  }catch(err){
+    msg.className = "why bad";
+    msg.textContent = err.message;
+  }
+});
+
+for(const [id, path, what] of [["twCard", "/api/admin/teams-card", "card"],
+                               ["twNow",  "/api/admin/teams-test", "list"],
+                               ["twPushNow", "/api/admin/teams-push", "push"]]){
+  $(id).addEventListener("click", async e => {
+    const msg = $("twMsg");
+    msg.className = "why";
+    msg.textContent = what === "card" ? "" : "Scanning the centre…";
+    try{
+      const d = await admin(path, {}, e.target);
+      msg.className = "why done";
+      msg.textContent =
+        what === "card" ? `Card posted to the chat for ${d.site}.`
+      : what === "push" ? `Row pushed · ${d.count} cars at ${d.site} · ${d.bytes} bytes of card.`
+      : `Posted ${d.count} ${d.count === 1 ? "car" : "cars"} awaiting VRI at ${d.site}` +
+        (d.posted < d.count ? ` (the card shows the first ${d.posted}).` : ".");
+    }catch(err){
+      msg.className = "why bad";
+      msg.textContent = err.message;
+    }
+  });
+}
 
 $("resetBoard").addEventListener("click", async e => {
   const d = await admin("/api/admin/reset", {}, e.target);
   paintConnections(d.connections);
+  paintTeams(null);
   setTrt(null, null);
 });
 
@@ -2105,6 +3945,8 @@ $("resetBoard").addEventListener("click", async e => {
     S.offsiteTrt   = st.offsiteTrt || null;
     paintSites();
     paintConnections(st.connections);
+    paintBilling(st.billingAddress);
+    paintTeams(st.teams);
     // After the facets land: a saved selection is validated against them.
     paintQuick();
   }catch(err){

@@ -2892,14 +2892,21 @@ async function runAlertNow(post){
 
     if(!d.missing){
       box.hidden = true;
-      sendNote(`All ${d.total} car(s) delivered today have driven their FSD miles — nothing to post.`);
+      // An empty day is not a finished one. "100% done — all 0 cars have
+      // driven" is technically true and reads as nonsense.
+      sendNote(d.total
+        ? `100% done — all ${d.total} car(s) delivered today have driven their FSD miles. Nothing to post.`
+        : `No cars delivered yet today — nothing to check.`);
       return;
     }
     const lines = d.cars.slice(0, 12).map(c =>
       `${esc(c.vin)} — ${c.unreadable ? "no reading" : c.miles.toFixed(1) + " mi"}` +
       (c.advisor ? ` · ${esc(c.advisor)}` : "")).join("<br>");
     box.hidden = false;
-    box.innerHTML = `<b>${d.missing} of ${d.total}</b> not yet driven:<br>${lines}` +
+    // Led with the same headline the card leads with, so the preview is a
+    // preview rather than a differently-worded second opinion.
+    box.innerHTML = `<b>${d.done}% done — ${d.drove} of ${d.resolved} driven.</b><br>` +
+      `${d.missing} still to go:<br>${lines}` +
       (d.missing > 12 ? `<br>…and ${d.missing - 12} more` : "");
     sendNote(post ? `Posted ${d.missing} car(s) to Teams (HTTP ${d.status}).`
                   : `Preview only — nothing was posted.`);
