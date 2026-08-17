@@ -192,6 +192,142 @@ main{max-width:1180px;margin:0 auto;padding:22px}
 .veh.ct{border-color:rgba(232,33,39,.42)}
 .veh.lg{border-color:rgba(62,106,225,.42)}
 
+/* ── the Pending Inventory deck ──
+
+   The one tool whose answer is a picture. A line of text reading "Quicksilver,
+   Glider 18, Black Console 2" is three lookups for anybody who then has to
+   walk out and find the car; the rendered car is recognised down a row of
+   them. So this tool has a card rather than a row, and the card is portrait
+   with the picture at the top — the shape a trading card is, for the same
+   reason a trading card is that shape.
+
+   Cards are stacked in a wheel: one in focus, its neighbours cut off above
+   and below, and the whole thing moves when you scroll it. The spec sits in
+   a panel beside the focused card rather than inside it, so the picture keeps
+   the card and the words get room to be read straight.
+
+   Everything else about the vocabulary — the paper, the border-carries-state
+   rule, the type scale — is the board's. Only the arrangement is new, and it
+   is still inside the same .list element, so the head, the empty state, the
+   count and the export are one implementation and cannot disagree. */
+.list.cards{display:block}
+/* The card column is wider than the card. The extra room on its left is what
+   the cards swing into as they go round the wheel — without it they would be
+   clipped the moment they left the centre. */
+.deck{display:grid;grid-template-columns:minmax(0,540px) minmax(0,1fr);
+  gap:40px;align-items:center}
+
+/* The window the wheel turns behind. Tall on purpose — a wheel you can only
+   see one and a half cards of is a card with a smudge above it. This is most
+   of a screen, so the page gets longer and the cards behind the focused one
+   are big enough to read the model off. */
+.wheel{position:relative;height:1000px;overflow:hidden;
+  /* Fades the cut edges into the page so the clip is a horizon rather than a
+     scissor line — the whole difference between a wheel and a cropped list.
+     Shallow, because the fade is what eats the neighbours. */
+  -webkit-mask-image:linear-gradient(180deg,transparent 0,#000 9%,#000 91%,transparent 100%);
+          mask-image:linear-gradient(180deg,transparent 0,#000 9%,#000 91%,transparent 100%)}
+/* Anchored to the RIGHT of the column, not stretched across it: the focused
+   card sits next to the spec panel it belongs to, and everything to its left
+   is room for the wheel to turn into.
+
+   No CSS transition: every frame is written by the animation loop, and a
+   transition on top of it would be two things easing the same number against
+   each other. */
+.wheel-item{position:absolute;right:0;left:auto;width:360px;top:50%;
+  will-change:transform}
+/* Only the focused card takes clicks. A neighbour is a target for coming into
+   focus, which its own handler does — its RN must not be clickable while it
+   is half off the screen and half readable. */
+.wheel-item:not(.on){cursor:pointer}
+.wheel-item:not(.on) a{pointer-events:none}
+
+.pcard{
+  border:1px solid var(--line-soft);border-radius:var(--r-lg);background:var(--paper);
+  overflow:hidden;display:flex;flex-direction:column;
+  transition:border-color .2s,box-shadow .25s;
+}
+.wheel-item.on .pcard{box-shadow:var(--shadow)}
+/* Waiting longest earns the border, the way dwell does on a car on ground:
+   two cars matched a month apart are the same card and different problems. */
+.pcard.warm{border-color:rgba(245,179,27,.55)}
+.pcard.hot{border-color:rgba(232,33,39,.42)}
+
+.pcard-shot{position:relative;background:rgba(23,26,32,.035);aspect-ratio:4/3;
+  display:grid;place-items:center}
+.pcard-shot img{width:100%;height:100%;object-fit:contain;display:block}
+/* The compositor answers a plain <img> with no credential at all, so a car it
+   cannot render fails as a broken image. Hidden rather than shown broken —
+   the words underneath still say what the car is. */
+.pcard-shot img.gone{display:none}
+/* The two bubbles on the picture, in one row so a card with both reads as a
+   pair rather than as two things that happen to be near each other. */
+.pcard-tags{position:absolute;top:10px;right:10px;display:flex;gap:6px;align-items:center}
+.pcard-wait,.pcard-sv{
+  padding:4px 9px;border-radius:999px;
+  background:rgba(255,255,255,.92);border:1px solid var(--line);
+  font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--ink);
+}
+/* Amber, the colour a service visit already has on a Service Visits row —
+   the same fact should not have two liveries on one board. */
+.pcard-sv{border-color:rgba(245,179,27,.75);color:#8a6100;cursor:pointer;
+  transition:background .15s,border-color .15s}
+.pcard-sv:hover{background:#F5B31B;border-color:#F5B31B;color:var(--ink)}
+/* Only the focused card's bubble is live, like its links: a button on a card
+   that is half off the screen is a misclick waiting to happen. */
+.wheel-item:not(.on) .pcard-sv{pointer-events:none}
+.pcard-b{padding:15px 17px 13px;display:flex;flex-direction:column;gap:5px}
+.pcard-t{font-size:17px;font-weight:600;letter-spacing:-.015em;color:var(--ink)}
+.pcard-sub{font-size:12px;color:var(--ink-soft)}
+.pcard-vin{font-size:11.5px;color:var(--ink-mute);letter-spacing:.02em}
+.pcard-vin .vin{font-size:11.5px}
+/* The RN in the bottom corner, which is where it was asked for and where a
+   card number lives on a card. */
+.pcard-foot{display:flex;align-items:baseline;gap:10px;margin-top:8px;
+  padding-top:10px;border-top:1px solid var(--line-soft);font-size:11.5px;color:var(--ink-mute)}
+.pcard-foot .rn{margin-left:auto;font-weight:600;color:var(--ink-soft)}
+/* The same underline-on-hover an SV number gets, because it is the same kind
+   of thing: an id that opens the record it came from. */
+a.rnl{color:inherit;text-decoration:none;border-bottom:1px solid transparent}
+a.rnl:hover{color:var(--blue);border-bottom-color:var(--blue)}
+
+/* ── the spec, beside the card ── */
+.deck-spec{min-width:0}
+.deck-spec h3{margin:0 0 3px;font-size:20px;font-weight:600;letter-spacing:-.02em}
+.deck-spec .lede{font-size:12.5px;color:var(--ink-soft);margin-bottom:18px}
+.spec-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:2px 30px;margin:0}
+.spec-row{display:flex;align-items:baseline;gap:12px;padding:9px 0;
+  border-bottom:1px solid var(--line-soft)}
+.spec-row dt{font-size:10.5px;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-mute);min-width:82px}
+/* Wraps rather than truncating. The panel is the one place with room, and
+   "Cybertruck AWD · MT…" is a spec nobody can act on. */
+.spec-row dd{margin:0;font-size:13.5px;color:var(--ink);min-width:0}
+.spec-row dd.none{color:var(--ink-mute);font-size:12.5px}
+.deck-when{margin-top:18px;font-size:12px;color:var(--ink-mute)}
+
+/* ── moving the wheel ── */
+.deck-nav{display:flex;align-items:center;gap:10px;margin-top:16px}
+.deck-nav button{
+  width:30px;height:30px;display:grid;place-items:center;
+  border:1px solid var(--line);border-radius:var(--r-sm);color:var(--ink-soft);
+  transition:border-color .2s,color .15s}
+.deck-nav button:hover:not(:disabled){border-color:var(--ink);color:var(--ink)}
+.deck-nav button:disabled{opacity:.35}
+.deck-nav svg{width:14px;height:14px}
+.deck-count{font-size:11px;font-weight:600;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-mute)}
+.deck-hint{margin-left:auto;font-size:11.5px;color:var(--ink-mute)}
+
+/* Stacked, and still tall enough to show the card either side — the step
+   between cards is a script constant, so a short wheel here would crop the
+   neighbours away entirely and leave a single card pretending to be a deck. */
+@media (max-width:860px){
+  .deck{grid-template-columns:1fr;gap:20px}
+  .wheel{height:820px}
+}
+
 /* ── the edit panel ──
    Spans both columns under the row it belongs to, and is built on click
    rather than rendered 400 times and hidden. The row keeps its own border
@@ -229,6 +365,32 @@ main{max-width:1180px;margin:0 auto;padding:22px}
 .veh-edit .sitelist .site{padding:12px 14px;font-size:13.5px;gap:12px}
 .veh-edit .sitelist .site b{font-weight:600}
 .veh-edit .sitelist .site span{font-size:11.5px}
+/* ── the concern, in full ──
+   The list row has one line for this and has to compress it to a dot-joined
+   string. Here there is room, so the symptom leads at reading size, the
+   classification sits under it, and the narrative a technician typed gets to
+   be a sentence. Separated by a dashed rule like the contact blocks, because
+   several concerns on one visit are several pieces of work. */
+.veh-edit .cn{margin-top:11px;padding-top:10px;border-top:1px dashed var(--line-soft)}
+.veh-edit .cn:first-of-type{border-top:0;padding-top:0;margin-top:0}
+.veh-edit .cn-t{font-size:13.5px;font-weight:600;color:var(--ink);line-height:1.4}
+.veh-edit .cn-bits{margin-top:3px;font-size:11.5px;color:var(--ink-soft)}
+/* The one long piece of free text on the panel, so it gets the wider measure
+   and the quieter colour that the rest of the notes use. */
+.veh-edit .cn-note{margin-top:6px;font-size:12.5px;line-height:1.55;color:var(--ink);
+  white-space:pre-wrap;max-width:62ch}
+.veh-edit .cn-who{margin-top:5px;font-size:11px;color:var(--ink-mute)}
+.veh-edit .cn-act{margin-top:8px;display:flex;gap:8px;align-items:center}
+.veh-edit .cn-edit{margin-top:9px;display:flex;gap:8px;align-items:flex-start}
+.veh-edit .cn-edit[hidden]{display:none}
+.veh-edit .cn-pick{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.veh-edit .cn-pick[hidden]{display:none}
+.veh-edit .cn-msg{margin-top:7px}
+.veh-edit .cn-msg:empty{margin-top:0}
+/* Struck through while the write is in flight and after it lands, so a line
+   that is on its way off the visit cannot be read as one still on it. */
+.veh-edit .cn.going .cn-t{text-decoration:line-through;color:var(--ink-mute)}
+
 /* Why a move is not on offer, said out loud. Never a greyed control with no
    explanation. */
 .veh-edit .why{color:var(--ink-mute);font-size:11.5px;line-height:1.5}
@@ -508,6 +670,28 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 .qdel svg{width:13px;height:13px}
 .qempty{padding:12px 10px;font-size:12px;color:var(--ink-mute)}
 
+/* ── the concern menu ──
+   The same menu as saved scans, hung the other way up: this one drops off a
+   chip in the list header rather than a button in a modal footer, so upward
+   would put it over the stats strip.
+
+   Its rows latch instead of firing — several concerns at once is the normal
+   way to read a board like this ("everything cosmetic and everything that
+   won't drive"), and a single-select menu would make that three passes. */
+.qmenu.down{bottom:auto;top:calc(100% + 8px);transform:translateY(-4px)}
+.qmenu.down.on{transform:translateY(0)}
+.crow{gap:9px}
+.crow .qt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--ink-soft)}
+.crow.on .qt{color:var(--ink)}
+/* The count is the point of the row as much as the name is — "Cosmetic 31"
+   says where the work is before anything has been clicked. */
+.crow .qn{flex:none;font-size:11px;font-weight:600;color:var(--ink-mute);
+  font-variant-numeric:tabular-nums}
+.crow .qtick{flex:none;width:13px;height:13px;color:var(--blue);opacity:0}
+.crow.on .qtick{opacity:1}
+.qsep{height:1px;background:var(--line-soft);margin:5px 8px}
+
 /* Takes the count text's place in the footer, so naming costs no extra row. */
 #selName{
   flex:1;min-width:0;margin-right:auto;
@@ -744,15 +928,24 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
   <div class="hero-in">
     <h1>The Compiler</h1>
     <p>One board over the systems that describe a vehicle. Garage says what a car
-       <b>is</b>; Intrepid says what is <b>wrong</b> with it.</p>
+       <b>is</b>; Intrepid says what is <b>wrong</b> with it; Tesla OS says who is
+       <b>waiting</b> for it.</p>
     <div class="tools">
       <button class="btn btn-primary" id="svBtn">Service Visits</button>
       <button class="btn btn-primary" id="cogBtn">Cars on Ground</button>
+      <!-- No modal behind this one: the bucket is the bucket and the centre is
+           already picked, so there is nothing to choose before it runs.
+
+           The id, and the `exp` prefix on everything behind it, predate the
+           name: this tool was called "Expenable" until 2026-08-16. Renaming the
+           button is the whole rename — the internals were left alone rather
+           than churning forty identifiers across three files for a label. -->
+      <button class="btn btn-primary" id="expBtn">Pending Inventory</button>
     </div>
   </div>
 </section>
 
-<!-- Written by paintStats(): the two tools count different things, and a
+<!-- Written by paintStats(): the three tools count different things, and a
      fixed strip would leave one of them staring at four tiles reading zero. -->
 <div class="stats" id="stats"></div>
 
@@ -774,6 +967,34 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
            the status you asked for — so its view toggle is a sort instead. -->
       <button class="chip on" id="sortDwell" hidden>Longest first</button>
       <button class="chip" id="sortRecent" hidden>Newest first</button>
+      <!-- Groups the list by what the tickets on it actually say. Built from
+           the rows on screen, not from a list kept here: the concern names
+           are SCA's, they are not in its bundle as an enum, and a hard-coded
+           copy would quietly drop whatever it had not heard of. Hidden
+           outright when the rows carry no ticket detail — the Service App
+           prompt above already says why, and a dead chip would say it worse. -->
+      <div class="qwrap" id="concernWrap" hidden>
+        <button class="chip" id="concernBtn" aria-haspopup="true" aria-expanded="false"
+                title="Show only the cars whose tickets name these concerns">Concern: All</button>
+        <div class="qmenu down" id="concernMenu" role="menu"></div>
+      </div>
+      <!-- Pending Inventory only. Everything a card shows is filterable, and none of
+           it is part of the scan: the bucket is the bucket, so narrowing can
+           only ever happen over rows already fetched. Same reasoning as the
+           concern filter beside it — see visibleRows(). -->
+      <button class="chip" id="expFilterBtn" hidden
+              title="Narrow the cards by anything on them — colour, wheels, trim, how long they have waited">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+             style="vertical-align:-1px;margin-right:6px">
+          <path d="M3 5h18M7 12h10M11 19h2"/>
+        </svg><span id="expFilterLabel">Filters</span>
+      </button>
+      <div class="qwrap" id="expSortWrap" hidden>
+        <button class="chip" id="expSortBtn" aria-haspopup="true" aria-expanded="false"
+                title="Change the order the cards are in">Longest waiting</button>
+        <div class="qmenu down" id="expSortMenu" role="menu"></div>
+      </div>
       <!-- The only control on the board that does something to a car rather
            than reading one, which is why it asks first and why it says how
            many. Cars on Ground only. -->
@@ -809,8 +1030,10 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
       <path d="M129 81 l11 11" stroke="#171A20" stroke-width="3" stroke-linecap="round" opacity=".3"/>
     </svg>
     <h3>Nothing compiled yet</h3>
-    <p>Choose <b>Service Visits</b> to see what is holding cars up, or
-       <b>Cars on Ground</b> to see where they are in the receiving ladder.</p>
+    <p>Choose <b>Service Visits</b> to see what is holding cars up,
+       <b>Cars on Ground</b> to see where they are in the receiving ladder, or
+       <b>Pending Inventory</b> for the cars that are matched to a customer
+       with no appointment booked.</p>
   </div>
 </main>
 
@@ -900,6 +1123,29 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
     <span class="modal-sub" id="cogCount" style="margin-right:auto"></span>
     <button class="btn btn-ghost" data-close>Cancel</button>
     <button class="btn btn-dark" id="runCog">Run scan</button>
+  </div>
+</div>
+
+<!-- Pending Inventory filters — every facet the cards carry, in one surface.
+
+     A modal rather than a strip of chips because there are eleven of them:
+     eleven dropdowns across the list head would wrap onto three lines and
+     bury the Export button. It is also the shape the other two tools already
+     use for facets, so the vocabulary — .facet, .opt, counts, a Clear on each
+     group — is the one already on the board.
+
+     Built on open and repainted after every pick, because the counts are
+     measured against the other facets and therefore move as you narrow. -->
+<div class="modal wide" id="expFilterModal" role="dialog" aria-label="Narrow the list">
+  <div class="modal-head"><h3>Filters</h3>
+    <span class="modal-sub" id="expFilterCtx"></span>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body" id="expFilterBody"></div>
+  <div class="modal-foot">
+    <span class="modal-sub" id="expFilterCount" style="margin-right:auto"></span>
+    <button class="btn btn-ghost" id="expFilterClear">Clear all</button>
+    <button class="btn btn-dark" data-close>Done</button>
   </div>
 </div>
 
@@ -1040,7 +1286,9 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
       <p class="sec-p">Garage and Intrepid are both required. A scan with one of
         them missing would answer the question wrongly rather than refuse, so it
         refuses. The Service App is optional: without it a service visit shows
-        as a number instead of what it is for.</p>
+        as a number instead of what it is for. Tesla OS is what Pending
+        Inventory reads, and only that one — the other two tools never touch
+        it.</p>
 
       <div class="conn" id="aGarageRow"><i class="dot"></i><b>Garage</b><span id="aGarage">—</span></div>
       <div class="conn" id="aIntrepidRow"><i class="dot"></i><b>Intrepid</b><span id="aIntrepid">—</span></div>
@@ -1049,6 +1297,11 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
         <button class="mini" id="scaConnect">Connect</button>
         <button class="mini" id="scaForget" hidden>Forget</button>
       </div>
+      <div class="conn" id="aOsRow"><i class="dot"></i><b>Tesla OS</b><span id="aOs">—</span></div>
+      <div class="connect-row">
+        <button class="mini" id="osConnect">Connect</button>
+        <button class="mini" id="osForget" hidden>Forget</button>
+      </div>
 
       <div class="hub-note">
         Sign-ins live on the <b>Zo Projects Hub</b>. One session there covers every
@@ -1056,9 +1309,9 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
         <a href="http://localhost:3100" target="_blank" rel="noopener">Open the Hub</a>
         <!-- The exception, said here rather than left as an inconsistency
              somebody has to work out for themselves. -->
-        <div style="margin-top:8px">The <b>Service App</b> connects here instead:
-           it is a nine-hour token rather than a session cookie, and this is
-           the only board that speaks to it.</div>
+        <div style="margin-top:8px">The <b>Service App</b> and <b>Tesla OS</b>
+           connect here instead: both are tokens rather than session cookies,
+           and this is the only board that speaks to either.</div>
       </div>
     </section>
 
@@ -1197,14 +1450,14 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
     <section class="sec" id="secMaintenance">
       <h4 class="sec-h">Maintenance</h4>
       <p class="sec-p">The site directory is ~1,850 records cached for a week.
-        Reset forgets the centre, both session cookies and the Service App
-        token — everything this board stores.</p>
+        Reset forgets the centre, both session cookies, the Service App token
+        and the Tesla OS session — everything this board stores.</p>
 
       <div class="conn" id="mTrtRow"><i class="dot"></i><b>Site directory</b><span id="mTrt">cached</span></div>
       <button class="btn-block" id="refreshTrt">Refresh the site directory</button>
 
       <div class="sep"></div>
-      <button class="btn-block red" id="resetBoard">Forget centre, cookies and SCA</button>
+      <button class="btn-block red" id="resetBoard">Forget centre, cookies and tokens</button>
     </section>
 
     </div>
@@ -1220,14 +1473,23 @@ const S = {
   // The overflow lot, and which of the two the Service Visits scan covers.
   // Onsite is the default: the same population the board scanned before this.
   offsiteTrtId:null, offsiteTrt:null, sites:"onsite",
-  // `tool` is which of the two last ran. The list, the stats strip and the
-  // export all read it, because the two tools answer different questions and
-  // a row from one rendered by the other's code would be nonsense.
+  // `tool` is which of the three last ran. The list, the stats strip and the
+  // export all read it, because the tools answer different questions and a
+  // row from one rendered by another's code would be nonsense.
   tool:"sv",
   rows:[], summary:null, notes:[], reasons:{},
   facets:null, kinds:[], garageUrl:null,
   filters:{}, chosenKinds:["sv","containment","logistics"],
   view:"flagged", listSub:"",
+  /* Which ticket concerns the list is narrowed to, empty meaning all of them.
+     Unlike every filter in the Service Visits menu this one is not part of
+     the scan: a concern is only known once SCA has answered, which is the
+     last thing a scan does, so filtering on it can save no work and asking
+     for a second scan would spend a minute to hide rows already on screen.
+     It goes through visibleRows() instead, which is what the count, the
+     export and the empty state all read — so none of them can disagree with
+     the screen about what is listed. */
+  concern:[],
   cogStatuses:null, cogChosen:[], cogSort:"dwell", cogTally:[], cogTotal:0, cogNoRecord:0,
   /* Two of them: `cogDwell` is what the menu has selected, `cogWindow` is what
      the rows on screen were actually scanned with. They diverge the moment
@@ -1239,7 +1501,26 @@ const S = {
      sign-in poll can repaint one source without refetching the other two;
      `scaPhase` is the sign-in state machine's phase as of the last poll. */
   conns:null, sca:null, scaPhase:"idle", scaDetail:null, scaDismissed:false,
-  rowsHaveSca:false, scanTrtId:null
+  rowsHaveSca:false, scanTrtId:null,
+  /* Tesla OS, the same pair of fields as the Service App and for the same
+     reason. `expBucket` is what OS called the bucket these rows came out of —
+     it is site-configured, so the screen says which one it read rather than
+     assuming everyone's is named the same. */
+  osPhase:"idle", osDetail:null, expBucket:null,
+  /* Pending Inventory's narrowing, all of it over rows already fetched — the bucket
+     cannot be asked for a smaller one, so there is no scan to make cheaper.
+     `expFilters` is facet key → chosen values; `expWait` is a floor in days,
+     0 meaning any; `expSort` names one of EXP_SORTS. */
+  expFilters:{}, expWait:0, expSort:"wait",
+  /* Which card the wheel has in focus, as an index into the rows currently
+     listed — not a VIN. The list it indexes is rebuilt by every filter and
+     sort, and a car that has just been filtered out cannot be the one in
+     focus, so the position is clamped rather than followed. */
+  expIndex:0,
+  /* Three-valued on purpose: true, false, and "nobody has asked yet". The
+     probe costs a call to the pipeline, so the dot must be paintable before
+     it comes back. */
+  osLive:null
 };
 
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
@@ -1660,6 +1941,43 @@ $("runCog").addEventListener("click", async () => {
   }
 });
 
+/* ── Pending Inventory ──
+   The only tool with no modal in front of it. There is nothing to choose: the
+   bucket is whatever Tesla OS calls "Matched But Not Scheduled" at this
+   centre, and the centre is the one already in the picker. A dialog offering a
+   single button would be a click spent on nothing.
+
+   So the hero button IS the run button, spinner and all. */
+$("expBtn").addEventListener("click", async () => {
+  if(S.busy) return;
+  if(!S.trtId){
+    note("Set a TRT first — the pipeline is read one centre at a time.");
+    $("trtInput").value = "";
+    showModal($("trtModal"));
+    setTimeout(() => $("trtInput").focus(), 60);
+    return;
+  }
+
+  S.busy = true;
+  const btn = $("expBtn");
+  const restore = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<i class="spin"></i>Reading';
+  clearNotes(); progWatch();
+
+  try{
+    renderExp(await api("/api/exp/scan", { trtId: S.trtId }));
+  }catch(err){
+    /* A dead OS session is the one failure with a fix the reader can act on,
+       and it is also the one that would otherwise land as an empty centre. */
+    note(err.needsOs
+      ? err.message + "  Open Admin › Sources and connect Tesla OS again."
+      : err.message, true);
+  }finally{
+    S.busy = false; progHide();
+    btn.disabled = false; btn.innerHTML = restore;
+  }
+});
+
 /* ── progress ── */
 let progTimer = null;
 function progWatch(){
@@ -1677,6 +1995,9 @@ function progWatch(){
                       tickets:"Reading the tickets", vri:"Receiving inspections",
                       statuses:"Reading the ladder", inventory:"Cars on ground",
                       cog:"COG status",
+                      pipeline:"Reading the delivery pipeline",
+                      spec:"Looking the cars up in Garage",
+                      arrival:"Checking which ones are here",
                       identify:"Finding these cars in Garage", wake:"Waking them up",
                       settle:"Giving the sleepers a moment", trunks:"Opening trunks"
                     }[d.phase] || d.phase;
@@ -1687,6 +2008,15 @@ function progWatch(){
       if(d.phase === "settle"){
         $("pCount").textContent = "";
         $("pBar").style.width = "70%";
+      }else if(d.phase === "pipeline" || d.phase === "spec"){
+        /* Two phases over the same cars: OS pages them out, then Garage is
+           asked what they are. The bar splits the run between them rather
+           than restarting at zero for the second, which would read as the
+           scan having gone back to the beginning. */
+        $("pCount").textContent = d.total ? `${d.done || 0} / ${d.total}` : "";
+        const base = d.phase === "pipeline" ? 8 : 60;
+        const span = d.phase === "pipeline" ? 52 : 36;
+        $("pBar").style.width = (base + (d.total ? span * ((d.done || 0) / d.total) : 0)).toFixed(1) + "%";
       }else if(["identify", "wake", "trunks"].includes(d.phase)){
         $("pCount").textContent = d.total ? `${d.done || 0} / ${d.total}` : "";
         $("pBar").style.width = { identify:15, wake:40, trunks:70 }[d.phase] +
@@ -1831,14 +2161,23 @@ $("savedBtn").addEventListener("click", e => {
   const open = $("qmenu").classList.toggle("on");
   $("savedBtn").setAttribute("aria-expanded", String(open));
 });
+/* Both drop-downs, one handler. A click inside either wrap leaves that one
+   alone; anything else shuts them both, including a click on the other. */
 document.addEventListener("click", e => {
-  if(!e.target.closest(".qwrap")) closeQuick();
+  const wrap = e.target.closest(".qwrap");
+  if(wrap !== $("savedBtn").closest(".qwrap")) closeQuick();
+  if(wrap !== $("concernWrap")) closeConcerns();
+  if(wrap !== $("expSortWrap")) closeExpSort();
 });
 /* Before the shared Escape handler, which closes the whole modal: one press
    should dismiss the menu and leave the selection behind it alone. */
 document.addEventListener("keydown", e => {
   if(e.key !== "Escape") return;
   if($("qmenu").classList.contains("on")){ e.stopPropagation(); closeQuick(); }
+  // Same bargain for the concern menu, which sits over the list rather than
+  // inside a modal — Escape should dismiss it before it reaches anything else.
+  if($("concernMenu").classList.contains("on")){ e.stopPropagation(); closeConcerns(); }
+  if($("expSortMenu").classList.contains("on")){ e.stopPropagation(); closeExpSort(); }
 }, true);
 
 $("qmenu").addEventListener("click", e => {
@@ -2148,6 +2487,86 @@ function editPanelHtml(r){
 
        A ticket with none says so. A silently absent section is
        indistinguishable from a section that failed to load. */
+    /* ── what the visit is actually for ──
+
+       Above the images, because the words come first: a photo of a scratched
+       fender means something once you have read "FENDER, LH [ Paint / Chips ]
+       · Logistics Damage", and very little before it.
+
+       The list row already carries a one-line version of this. This is the
+       long form the row has no space for — the narrative a technician typed,
+       who logged it and when — and it is here rather than on the row for the
+       same reason the mover is: one car at a time, on the surface where
+       someone is actually working on that car.
+
+       Every concern on the visit, not just the first. A visit with three of
+       them is three separate pieces of work and the panel that moves it
+       should say so. */
+    const cnActs = t.activities || [];
+    const concerns = `
+      <div class="cns" style="margin-top:14px;padding-top:12px;
+           border-top:1px solid var(--line-soft)">
+        <div class="ed-h"><b>${cnActs.length === 1 ? "Concern" : "Concerns"}</b><span>${
+          cnActs.length > 1 ? cnActs.length + " on this visit" : ""}</span></div>
+        ${!cnActs.length
+          ? `<div class="why">No concern logged on this visit yet.</div>`
+          : cnActs.map(a => {
+              const head = a.symptom || a.narrative || "Concern";
+              /* Only what differs. Printing "Cosmetic" beside a category that
+                 already says "Cosmetic" is a line spent on nothing, which is
+                 the same rule the row applies to the same fields. */
+              const bits = [];
+              if(a.hyper && a.hyper !== head) bits.push(a.hyper);
+              if(a.category && a.category !== a.hyper) bits.push(a.category);
+              if(a.cosmetic && !/cosmetic/i.test(a.hyper || "")) bits.push("Cosmetic issue");
+              if(a.frtHours != null) bits.push(a.frtHours + "h");
+
+              // The narrative is the head when there is no symptom, and
+              // printing it twice would read as two different facts.
+              const note = a.narrative && a.narrative !== head ? a.narrative : "";
+              const who = [
+                a.number,
+                a.createdBy ? "logged by " + a.createdBy : "",
+                a.changedAt ? "updated " + fmtDate(a.changedAt) : ""
+              ].filter(Boolean).join(" · ");
+
+              /* ── the two things a concern can have done to it ──
+
+                 A courtesy line gets Remove and nothing else: it is a
+                 standing inspection line, it is the one people actually want
+                 off a visit, and there is nothing on it worth editing.
+                 Everything else gets Edit, because the thing that goes wrong
+                 with a real concern is that it names the wrong symptom.
+
+                 Matched on the symptom text rather than on a code, because
+                 SCA has no flag for "this is the courtesy line" — the
+                 catalogue entry is just a symptom like any other. */
+              const courtesy = /courtesy service provided/i.test(head);
+
+              return `<div class="cn" data-act="${esc(a.id)}" data-sv="${esc(v.svId)}"
+                           data-model="${esc(a.modelId || "")}">
+                <div class="cn-t">${esc(head)}</div>
+                ${bits.length ? `<div class="cn-bits">${esc(bits.join(" · "))}</div>` : ""}
+                ${note ? `<div class="cn-note">${esc(note)}</div>` : ""}
+                ${who ? `<div class="cn-who">${esc(who)}</div>` : ""}
+                <div class="cn-act">
+                  ${courtesy
+                    ? `<button class="mini danger cn-rm">Remove</button>`
+                    : `<button class="mini cn-ed">Edit</button>`}
+                </div>
+                <div class="cn-edit" hidden>
+                  <div class="grow" style="position:relative">
+                    <input class="cn-q" autocomplete="off"
+                           placeholder="Start typing a symptom">
+                    <div class="sitelist cn-list" hidden></div>
+                  </div>
+                  <div class="cn-pick" hidden></div>
+                </div>
+                <div class="why cn-msg"></div>
+              </div>`;
+            }).join("")}
+      </div>`;
+
     const shotActs = (t.activities || []).filter(a => (a.photos || []).length);
     const allShots = shotActs.flatMap(a => a.photos);
     const images = `
@@ -2195,6 +2614,7 @@ function editPanelHtml(r){
         </div>
       </div>
       <div class="why mv-msg" style="margin-top:7px"></div>
+      ${concerns}
       ${images}
 
       <!-- ── contact ──
@@ -2423,6 +2843,145 @@ function wireEditPanel(panel){
     range.addEventListener("keyup", e => {
       if(e.key === "End" && Number(range.value) === 100) doMove();
     });
+
+    /* ══════════════ the two writes on a concern ══════════════
+
+       Remove takes a courtesy line off the visit; Edit changes what a concern
+       says it is. Both were captured off SCA's own UI rather than inferred —
+       see sca.js — and both are judged on the record being read back, never
+       on the 200.
+
+       Wired here rather than in their own pass so they inherit everything
+       this panel already is: one at a time, in a modal, over a row the server
+       shaped. Pending Inventory's SV bubble gets them for free for the same
+       reason it gets the panel. */
+    for(const cn of ed.querySelectorAll(".cn[data-act]")){
+      const actId = cn.dataset.act;
+      const svId  = cn.dataset.sv;
+      const model = cn.dataset.model;
+      const msg   = cn.querySelector(".cn-msg");
+      const say   = (text, kind) => {
+        msg.className = "why cn-msg" + (kind ? " " + kind : "");
+        msg.textContent = text;
+      };
+
+      /* ── remove ──
+         Slide to confirm, like every other write on this board. The words say
+         what actually happens: the line goes back to outstanding work, which
+         is not the same as cancelling it, and somebody reading a red button
+         deserves to know which of the two they are pressing. */
+      const rm = cn.querySelector(".cn-rm");
+      if(rm) rm.addEventListener("click", async () => {
+        say("Removing it takes this line off the visit and returns it to " +
+            "outstanding work. The ticket stays open and the concern is not cancelled.");
+        const sure = await confirmBySlide(rm, "Slide to remove", { tone: "danger" });
+        if(!sure){ say(""); return; }
+
+        rm.disabled = true;
+        cn.classList.add("going");
+        say("Removing…");
+        try{
+          const d = await api("/api/sca/activity/remove",
+            { serviceVisitId: svId, activityId: actId });
+          say(`Removed — back on outstanding work.${
+            d.remaining != null ? ` ${d.remaining} left on this visit.` : ""} ` +
+            `Re-run the scan to refresh the list.`, "done");
+          rm.remove();
+        }catch(err){
+          cn.classList.remove("going");
+          rm.disabled = false;
+          // SCA's own words when it refuses, relayed rather than reworded.
+          say(err.message, "bad");
+        }
+      });
+
+      /* ── edit the symptom ──
+         A type-ahead over SCA's own catalogue, scoped to this car's model,
+         because a copy of that list would be wrong the first time Tesla added
+         a symptom. Two characters before it asks, the same floor SCA's picker
+         uses. */
+      const edBtn = cn.querySelector(".cn-ed");
+      const box   = cn.querySelector(".cn-edit");
+      const q     = cn.querySelector(".cn-q");
+      const list  = cn.querySelector(".cn-list");
+      const pick  = cn.querySelector(".cn-pick");
+      let chosen = null, timer = null;
+
+      const closeList = () => { list.hidden = true; list.innerHTML = ""; };
+
+      if(edBtn) edBtn.addEventListener("click", () => {
+        box.hidden = !box.hidden;
+        edBtn.textContent = box.hidden ? "Edit" : "Cancel edit";
+        if(box.hidden){ closeList(); pick.hidden = true; chosen = null; say(""); }
+        else q.focus();
+      });
+
+      if(q) q.addEventListener("input", () => {
+        clearTimeout(timer);
+        const term = q.value.trim();
+        chosen = null; pick.hidden = true;
+        if(term.length < 2){ closeList(); return; }
+        timer = setTimeout(async () => {
+          try{
+            const d = await api(`/api/sca/symptoms?q=${encodeURIComponent(term)}` +
+                                `&modelId=${encodeURIComponent(model)}`);
+            const rows = d.symptoms || [];
+            if(!rows.length){ closeList(); say("No symptom in the Service App matches that."); return; }
+            say("");
+            /* Capped at 40. "glass" returns over a thousand rows and a list
+               that long is not a picker, it is a scroll. */
+            list.innerHTML = rows.slice(0, 40).map(s =>
+              `<button class="site" data-code="${esc(s.symptomCode)}"
+                 ><b>${esc(s.name)}</b></button>`).join("") +
+              (rows.length > 40
+                ? `<div class="hint" style="padding:8px 14px">${rows.length - 40} more — keep typing</div>`
+                : "");
+            list.hidden = false;
+          }catch(err){ closeList(); say(err.message, "bad"); }
+        }, 220);
+      });
+
+      if(list) list.addEventListener("click", e => {
+        const b = e.target.closest("[data-code]");
+        if(!b) return;
+        chosen = { code: b.dataset.code, name: b.querySelector("b").textContent };
+        q.value = chosen.name;
+        closeList();
+        /* The confirm names the symptom rather than saying "Save". A button
+           that says Save can be pressed without reading; one that says the
+           words going onto the record cannot. */
+        pick.innerHTML = `<button class="mini cn-go">Change to this symptom</button>
+          <span class="cn-who">classification follows the symptom</span>`;
+        pick.hidden = false;
+      });
+
+      if(pick) pick.addEventListener("click", async e => {
+        if(!e.target.closest(".cn-go") || !chosen) return;
+        const go = e.target.closest(".cn-go");
+        go.disabled = true;
+        say("Changing…");
+        try{
+          const d = await api("/api/sca/activity/symptom",
+            { serviceVisitId: svId, activityId: actId, symptomCode: chosen.code });
+          /* What the RE-READ says, not what was sent. The two differ exactly
+             when something is wrong, which is the only time it matters. */
+          cn.querySelector(".cn-t").textContent = d.symptom || chosen.name;
+          const bitsEl = cn.querySelector(".cn-bits");
+          if(bitsEl && d.hyper) bitsEl.textContent = d.hyper;
+          say(d.verified === true
+                ? "Changed, and read back from the Service App to prove it."
+                : d.verified === null
+                  ? "The Service App accepted it, but the board could not read the record back — check it in SCA."
+                  : "The Service App accepted it and then read back something else. Check it in SCA.",
+              d.verified === true ? "done" : "bad");
+          box.hidden = true;
+          if(edBtn) edBtn.textContent = "Edit";
+        }catch(err){
+          go.disabled = false;
+          say(err.message, "bad");
+        }
+      });
+    }
 
     /* ── the images ──
        Rendered with the card, so there is nothing to open — only the viewer to
@@ -2821,13 +3380,31 @@ document.addEventListener("click", e => {
   if(e.target.closest("a, button")) return;
 
   const r = S.rows.find(x => x.vin === veh.dataset.vin);
-  if(!r) return;
-  $("ticketCtx").textContent = `${r.vin}  ·  ${labelFor("model", r.model)}` +
-    (r.site ? `  ·  ${r.site}` : "");
+  if(r) openTicket(r);
+});
+
+/* ── the ticket editor, opened from anywhere ──
+
+   One way in, deliberately. Pending Inventory's SV bubble opens this same
+   panel over one of its own rows, and the whole point of that is that there
+   is no second copy: whatever the Service Visits editor grows next — another
+   write, another guard, another line of ticket detail — the bubble gets it on
+   the same day, because it is the same function over the same row shape.
+
+   The rows agree because the server makes them agree. `expScan` builds its
+   `visits[]` with the same fields as the scan does and runs them through the
+   same `enrichVisits()`, so this does not care which tool it was handed.
+
+   The heading is the one thing that differs, and only because the two tools
+   name a model differently — Tesla OS ships the compositor's code ("m3") and
+   Garage's facet ships its own ("3"). Whichever the row has. */
+function openTicket(r){
+  const model = r.modelName || labelFor("model", r.model);
+  $("ticketCtx").textContent = [r.vin, model, r.site].filter(Boolean).join("  ·  ");
   $("ticketBody").innerHTML = editPanelHtml(r);
   wireEditPanel($("ticketBody"));
   showModal($("ticketModal"));
-});
+}
 
 function rowHtml(r){
   const cls = r.campaigns.length ? "ct" : (r.visits.length ? "sv" : (r.logistics.length ? "lg" : ""));
@@ -2955,25 +3532,910 @@ function cogRowHtml(r){
   </div>`;
 }
 
-function visibleRows(){
-  if(S.tool === "cog"){
-    /* Sorted here rather than re-scanned: the server hands back longest-first
-       and the other order is the same rows read the other way up. */
-    return S.cogSort === "recent" ? [...S.rows].reverse() : S.rows;
+/* ── a matched car ──
+
+   The card, and the one thing on this board that is a picture rather than a
+   line of text. "Quicksilver, Glider 18, Black Console 2" is three lookups for
+   anybody who then has to walk out and find the car; the rendered car is
+   recognised at a glance. The words are underneath it anyway, because the
+   picture cannot be pasted into a message.
+
+   ── the compositor takes no credential at all ──
+
+   A plain <img src>, no proxy, unlike the SCA photos which had to be fetched
+   through the board so the bearer never reached the page. The recipe is copied
+   from OS's own CompositorImage component: the view suffix differs for S and
+   X, and the crop differs for Cybertruck.
+
+   It is fed the MARKETING codes off the OS row, not Garage's manufacturing
+   `option_codes`. Feeding it the latter renders the car and leaves black voids
+   where the wheels should be — a real dead end, not a compositor bug. */
+const COMPOSITOR = "https://sdlc-assets.tesla.com/configurator/compositor";
+const SHOT_MODELS = ["m3", "my", "ms", "mx", "ct", "ts"];
+
+function carShot(r, size = 400){
+  // A model the compositor does not know renders nothing at all, so the card
+  // goes without a picture rather than with a broken one.
+  if(!r.options || !SHOT_MODELS.includes(r.model)) return "";
+  const view = (r.model === "ms" || r.model === "mx") ? "STUD_3QTR_V2" : "STUD_3QTR";
+  const crop = r.model === "ct" ? "1400,680,260,220" : "1550,850,200,180";
+  return `${COMPOSITOR}?model=${encodeURIComponent(r.model)}` +
+         `&options=${encodeURIComponent(r.options)}&view=${view}&size=${size}` +
+         `&crop=${crop}&bkba_opt=1`;
+}
+
+/* Derived on the page from the timestamp, never taken from OS's own
+   `time_since_matched`: that field is minutes as a string, fixed at the moment
+   the row was fetched, so a tab left open would keep reporting the age it had
+   on load. */
+const daysSince = at => {
+  if(!at) return null;
+  const t = new Date(at).getTime();
+  return isNaN(t) ? null : Math.floor((Date.now() - t) / 86400000);
+};
+
+/* The order, in Tesla OS. The card's one way back to the system the row came
+   from — the VIN beside it goes to Garage, so between them a card opens both
+   halves of what it is made of. */
+const rnLink = r => !r.rn ? "" :
+  `<b><a class="rnl" target="_blank" rel="noreferrer"
+     href="https://os.tesla.com/vehicle-order/${encodeURIComponent(r.rn)}/"
+     title="${esc(r.rn)} — open this order in Tesla OS">${esc(r.rn)}</a></b>`;
+
+/* A reading aid, not a policy. Nobody has told this board what counts as too
+   long to leave a matched car unbooked, so the colours only separate today's
+   matches from last week's and last fortnight's — the same job dwell does on a
+   car on ground. */
+const WAIT_WARM = 7, WAIT_HOT = 14;
+
+/* The card itself: picture, then year and model, then the VIN, and the RN in
+   the bottom corner — the order it was asked for, and the order a trading
+   card puts them in. The spec is deliberately NOT in here; it lives beside
+   the focused card, where it has room to be read. */
+function pcardHtml(r){
+  const d   = daysSince(r.matchedAt);
+  const cls = d == null ? "" : (d >= WAIT_HOT ? "hot" : (d >= WAIT_WARM ? "warm" : ""));
+  const spc = sp(r);
+  /* One size for every card rather than a bigger one for the focused card.
+     Swapping an <img> src as a card comes into focus reloads it, and a card
+     that flickers as it arrives is worse than one rendered at 500 for a slot
+     360 wide. It also means turning back and forth reuses the cache.
+
+     `data-src`, not `src`: the layout pass fills it in when the wheel brings
+     the card near, so a 700-car bucket does not fetch 700 renders. `loading`
+     cannot do this job — every card is inside the viewport's reach as far as
+     the browser is concerned. */
+  const shot = carShot(r, 500);
+
+  return `<article class="pcard ${cls}">
+    <div class="pcard-shot">
+      ${shot ? `<img data-src="${esc(shot)}" alt="${esc([r.year, r.modelName, spc.paint]
+          .filter(Boolean).join(" "))}" onerror="this.classList.add('gone')">` : ""}
+      <div class="pcard-tags">
+        ${!(r.visits && r.visits.length) ? "" : `<button class="pcard-sv" data-svvin="${esc(r.vin)}"
+          title="${esc(r.visits.length === 1 ? "This car has a service visit — open it"
+                                            : r.visits.length + " service visits — open them")}">SV${
+          r.visits.length > 1 ? " ×" + r.visits.length : ""}</button>`}
+        ${d == null ? "" : `<span class="pcard-wait"
+          title="Days since Tesla OS matched this car to an order">${d}d</span>`}
+      </div>
+    </div>
+    <div class="pcard-b">
+      <div class="pcard-t">${esc([r.year, r.modelName].filter(Boolean).join(" ")) || "Unknown model"}</div>
+      ${spc.trim || spc.motor
+        ? `<div class="pcard-sub">${esc([spc.trim || spc.motor, spc.trimCode].filter(Boolean).join(" · "))}</div>`
+        : ""}
+      <div class="pcard-vin">${vinLink(r)}</div>
+      <div class="pcard-foot">
+        <span>${r.matchedAt ? "matched " + esc(fmtDate(r.matchedAt)) : "no match date"}</span>
+        <span class="rn">${rnLink(r)}</span>
+      </div>
+    </div>
+  </article>`;
+}
+
+/* Everything Garage knows about the car in focus, beside it.
+
+   Every field is named even when it is empty, which is the opposite of what
+   the card does with the tow hitch. On a card a missing line is invisible and
+   nothing is claimed; in a panel of eight labelled rows a silently absent one
+   reads as a car that has no roof. So the label stays and the value says
+   "not on record". */
+function deckSpecHtml(r){
+  const spc = sp(r);
+  const rows = [
+    ["Paint",    spc.paint],
+    ["Wheels",   spc.wheels],
+    ["Interior", spc.interior],
+    ["Seats",    spc.seats],
+    ["Roof",     spc.roof],
+    ["Motor",    spc.motor],
+    ["Trim",     [spc.trim, spc.trimCode].filter(Boolean).join(" · ")],
+    // The one field with a real negative: "no tow hitch" is an answer, and a
+    // blank here would leave the question open on every car without one.
+    ["Tow hitch", spc.towed ? (spc.tow || "Fitted") : (r.inGarage ? "None" : "")]
+  ];
+
+  const body = r.inGarage
+    ? `<dl class="spec-grid">${rows.map(([k, v]) => `
+        <div class="spec-row"><dt>${esc(k)}</dt>
+          <dd class="${v ? "" : "none"}">${v ? esc(v) : "not on record"}</dd></div>`).join("")}</dl>`
+    /* Not a car without a colour — a car that does not exist yet. A VIN with
+       no record in Garage's index has not come down the line, so there is
+       nothing to describe; the order and the picture are Tesla OS's and are
+       as good as any other card's. One sentence, because that is the whole
+       fact. */
+    : `<div class="note">This vehicle has not been built yet.</div>`;
+
+  const d = daysSince(r.matchedAt);
+  return `
+    <h3>${esc([r.year, r.modelName].filter(Boolean).join(" ")) || "Unknown model"}</h3>
+    <div class="lede">${esc([
+      spc.trim || spc.motor,
+      r.rn,
+      d == null ? "" : `waiting ${d} day${d === 1 ? "" : "s"}`
+    ].filter(Boolean).join(" · "))}</div>
+    ${body}
+    <div class="deck-when">${[
+      r.matchedAt ? "Matched " + esc(fmtDate(r.matchedAt)) : "No match date on the order",
+      /* Where the car is, said before where it is going. A board that lets you
+         filter on arrival has to show it somewhere, and this is the line the
+         other dates are already on. The ETA is only worth printing while the
+         car is still coming — on one that has arrived it is a plan that has
+         been overtaken by events, and several are months in the past. */
+      r.here == null ? "" : (r.here
+        ? "Arrived" + (r.arrivedAt ? " " + esc(fmtDate(r.arrivedAt)) : " at this centre")
+        : "In transit" + (r.etaAt ? " · ETA " + esc(fmtDate(r.etaAt)) : "")),
+      r.here == null && r.etaAt ? "ETA to the centre " + esc(fmtDate(r.etaAt)) : ""
+    ].filter(Boolean).join(" · ")}</div>`;
+}
+
+/* ── the wheel, and the deck's position is a number rather than an index ──
+
+   The first version moved a card at a time: one wheel event, one step, and a
+   cooldown to stop a trackpad flying through the lot. It stepped, and stepping
+   is not what a wheel does — you could feel every notch land.
+
+   So the wheel has a POSITION instead, `deckPos`, a float in card units. The
+   scroll adds to a target, an animation loop eases the position toward it, and
+   every frame writes the transform of the cards near it. Halfway between two
+   cards is a real state now: both are half-sized, half-faded, on their way
+   past each other. When the scrolling stops the target rounds to the nearest
+   card, so it always comes to rest ON one rather than between two.
+
+   The DOM is built once per list, not per frame. Cards near the position are
+   shown and everything else is display:none, so a 700-car bucket still paints
+   nine boxes; the frame loop only writes styles, never HTML. Rebuilding markup
+   at 60fps was what made the first version feel like it was chewing. */
+
+/* Centre to centre, and it was tuned by eye from both ends. A card is about
+   410 tall: at 420 the cards nearly touched and the stack read as clutter, at
+   500 they were too far apart to read as one wheel. 455 leaves ~55px of air,
+   which is the middle of those two. The wheel's height is set against this —
+   the two numbers together decide how much of a neighbour you see. */
+const DECK_STEP  = 455;
+const DECK_SPAN  = 4;     // cards either side that exist in the DOM at all
+const DECK_PXCARD = 240;  // wheel pixels that add up to one card of travel
+const DECK_EASE  = 0.17;  // how much of the remaining distance each frame eats
+
+/* ── the cards travel on an arc, not down a line ──
+
+   A wheel turns about an axis, and its axis here is off to the LEFT: a card
+   leaving the centre swings away from you and drifts left as it goes, above
+   and below alike. That is what the reference sketch showed and it is the
+   whole difference between a wheel and a column that slides.
+
+   The horizontal offset is the sagitta of that turn — `R(1 - cos θ)` — so it
+   is nearly nothing for the first few degrees and then opens up, which is how
+   a circle actually reads. It is capped, because the card column is only so
+   wide and a card that swings out of it is clipped rather than turned. */
+const DECK_ARC   = 1000;  // radius of the swing, in px
+const DECK_ANG   = 0.45;  // radians of turn per card of distance
+const DECK_ARCMAX = 190;  // px left of centre a card may ever get
+
+let deckRows = [];        // the rows the current deck was built from
+let deckItems = [];       // their .wheel-item elements, by index
+let deckPos = 0, deckTarget = 0, deckRaf = 0, deckSettle = 0;
+let deckLo = -1, deckHi = -1;
+
+const deckClamp = v => Math.max(0, Math.min(v, Math.max(0, deckRows.length - 1)));
+
+/* One frame. Everything here is a style write on an element that already
+   exists — no markup, no layout, no measuring. */
+function deckLayout(){
+  const lo = Math.max(0, Math.round(deckPos) - DECK_SPAN);
+  const hi = Math.min(deckRows.length - 1, Math.round(deckPos) + DECK_SPAN);
+
+  // Anything that has just left the window goes away entirely, so the browser
+  // is compositing nine cards and not seven hundred.
+  if(deckLo !== -1){
+    for(let i = deckLo; i <= deckHi; i++){
+      if((i < lo || i > hi) && deckItems[i]) deckItems[i].style.display = "none";
+    }
   }
+
+  for(let i = lo; i <= hi; i++){
+    const el = deckItems[i];
+    if(!el) continue;
+    const d = i - deckPos;                 // fractional: 0.5 is mid-turn
+    const off = Math.abs(d);
+    el.style.display = "";
+    /* Left as it goes round, shrunk and faded with distance. Together those
+       three are what make it read as a wheel turning away from you rather
+       than a column of different-sized cards. All gentle: the cards behind
+       have to stay big enough to read the model off. */
+    const x = -Math.min(DECK_ARCMAX, DECK_ARC * (1 - Math.cos(off * DECK_ANG)));
+    el.style.transform = `translate3d(${x.toFixed(1)}px, calc(-50% + ${
+      (d * DECK_STEP).toFixed(1)}px), 0) scale(${
+      Math.max(0.7, 1 - off * 0.055).toFixed(4)})`;
+    el.style.opacity = Math.max(0.18, 1 - off * 0.26).toFixed(3);
+    el.style.zIndex = String(50 - Math.round(off * 10));
+    // Only the card actually in focus is clickable through to its links.
+    el.classList.toggle("on", Math.round(deckPos) === i);
+  }
+  deckLo = lo; deckHi = hi;
+
+  /* The images of the cards now in the window, and only those. Set once and
+     left alone, so turning back and forth does not re-fetch. */
+  for(let i = lo; i <= hi; i++){
+    const img = deckItems[i] && deckItems[i].querySelector("img[data-src]");
+    if(img){ img.src = img.dataset.src; img.removeAttribute("data-src"); }
+  }
+
+  const focus = deckClamp(Math.round(deckPos));
+  if(focus !== S.expIndex){
+    S.expIndex = focus;
+    deckPaintSpec();
+  }
+}
+
+function deckTick(){
+  const gap = deckTarget - deckPos;
+  if(Math.abs(gap) < 0.0015){
+    deckPos = deckTarget;
+    deckRaf = 0;
+    deckLayout();
+    return;
+  }
+  deckPos += gap * DECK_EASE;
+  deckLayout();
+  deckRaf = requestAnimationFrame(deckTick);
+}
+
+function deckRun(){ if(!deckRaf) deckRaf = requestAnimationFrame(deckTick); }
+
+/* Where the wheel is being asked to come to rest. `snap` is off while a scroll
+   is still arriving — rounding mid-gesture would fight the hand — and on for
+   everything discrete: a key, a button, a click on a neighbour. */
+function deckTo(v, snap){
+  deckTarget = deckClamp(snap ? Math.round(v) : v);
+  deckRun();
+}
+
+/* The spec panel and the counter, repainted alone. The wheel is not touched:
+   its cards are already where they should be, and rebuilding them here would
+   throw away the frame that is mid-flight. */
+function deckPaintSpec(){
+  const r = deckRows[S.expIndex];
+  if(!r || !$("deckSpec")) return;
+  $("deckSpecBody").innerHTML = deckSpecHtml(r);
+  $("deckCount").textContent = `${S.expIndex + 1} of ${deckRows.length.toLocaleString()}`;
+  $("deckUp").disabled   = S.expIndex <= 0;
+  $("deckDown").disabled = S.expIndex >= deckRows.length - 1;
+}
+
+function deckHtml(rows){
+  /* Every card, but only as markup — the images are held back in `data-src`
+     until the wheel brings them near, and everything outside the window is
+     display:none from the first layout pass. */
+  const items = rows.map((r, j) =>
+    `<div class="wheel-item" data-di="${j}" style="display:none">${pcardHtml(r)}</div>`).join("");
+
+  const arrow = up => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="${
+      up ? "M18 15l-6-6-6 6" : "M6 9l6 6 6-6"}"/></svg>`;
+
+  return `<div class="deck">
+    <div class="wheel" id="wheel">${items}</div>
+    <aside class="deck-spec" id="deckSpec">
+      <div id="deckSpecBody"></div>
+      <div class="deck-nav">
+        <button id="deckUp" aria-label="Previous car">${arrow(true)}</button>
+        <button id="deckDown" aria-label="Next car">${arrow(false)}</button>
+        <span class="deck-count" id="deckCount"></span>
+        <span class="deck-hint">Scroll, or use ↑ ↓</span>
+      </div>
+    </aside>
+  </div>`;
+}
+
+/* Rebuilds the deck for a new set of rows: after a scan, a filter or a sort.
+   Not called while turning — that is what deckLayout() is for. */
+function paintDeck(){
+  const rows = visibleRows();
+  deckRows = rows;
+  if(!rows.length){ deckItems = []; return; }
+
+  S.expIndex = deckClamp(S.expIndex);
+  $("list").innerHTML = deckHtml(rows);
+  deckItems = Array.from($("wheel").children);
+  deckLo = -1; deckHi = -1;
+  deckPos = deckTarget = S.expIndex;
+  if(deckRaf){ cancelAnimationFrame(deckRaf); deckRaf = 0; }
+  deckPaintSpec();
+  deckLayout();
+}
+
+const deckGo = delta => deckTo(Math.round(deckPos) + delta, true);
+
+/* One handler on the list, because the deck is rebuilt whenever the rows
+   change and anything bound to a card would outlive its card. */
+$("list").addEventListener("click", e => {
+  if(S.tool !== "exp") return;
+  if(e.target.closest("#deckUp"))   return deckGo(-1);
+  if(e.target.closest("#deckDown")) return deckGo(1);
+
+  /* The SV bubble, before the focus branch below — it sits inside a
+     .wheel-item, so the two would otherwise race and the click would move the
+     wheel instead of opening the ticket. Dead on an unfocused card by CSS, so
+     reaching here means the focused one was pressed. */
+  const sv = e.target.closest("[data-svvin]");
+  if(sv){
+    e.stopPropagation();
+    const r = deckRows.find(x => x.vin === sv.dataset.svvin);
+    if(r) openTicket(r);
+    return;
+  }
+
+  // A neighbour is a target for coming into focus. Its links are switched off
+  // in CSS while it is out of focus, so this cannot steal a click on the RN.
+  const item = e.target.closest(".wheel-item");
+  if(item && !item.classList.contains("on")) deckTo(Number(item.dataset.di), true);
+}, true);
+
+/* ── turning it ──
+
+   The scroll is taken as a DISTANCE and added to the target, so a trackpad's
+   hundred small deltas are a hundred small movements rather than a hundred
+   steps — which is the whole difference between this and the version before
+   it. `deltaMode` is normalised because Firefox reports lines and pages where
+   Chrome reports pixels, and a line is not three pixels. */
+function wheelPixels(e){
+  if(e.deltaMode === 1) return e.deltaY * 16;                        // lines
+  if(e.deltaMode === 2) return e.deltaY * (window.innerHeight || 800); // pages
+  return e.deltaY;
+}
+
+/* Whether the wheel is what the reader is looking at.
+
+   It has to be asked, because the deck starts below the fold — hero, strip,
+   notice and head come first — and a wheel that swallowed the scroll on its
+   way past would trap the page: point at the cards, scroll, and the page
+   never reaches them. So the wheel only takes the scroll once it is actually
+   in front of you. */
+function deckInView(){
+  const el = $("wheel");
+  if(!el) return false;
+  const r = el.getBoundingClientRect();
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+  return r.top < vh * 0.5 && r.bottom > vh * 0.5;
+}
+
+$("list").addEventListener("wheel", e => {
+  if(S.tool !== "exp" || !$("wheel") || !deckRows.length) return;
+  if(!deckInView()) return;
+
+  const px = wheelPixels(e);
+  /* Handed back at the ends. Scrolling down on the last card should carry on
+     down the page to the footer, not sit there refusing — a carousel that
+     eats the scroll at its own end is a trap with no way out but the mouse. */
+  const atEnd = deckTarget >= deckRows.length - 1 - 0.001 && px > 0;
+  const atTop = deckTarget <= 0.001 && px < 0;
+  if(atEnd || atTop) return;
+
+  e.preventDefault();
+  /* Added to the TARGET, not to where the wheel has eased to so far. A flick
+     arrives as thirty events in a quarter of a second and the position is
+     always behind them; adding each one to the lagging position throws away
+     most of the gesture, so a hard flick moved one card instead of three.
+     Measured that way round the first time — it felt weightless and wrong. */
+  deckTo(deckTarget + px / DECK_PXCARD, false);
+
+  /* Settles on a card once the gesture stops. Rounding on every event would
+     fight the hand mid-flick; rounding never would leave two half-cards on
+     screen and no answer to "which one is this". */
+  clearTimeout(deckSettle);
+  deckSettle = setTimeout(() => deckTo(deckTarget, true), 110);
+}, { passive: false });
+
+document.addEventListener("keydown", e => {
+  if(S.tool !== "exp" || !$("wheel")) return;
+  // Not while a modal is up: the filter panel scrolls, and Escape and the
+  // arrows belong to whatever is in front.
+  if(document.querySelector(".modal.on")) return;
+  if(e.key === "ArrowDown" || e.key === "ArrowUp"){
+    e.preventDefault();
+    deckGo(e.key === "ArrowDown" ? 1 : -1);
+  }
+});
+
+/* ══════════════════ narrowing and ordering the cards ══════════════════
+
+   Everything a card shows is filterable, and none of it is part of the scan.
+   That is not a shortcut — it is the only thing it could be. The bucket is
+   the bucket: Tesla OS decides which cars are in it and the board cannot ask
+   for a narrower one, so a rescan could not return fewer cars and would only
+   spend ten seconds re-fetching rows already on screen. Exactly the argument
+   the ticket-concern filter makes on Service Visits, for the same reason, and
+   it runs through the same door: `visibleRows()`, which the count, the
+   subtitle and the export all already read. Three things cannot disagree
+   about what is listed if there is only one of them.
+
+   The opposite rule holds on the other two tools, where a facet narrows the
+   Lucene query and makes the scan genuinely cheaper. Neither rule is a house
+   style; each follows from whether the filter can save any work.            */
+
+const sp = r => r.spec || {};
+
+/* Read off the rows rather than declared: paint, wheels and trim are Garage's
+   vocabulary and it is not published anywhere as a list. A hard-coded copy
+   would quietly drop the first colour Tesla ships that this board has not
+   heard of — the same mistake the concern menu avoids the same way. */
+const EXP_FACETS = [
+  { k: "model",    label: "Model",     of: r => r.modelName },
+  { k: "year",     label: "Year",      of: r => r.year ? String(r.year) : "" },
+  { k: "trim",     label: "Trim",      of: r => sp(r).trim || sp(r).trimCode },
+  { k: "motor",    label: "Motor",     of: r => sp(r).motor },
+  { k: "paint",    label: "Paint",     of: r => sp(r).paint },
+  { k: "wheels",   label: "Wheels",    of: r => sp(r).wheels },
+  { k: "interior", label: "Interior",  of: r => sp(r).interior },
+  { k: "seats",    label: "Seats",     of: r => sp(r).seats },
+  { k: "roof",     label: "Roof",      of: r => sp(r).roof },
+  /* Both sides named. "Tow hitch: fitted" with no opposite would leave no way
+     to ask the other question, which is the one a delivery advisor actually
+     has. */
+  { k: "tow",      label: "Tow hitch", of: r => sp(r).towed ? (sp(r).tow || "Fitted") : "No tow hitch" },
+  /* Built or not. `inGarage` is the test — a VIN the index has never heard of
+     has not come down the line — but the reader is asked about the car, not
+     about which database answered. */
+  { k: "source",   label: "Build",     of: r => r.inGarage ? "Built" : "Not built yet" },
+  /* Standing on the lot, or still coming. `here` is deliberately three-valued
+     — true, false, and null for "the inventory call failed" — and a null
+     answers "" here, which drops the whole group rather than filing every car
+     under one side of a question the board could not ask. The notice says so
+     in words at the same time. */
+  { k: "here",     label: "Arrival",
+    of: r => r.here == null ? "" : (r.here ? "Arrived" : "In transit") }
+];
+
+/* At least this long, not "under" like the Cars on Ground windows — the
+   question here is the opposite one. Nobody wants the cars matched an hour
+   ago; they want the ones nobody has called. */
+const EXP_WAITS = [
+  { v: 0,  label: "Any",         sub: "however long" },
+  { v: 3,  label: "3d or more",  sub: "" },
+  { v: 7,  label: "7d or more",  sub: "past the week" },
+  { v: 14, label: "14d or more", sub: "" },
+  { v: 30, label: "30d or more", sub: "the backlog" }
+];
+
+const EXP_SORTS = [
+  { v: "wait",   label: "Longest waiting", sub: "oldest match first" },
+  { v: "recent", label: "Newest matched",  sub: "what just landed" },
+  { v: "eta",    label: "ETA soonest",     sub: "arriving first" },
+  { v: "model",  label: "Model",           sub: "then year, then trim" }
+];
+
+/* `skip` leaves one facet out of the test, which is what makes the counts in
+   the menu mean something: the number beside Pearl White is how many cars you
+   would have if you added it to everything else already picked, not how many
+   the centre owns. Without it every count would describe a screen nobody is
+   looking at. */
+function expMatches(r, skip){
+  if(S.expWait && skip !== "wait"){
+    const d = daysSince(r.matchedAt);
+    /* A car with no match date cannot support "waiting 7 days or more", so a
+       window drops it rather than keeping it — the same call the time-on-
+       ground filter makes about a missing arrival. */
+    if(d == null || d < S.expWait) return false;
+  }
+  for(const f of EXP_FACETS){
+    if(f.k === skip) continue;
+    const want = S.expFilters[f.k];
+    if(!want || !want.length) continue;
+    /* A blank value never matches anything, so a car Garage has not indexed
+       disappears the moment a colour is picked. Correct — it is not known to
+       be that colour — and the modal says so in words above the groups. */
+    if(!want.includes(f.of(r))) return false;
+  }
+  return true;
+}
+
+function expSorted(rows){
+  const by = {
+    /* Undated last in every order. An unknown wait cannot be the longest, an
+       unknown ETA is not the soonest, and either sorting first would put the
+       least informative card at the top of the screen. */
+    wait  : (a, b) => (a.matchedAt ? 0 : 1) - (b.matchedAt ? 0 : 1) ||
+                      String(a.matchedAt || "").localeCompare(String(b.matchedAt || "")),
+    recent: (a, b) => (a.matchedAt ? 0 : 1) - (b.matchedAt ? 0 : 1) ||
+                      String(b.matchedAt || "").localeCompare(String(a.matchedAt || "")),
+    eta   : (a, b) => (a.etaAt ? 0 : 1) - (b.etaAt ? 0 : 1) ||
+                      String(a.etaAt || "").localeCompare(String(b.etaAt || "")),
+    model : (a, b) => String(a.modelName || "").localeCompare(String(b.modelName || "")) ||
+                      (b.year || 0) - (a.year || 0) ||
+                      String(sp(a).trim || "").localeCompare(String(sp(b).trim || ""))
+  };
+  return [...rows].sort(by[S.expSort] || by.wait);
+}
+
+/* How many facets are doing something, for the chip and the subtitle. */
+const expActive = () =>
+  (S.expWait ? 1 : 0) + EXP_FACETS.filter(f => (S.expFilters[f.k] || []).length).length;
+
+/* What is applied, in words, for the subtitle. The screen must say why it is
+   showing 6 cards out of 55 or it reads as a scan that went wrong — the same
+   rule the time-on-ground window and the concern filter both follow. */
+function expSlice(){
+  const bits = [];
+  if(S.expWait) bits.push("waiting " + S.expWait + "d+");
+  for(const f of EXP_FACETS){
+    const v = S.expFilters[f.k] || [];
+    if(v.length) bits.push(v.length > 2 ? `${v.length} ${f.label.toLowerCase()}s` : v.join(" + "));
+  }
+  return bits;
+}
+
+/* ── the filter panel ──
+   Repainted after every pick rather than wired once, because the counts move
+   as the selection narrows and a stale count is worse than none. */
+function paintExpFilters(){
+  const all = S.rows;
+  const tick = `<svg class="qtick" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
+
+  const waits = EXP_WAITS.map(w => {
+    const n = all.filter(r => {
+      const d = daysSince(r.matchedAt);
+      return (!w.v || (d != null && d >= w.v)) && expMatches(r, "wait");
+    }).length;
+    return `<button class="opt exp-wait${S.expWait === w.v ? " on" : ""}" data-wait="${w.v}"
+      >${esc(w.label)} <small>${n.toLocaleString()}</small></button>`;
+  }).join("");
+
+  const groups = EXP_FACETS.map(f => {
+    const tally = new Map();
+    for(const r of all){
+      const v = f.of(r);
+      if(!v || !expMatches(r, f.k)) continue;
+      tally.set(v, (tally.get(v) || 0) + 1);
+    }
+    const picked = S.expFilters[f.k] || [];
+    /* A value that has just become unreachable is dropped rather than shown
+       at zero — the concern menu's rule, and it is also what stops the panel
+       offering a combination that would empty the screen. Anything already
+       picked stays visible so it can be unpicked. */
+    const opts = [...tally.entries()]
+      .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
+    for(const v of picked) if(!tally.has(v)) opts.push([v, 0]);
+    if(!opts.length) return "";
+
+    /* A group whose only option covers every card left cannot narrow
+       anything — every centre is all one model year — so it is dropped rather
+       than shown as a button that does nothing when pressed. It comes back
+       the moment a second value exists, and a group with something picked in
+       it always stays so the pick can be undone. */
+    const reach = all.filter(r => expMatches(r, f.k)).length;
+    if(!picked.length && opts.length === 1 && opts[0][1] === reach) return "";
+
+    return `<div class="facet">
+      <div class="facet-head"><span>${esc(f.label)}</span>${
+        picked.length ? `<button data-fclear="${f.k}">Clear</button>` : ""}</div>
+      <div class="opts">${opts.map(([v, n]) =>
+        `<button class="opt exp-opt${picked.includes(v) ? " on" : ""}"
+          data-fk="${esc(f.k)}" data-fv="${esc(v)}"
+          >${esc(v)} <small>${n.toLocaleString()}</small></button>`).join("")}</div>
+    </div>`;
+  }).join("");
+
+  const shown = S.rows.filter(r => expMatches(r)).length;
+  const blind = S.rows.filter(r => !r.inGarage).length;
+
+  $("expFilterBody").innerHTML = `
+    <div class="facet">
+      <div class="facet-head"><span>Waiting</span>${
+        S.expWait ? `<button data-fclear="wait">Clear</button>` : ""}</div>
+      <div class="opts">${waits}</div>
+      <div class="hint">Measured from the match date, the same number the card
+        shows in its corner.${blind
+          ? ` ${blind} car${blind === 1 ? " has" : "s have"} not been built yet, so
+              ${blind === 1 ? "it has" : "they have"} no colour, wheels or trim —
+              picking any of those hides ${blind === 1 ? "it" : "them"}.`
+          : ""}</div>
+    </div>
+    ${groups}`;
+
+  $("expFilterCount").textContent = `${shown.toLocaleString()} of ${
+    S.rows.length.toLocaleString()} card${S.rows.length === 1 ? "" : "s"}`;
+  $("expFilterCtx").textContent = expActive()
+    ? `${expActive()} filter${expActive() === 1 ? "" : "s"}` : "everything on screen";
+  $("expFilterClear").hidden = !expActive();
+}
+
+$("expFilterBtn").addEventListener("click", () => {
+  paintExpFilters();
+  showModal($("expFilterModal"));
+});
+
+/* One handler for the whole panel: the groups are rebuilt on every pick, so
+   anything bound to a button would be bound to a button that no longer
+   exists a moment later. */
+$("expFilterBody").addEventListener("click", e => {
+  const wait = e.target.closest(".exp-wait");
+  const clear = e.target.closest("[data-fclear]");
+  const opt = e.target.closest(".exp-opt");
+
+  if(clear){
+    const k = clear.dataset.fclear;
+    if(k === "wait") S.expWait = 0; else S.expFilters[k] = [];
+  }else if(wait){
+    // Single-select: the windows nest, so "7d+ and 14d+" is just "14d+".
+    S.expWait = Number(wait.dataset.wait);
+  }else if(opt){
+    const k = opt.dataset.fk, v = opt.dataset.fv;
+    const cur = S.expFilters[k] || [];
+    // Multi-select within a group, because two colours means either will do —
+    // the only reading under which picking a second one adds cars.
+    S.expFilters[k] = cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v];
+  }else return;
+
+  /* Back to the top of whatever is left. Keeping the position would leave the
+     wheel parked on the ninth car of a list the reader has just changed the
+     meaning of, which is nobody's idea of where to start. */
+  S.expIndex = 0;
+  paintExpFilters();
+  paintList();
+});
+
+$("expFilterClear").addEventListener("click", () => {
+  S.expFilters = {}; S.expWait = 0; S.expIndex = 0;
+  paintExpFilters();
+  paintList();
+});
+
+/* ── the sort menu ── */
+const closeExpSort = () => {
+  $("expSortMenu").classList.remove("on");
+  $("expSortBtn").setAttribute("aria-expanded", "false");
+};
+
+function paintExpSort(){
+  const hit = EXP_SORTS.find(s => s.v === S.expSort) || EXP_SORTS[0];
+  $("expSortBtn").textContent = hit.label;
+  const tick = `<svg class="qtick" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
+  $("expSortMenu").innerHTML = EXP_SORTS.map(s => `
+    <button class="qrow crow${S.expSort === s.v ? " on" : ""}" data-sort="${s.v}">
+      ${tick}<span class="qt">${esc(s.label)}</span>
+      <span class="qn">${esc(s.sub)}</span>
+    </button>`).join("");
+}
+
+$("expSortBtn").addEventListener("click", e => {
+  e.stopPropagation();
+  paintExpSort();
+  const open = $("expSortMenu").classList.toggle("on");
+  $("expSortBtn").setAttribute("aria-expanded", String(open));
+});
+
+/* Shuts on a pick, unlike the concern menu: an order is one choice, so
+   staying open would leave the menu covering the list it just reordered. */
+$("expSortMenu").addEventListener("click", e => {
+  const row = e.target.closest("[data-sort]");
+  if(!row) return;
+  e.stopPropagation();
+  S.expSort = row.dataset.sort;
+  // The point of reordering is to see what is now first.
+  S.expIndex = 0;
+  closeExpSort();
+  paintList();
+});
+
+/* ── grouping the list by what its tickets say ──
+
+   `hyperSymptom` is SCA's own coarse grouping of a concern — "Cosmetic",
+   "Does not function as expected" — and it is the one field on a ticket that
+   sorts a hundred of them into a handful of piles. Neither neighbour would
+   do: the symptom underneath it ("FENDER, LH [ Paint / Chips ]") is too fine
+   to group by, and the category beside it ("Logistics Damage") answers a
+   different question about the same ticket.
+
+   The values are not an enum anywhere. SCA's own bundle reads them off the
+   record rather than off a list, so there is nothing to copy and a copy would
+   silently drop whatever it had not heard of. They are counted off the rows
+   instead, which also means the menu only ever offers concerns that are
+   actually on screen. */
+const NO_TYPE = " untyped";
+
+function concernsOf(r){
+  const out = new Set();
+  for(const v of r.visits || [])
+    for(const a of (v.ticket && v.ticket.activities) || []) out.add(a.hyper || NO_TYPE);
+  return out;
+}
+
+/* Counted in CARS, not in concerns, because a car is what the filter
+   produces: pick "Cosmetic 31" and 31 rows remain. A car carrying two
+   cosmetic tickets is one car in that number and a car carrying one of each
+   kind is counted under both, so the column does not sum to the list length
+   and is not meant to. */
+function concernTally(rows){
+  const n = new Map();
+  for(const r of rows) for(const c of concernsOf(r)) n.set(c, (n.get(c) || 0) + 1);
+  /* Commonest first — the pile worth walking out to is usually the big one —
+     and the unnamed bucket last however big it grows, because a ticket with no
+     type is a gap in the record rather than a kind of work. */
+  return [...n]
+    .sort((a, b) => (a[0] === NO_TYPE) - (b[0] === NO_TYPE) || b[1] - a[1] ||
+                     String(a[0]).localeCompare(String(b[0])))
+    .map(([v, count]) => ({ v, count, label: v === NO_TYPE ? "No concern type" : v }));
+}
+
+const concernLabel = c => c === NO_TYPE ? "no concern type" : String(c).toLowerCase();
+
+/* The list before the concern filter: what the counts in the menu are
+   measured over, and what clearing it goes back to. Kept apart from
+   visibleRows() so the numbers beside each concern do not move as concerns
+   are picked — a count that changed under the cursor would be describing the
+   selection rather than the centre. */
+function scannedRows(){
   return S.view === "all"
     ? S.rows
     : S.rows.filter(r => r.visits.length || r.campaigns.length || r.logistics.length);
 }
 
+function visibleRows(){
+  /* Longest waiting first, which is the order the list is read in: a car
+     matched this morning is nobody's problem and one matched three weeks ago
+     is the reason the tool exists. Sorted here rather than server-side
+     because it is the same rows read the other way up — and a car with no
+     match date goes last, since an unknown wait cannot claim to be the
+     longest one. Both the narrowing and the order live in one place — see
+     the long note above EXP_FACETS for why neither is part of the scan. */
+  if(S.tool === "exp") return expSorted(S.rows.filter(r => expMatches(r)));
+  if(S.tool === "cog"){
+    /* Sorted here rather than re-scanned: the server hands back longest-first
+       and the other order is the same rows read the other way up. */
+    return S.cogSort === "recent" ? [...S.rows].reverse() : S.rows;
+  }
+  const rows = scannedRows();
+  if(!S.concern.length) return rows;
+  // Any of them, not all of them: two concerns picked means either will do,
+  // which is the only reading under which picking a second one adds cars.
+  const want = new Set(S.concern);
+  return rows.filter(r => { for(const c of concernsOf(r)) if(want.has(c)) return true; });
+}
+
+/* ── the concern menu ──
+   Repainted from the rows on every list paint, so the view toggle, a new scan
+   and a cleared selection all reach it without anything having to remember to
+   call it. */
+function paintConcerns(){
+  const wrap = $("concernWrap");
+  if(S.tool !== "sv"){ wrap.hidden = true; closeConcerns(); return; }
+
+  const tally = concernTally(scannedRows());
+  /* Nothing to group by is not a filter worth offering, so the chip goes
+     rather than greying out. That is the ordinary state with the Service App
+     disconnected — every ticket comes back null — and the prompt above the
+     list already says so in words a dead chip could not. */
+  wrap.hidden = tally.length === 0;
+  if(wrap.hidden){ S.concern = []; closeConcerns(); return; }
+
+  /* Selections survive the view toggle, and All scanned → Flagged only can
+     retire a concern entirely. Dropping the dead ones here keeps the chip
+     honest, and it is also what makes an empty list impossible from this
+     filter alone: every concern still offered has at least one car behind it. */
+  const live = new Set(tally.map(t => t.v));
+  S.concern = S.concern.filter(c => live.has(c));
+
+  const picked = tally.filter(t => S.concern.includes(t.v));
+  $("concernBtn").classList.toggle("on", picked.length > 0);
+  $("concernBtn").textContent =
+    !picked.length        ? "Concern: All"
+    : picked.length === 1 ? "Concern: " + picked[0].label
+                          : `Concern: ${picked.length} of ${tally.length}`;
+
+  const tick = `<svg class="qtick" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
+
+  /* Indexed rather than carrying the value, because one of the values is a
+     sentinel for "SCA left this blank" and a sentinel does not belong in the
+     DOM. The index is resolved against the same tally that drew the menu. */
+  $("concernMenu").innerHTML =
+    `<button class="qrow crow${S.concern.length ? "" : " on"}" data-ci="-1">
+       ${tick}<span class="qt">All concerns</span>
+       <span class="qn">${scannedRows().length.toLocaleString()}</span></button>
+     <div class="qsep"></div>` +
+    tally.map((t, i) => `
+      <button class="qrow crow${S.concern.includes(t.v) ? " on" : ""}" data-ci="${i}">
+        ${tick}<span class="qt">${esc(t.label)}</span>
+        <span class="qn">${t.count.toLocaleString()}</span>
+      </button>`).join("");
+  concernMenuTally = tally;
+}
+
+let concernMenuTally = [];
+
+const closeConcerns = () => {
+  $("concernMenu").classList.remove("on");
+  $("concernBtn").setAttribute("aria-expanded", "false");
+};
+
+$("concernBtn").addEventListener("click", e => {
+  e.stopPropagation();
+  const open = $("concernMenu").classList.toggle("on");
+  $("concernBtn").setAttribute("aria-expanded", String(open));
+});
+
+/* The menu stays open across a pick. Choosing three concerns is the point of
+   it being multi-select, and a menu that shut on the first one would make
+   that three trips to the chip. */
+$("concernMenu").addEventListener("click", e => {
+  const row = e.target.closest("[data-ci]");
+  if(!row) return;
+  e.stopPropagation();
+  const i = Number(row.dataset.ci);
+  if(i < 0){
+    S.concern = [];
+  }else{
+    const v = (concernMenuTally[i] || {}).v;
+    if(v === undefined) return;
+    S.concern = S.concern.includes(v) ? S.concern.filter(x => x !== v) : [...S.concern, v];
+  }
+  paintList();
+});
+
 function paintList(){
   const cog  = S.tool === "cog";
+  const exp  = S.tool === "exp";
+  /* Before the rows are taken, not after: this is what prunes a concern the
+     view toggle has just retired, and visibleRows() must not be asked for a
+     selection that paintConcerns is about to drop. */
+  paintConcerns();
   const rows = visibleRows();
   $("empty").hidden = rows.length > 0 || S.rows.length > 0;
-  $("list").innerHTML = rows.map(cog ? cogRowHtml : rowHtml).join("");
+  if(exp){
+    /* The focused card has to survive a filter that shortened the list under
+       it — and land somewhere real if it cannot. paintDeck() does the
+       clamping and builds the wheel; an empty result leaves the list empty
+       for the message below. */
+    if(rows.length){ paintDeck(); }
+    else { S.expIndex = 0; deckRows = []; deckItems = []; $("list").innerHTML = ""; }
+  }else{
+    $("list").innerHTML = rows.map(cog ? cogRowHtml : rowHtml).join("");
+  }
+  // Pending Inventory is a wheel of cards; the other two are a column of rows. Same
+  // element either way, so the head, the empty state and the export are one
+  // implementation rather than three.
+  $("list").classList.toggle("cards", exp);
 
-  for(const id of ["viewFlagged", "viewAll"]) $(id).hidden = cog;
+  for(const id of ["viewFlagged", "viewAll"]) $(id).hidden = cog || exp;
   for(const id of ["sortDwell", "sortRecent"]) $(id).hidden = !cog;
+  /* Both hidden outright off Pending Inventory rather than greyed: a control that
+     cannot do anything says less than no control at all, and the board has
+     been bitten once by shipping one that greys out without saying why. */
+  $("expFilterBtn").hidden = !exp;
+  $("expSortWrap").hidden = !exp;
+  if(!exp) closeExpSort();
+  if(exp){
+    const n = expActive();
+    $("expFilterBtn").classList.toggle("on", n > 0);
+    // The count goes on the chip, so a narrowed screen says so before anyone
+    // reads the subtitle to find out why it is short.
+    $("expFilterLabel").textContent = n ? `Filters · ${n}` : "Filters";
+    paintExpSort();
+  }
   // Nothing listed is nothing to open, and a live button over an empty list
   // only ever produces an error message.
   $("trunksBtn").hidden = !cog || !rows.length;
@@ -2982,10 +4444,25 @@ function paintList(){
   $("sortDwell").classList.toggle("on", S.cogSort === "dwell");
   $("sortRecent").classList.toggle("on", S.cogSort === "recent");
 
-  $("listSub").textContent = S.listSub + (rows.length ? ` · showing ${rows.length}` : "");
+  /* Named in the subtitle for the same reason the time-on-ground window is:
+     a screen showing 31 rows when the centre has 443 must say why, or it
+     reads as a scan that went wrong. */
+  const slice = S.tool === "sv"
+    ? (S.concern.length ? " · " + S.concern.map(concernLabel).join(" + ") : "")
+    : (exp && expActive() ? " · " + expSlice().join(" · ") : "");
+  $("listSub").textContent = S.listSub + slice + (rows.length ? ` · showing ${rows.length}` : "");
   if(!rows.length && S.rows.length){
-    $("list").innerHTML = `<div class="empty"><h3>Nothing flagged</h3>
-      <p>All ${S.rows.length} vehicles in this selection came back clear.</p></div>`;
+    /* Two empties that want opposite next moves, so they are two messages.
+       The Pending Inventory one can only be reached through the filter panel — a
+       scan with nothing in it never gets here — so it names the way back
+       out rather than describing the centre. */
+    $("list").innerHTML = exp
+      ? `<div class="empty"><h3>Nothing matches those filters</h3>
+          <p>All ${S.rows.length.toLocaleString()} matched cars at this centre are
+             outside ${expActive() === 1 ? "that filter" : "those filters"} —
+             ${esc(expSlice().join(", "))}. Open <b>Filters</b> and clear one.</p></div>`
+      : `<div class="empty"><h3>Nothing flagged</h3>
+          <p>All ${S.rows.length} vehicles in this selection came back clear.</p></div>`;
   }
 }
 
@@ -2994,8 +4471,8 @@ $("viewAll").addEventListener("click", () => { S.view = "all"; paintList(); });
 $("sortDwell").addEventListener("click", () => { S.cogSort = "dwell"; paintList(); });
 $("sortRecent").addEventListener("click", () => { S.cogSort = "recent"; paintList(); });
 
-/* The two tools count different things, so the strip is written rather than
-   filled in: four tiles reading zero because the other tool wrote them is
+/* The tools count different things, so the strip is written rather than
+   filled in: four tiles reading zero because another tool wrote them is
    worse than no tiles at all. */
 function paintStats(tiles){
   $("stats").innerHTML = tiles.map(t => `
@@ -3149,17 +4626,24 @@ function paintTrunkResult(d){
    you open to work from. VIN + delivery date is the one you paste into
    something else — a message, a whiteboard, another system's import — and for
    that, twenty-four columns of context is the thing in the way. */
-/* `sv` marks a preset that only makes sense on the Service Visits sheet. Cars
-   on Ground has no ticket columns, so offering the choice there would be a
-   button that quietly hands back the same sheet as All data. */
+/* `only` names the tools a preset makes sense on. A sheet with no ticket
+   columns offered "VIN + ticket" would be a button that quietly hands back
+   the same sheet as All data — the server falls back rather than writing a
+   one-column file, so the wrong choice is silent and has to be prevented
+   here instead. */
 const EXPORT_PRESETS = [
   { v: "all",          label: "All data",             sub: "every column" },
-  { v: "vin-delivery", label: "VIN + delivery date",  sub: "two columns" },
-  { v: "vin-ticket",   label: "VIN + ticket",         sub: "what each visit is for", sv: true }
+  { v: "vin-delivery", label: "VIN + delivery date",  sub: "two columns", only: ["sv", "cog"] },
+  { v: "vin-ticket",   label: "VIN + ticket",         sub: "what each visit is for", only: ["sv"] },
+  /* Pending Inventory's version of the same job: the pair of ids everything else in
+     the delivery world is keyed on, for pasting somewhere that is not a
+     spreadsheet. Its sheet has no delivery date to offer — the whole bucket
+     is cars that have not been given one. */
+  { v: "vin-rn",       label: "VIN + RN",             sub: "two columns", only: ["exp"] }
 ];
 
 function paintExportPresets(){
-  const opts = EXPORT_PRESETS.filter(o => !o.sv || S.tool === "sv");
+  const opts = EXPORT_PRESETS.filter(o => !o.only || o.only.includes(S.tool));
   // A preset that just stopped being offered must not stay selected, or the
   // sheet would come out narrowed by a choice with no button showing.
   if(!opts.some(o => o.v === S.exportPreset)) S.exportPreset = "all";
@@ -3170,8 +4654,9 @@ function paintExportPresets(){
       `<button class="opt export-opt${S.exportPreset === o.v ? " on" : ""}" data-preset="${o.v}"
         >${esc(o.label)} <small>${esc(o.sub)}</small></button>`).join("")}</div>
     <div class="hint">The rows are the same either way — whatever is on screen now.
-      ${S.tool === "cog" ? "Delivery date is Intrepid's scheduled date."
-                         : "Delivery date is the scheduled appointment from the Garage index."}
+      ${S.tool === "exp" ? "The spec columns come from Garage; the order and the option codes from Tesla OS."
+        : S.tool === "cog" ? "Delivery date is Intrepid's scheduled date."
+                           : "Delivery date is the scheduled appointment from the Garage index."}
       ${S.tool === "sv" && !S.rowsHaveSca
         ? "Ticket columns will be blank — this scan ran without the Service App." : ""}</div>`;
 }
@@ -3188,7 +4673,8 @@ $("exportBtn").addEventListener("click", () => {
   if(!rows.length){ note("Nothing on screen to export.", true); return; }
   $("exportCount").textContent = `${rows.length.toLocaleString()} row${
     rows.length === 1 ? "" : "s"}`;
-  $("exportCtx").textContent = S.tool === "cog" ? "Cars on Ground" : "Service Visits";
+  $("exportCtx").textContent = { cog: "Cars on Ground", exp: "Pending Inventory" }[S.tool]
+                             || "Service Visits";
   paintExportPresets();
   showModal($("exportModal"));
 });
@@ -3206,11 +4692,20 @@ $("runExport").addEventListener("click", async () => {
     const site = (S.trt && S.trt.name ? S.trt.name : "trt" + S.trtId).replace(/\s+/g, "");
     const stamp = new Date().toISOString().slice(0, 10);
 
-    /* The view is in the filename for the same reason on both tools: a file
+    /* The view is in the filename for the same reason on every tool: a file
        holding 5 rows when someone believed they had 700 is a nasty surprise,
        and a name saying which slice it is prevents it. On Cars on Ground the
-       slice is the status, so that is what the name carries. */
-    const payload = S.tool === "cog"
+       slice is the status, so that is what the name carries. Pending Inventory has no
+       slice at all unless the filter panel has been used, so its name carries
+       the centre, whatever was picked, and the date. */
+    const payload = S.tool === "exp"
+      ? { kind : "exp",
+          // Named after the tool, the way the other two sheets are.
+          label: `compiler-pending-inventory-${site}${
+            expActive() ? "-" + expSlice().join("-").replace(/[^A-Za-z0-9]+/g, "") : ""
+          }-${stamp}`,
+          rows }
+      : S.tool === "cog"
       ? { kind : "cog",
           label: `compiler-cars-on-ground-${site}-${
             (S.cogChosen.length ? S.cogTally.filter(t => S.cogChosen.includes(t.id))
@@ -3220,7 +4715,13 @@ $("runExport").addEventListener("click", async () => {
             S.cogWindow ? "-under" + (DWELL_OPTS.find(o => o.v === S.cogWindow) || {})
               .label.replace(/^Under\s*/, "") : "" }-${stamp}`,
           rows }
-      : { label: `compiler-service-visits-${site}-${S.view}-${stamp}`,
+      /* The concern joins the view in the name for the reason the whole
+         convention exists: a sheet of 31 cosmetic tickets and a sheet of all
+         443 cars are otherwise the same filename with different contents. */
+      : { label: `compiler-service-visits-${site}-${S.view}${
+            S.concern.length ? "-" + S.concern
+              .map(c => (c === NO_TYPE ? "untyped" : c).replace(/[^A-Za-z0-9]+/g, ""))
+              .join("-") : ""}-${stamp}`,
           rows : rows.map(r => ({
             ...r,
             modelLabel   : labelFor("model", r.model),
@@ -3303,6 +4804,10 @@ function render(data){
   $("listHead").hidden = false;
   $("empty").hidden = true;
   S.view = "flagged";
+  /* Cleared with the rows. The concerns are a property of the tickets just
+     fetched, so a selection carried over from the last centre would filter
+     this one against names it may not even use. */
+  S.concern = [];
   paintList();
 
   const msgs = [...(data.notes || [])];
@@ -3382,6 +4887,82 @@ function renderCog(data){
              on the ladder.</p></div>`;
     msgs.unshift("On ground: " + S.cogTally.map(t => `${t.count} ${t.name}`).join(" · ") + ".");
   }
+  if(msgs.length) note(msgs.join("  ")); else clearNotes();
+}
+
+/* ── Pending Inventory ──
+   Two systems, and the strip counts the wait rather than the population: how
+   many cars are matched is one number OS already shows on its own tab, and
+   how long they have been sitting there is the thing this screen is for. */
+function renderExp(data){
+  S.tool = "exp";
+  S.rows = data.rows || [];
+  S.expBucket = data.bucket || null;
+  S.scanTrtId = data.trtId || null;
+  /* A concern picked on a Service Visits scan has nothing to say about these
+     rows, and leaving it set would put a stale word in the subtitle. */
+  S.concern = [];
+  /* Cleared with the rows, for the same reason: a colour picked at one centre
+     is a filter against a fleet this scan may not contain, and it would hide
+     cars before anyone had seen them. The ORDER survives — that is a habit
+     about how you read a list, not a claim about which cars are in it. */
+  S.expFilters = {}; S.expWait = 0; S.expIndex = 0;
+
+  const waits = S.rows.map(r => daysSince(r.matchedAt)).filter(d => d != null)
+                      .sort((a, b) => a - b);
+  const median = waits.length ? waits[Math.floor(waits.length / 2)] : null;
+  const days = d => d == null ? "—" : d.toLocaleString() + "d";
+
+  paintStats([
+    { k: "Matched", v: (data.total || S.rows.length).toLocaleString() },
+    { k: "Longest", v: days(waits.length ? waits[waits.length - 1] : null) },
+    { k: "Median",  v: days(median) },
+    { k: "Over 7d", v: waits.filter(d => d >= WAIT_WARM).length.toLocaleString(),
+      small: waits.length ? Math.round(waits.filter(d => d >= WAIT_WARM).length / waits.length * 100) + "%" : "" },
+    /* Named rather than left to the notice, because it is the one number that
+       explains why some cards have no colour on them. Tile only when it
+       happens — a permanent "Not built: 0" is a tile spent on nothing. */
+    ...(S.rows.some(r => !r.inGarage)
+      ? [{ k: "Not built", v: S.rows.filter(r => !r.inGarage).length.toLocaleString(),
+           small: "no spec yet" }]
+      : [])
+  ]);
+
+  /* The bucket is named on screen because it is site-configured: another
+     centre's list is not guaranteed to hold the same one, and a screen that
+     said only "matched" would not say which definition it used. */
+  const site = (data.location && data.location.name) ? data.location.name : "TRT " + data.trtId;
+  S.listSub = `${site} · ${(data.bucket && data.bucket.name) || "matched, not scheduled"}`;
+
+  /* The tool's name, like the other two. What the bucket is called stays in
+     the subtitle — that is Tesla OS's own wording and it is worth keeping
+     where it can be checked against the pipeline screen. */
+  $("listTitle").textContent = "Pending Inventory";
+  $("listHead").hidden = false;
+  paintList();
+
+  /* Brought to the reader rather than left under the fold. This tool's answer
+     is one big card, and it lands below a hero, a stat strip and a notice —
+     on the other two tools the answer is a list and its first rows are
+     already visible, so neither of them does this. Only when it is actually
+     out of sight, so a rescan from a scrolled page does not jump. */
+  if(S.rows.length) requestAnimationFrame(() => {
+    const r = $("listHead").getBoundingClientRect();
+    if(r.top > (window.innerHeight || 800) * 0.42){
+      $("listHead").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+
+  /* An empty bucket is a good day, not a broken tool. Said as an answer, and
+     said with the centre's name on it so it cannot be read as the board
+     having failed to ask. */
+  if(!S.rows.length){
+    $("empty").hidden = true;
+    $("list").innerHTML = `<div class="empty"><h3>Nothing waiting</h3>
+      <p>Every matched car at ${esc(site)} has a delivery appointment booked.</p></div>`;
+  }
+
+  const msgs = [...(data.notes || [])];
   if(msgs.length) note(msgs.join("  ")); else clearNotes();
 }
 
@@ -3520,6 +5101,23 @@ function paintConnections(c){
     : (c.sca.set ? "Reconnect" : (c.sca.stale ? "Connect again" : "Connect"));
   $("scaForget").hidden = !(c.sca.set || c.sca.stale) || busy;
 
+  /* Tesla OS. Whether a token is stored is in this payload; whether the
+     session still works is not — the token is opaque, so only the pipeline
+     can say and refreshOs() has to ask. Until it has answered, a stored token
+     paints as connected: that is the case nearly every time, and flagging a
+     fault the board has not actually checked for would be a lie in the
+     noisier direction. */
+  const co = c.os || { set: false, detail: "not connected" };
+  const osBusy = SCA_BUSY.includes(S.osPhase);
+  paintRow("aOsRow",
+    osBusy ? (S.osDetail || "Connecting…")
+           : (co.set && S.osLive === false
+                ? co.detail + " — the pipeline no longer accepts it"
+                : co.detail),
+    co.set ? (S.osLive === false ? "bad" : "ok") : "off");
+  $("osConnect").textContent = osBusy ? "Cancel" : (co.set ? "Reconnect" : "Connect");
+  $("osForget").hidden = !co.set || osBusy;
+
   /* The rail's dot, so a missing source is visible from the section list rather
      than only once Connections is open. Red for a required source that is not
      there; green — the house's slow pulse — when everything the board needs is
@@ -3538,7 +5136,7 @@ function paintConnections(c){
     ? "Garage + Intrepid"
     : (!c.garage.set && !c.intrepid.set ? "No sources connected"
       : (c.garage.set ? "Garage · no Intrepid" : "Intrepid · no Garage"));
-  $("fSrc").textContent = core + (c.sca.set ? " + SCA" : "");
+  $("fSrc").textContent = core + (c.sca.set ? " + SCA" : "") + (co.set ? " + OS" : "");
 }
 
 /* ── connecting the Service App ──
@@ -3588,6 +5186,66 @@ async function connectSca(){
     note("Could not start the Service App sign-in: " + err.message, true);
   }
 }
+
+/* ── connecting Tesla OS ──
+   The same three functions as the Service App above, against the same kind of
+   state machine on the server. Kept as its own copy rather than made generic
+   over a source name: two is not a pattern, and the two differ in the one
+   place that matters — this one has a liveness answer to carry, because its
+   token cannot be asked when it expires. */
+let osPoll = null;
+function stopOsPoll(){ if(osPoll){ clearInterval(osPoll); osPoll = null; } }
+
+/* `quiet` is for the boot probe. The sign-in state machine lives in the server
+   process, so a connection made an hour ago still reads "connected" — and
+   without this every page load would announce a sign-in nobody just did. */
+async function refreshOs(quiet){
+  try{
+    const d = await api("/api/os");
+    S.osPhase  = d.signin.phase;
+    S.osDetail = d.signin.detail;
+    S.osLive   = d.live ? d.live.connected : null;
+    paintConnections({ ...S.conns, os: d.connection });
+    if(!SCA_BUSY.includes(d.signin.phase)){
+      stopOsPoll();
+      if(quiet) return;
+      if(d.signin.phase === "connected"){
+        note(`Tesla OS connected — ${d.connection.user}. Pending Inventory can read the pipeline now.`);
+      }else if(d.signin.error){
+        note("Tesla OS: " + d.signin.error, true);
+      }
+    }
+  }catch{ stopOsPoll(); }
+}
+
+async function connectOs(){
+  if(SCA_BUSY.includes(S.osPhase)){
+    await api("/api/os/cancel", {});
+    S.osPhase = "cancelled";
+    stopOsPoll();
+    return refreshOs();
+  }
+  clearNotes();
+  try{
+    const d = await api("/api/os/connect", {});
+    S.osPhase  = d.signin.phase;
+    S.osDetail = d.signin.detail;
+    paintConnections({ ...S.conns, os: d.connection });
+    stopOsPoll();
+    osPoll = setInterval(refreshOs, 2000);
+    refreshOs();
+  }catch(err){
+    note("Could not start the Tesla OS sign-in: " + err.message, true);
+  }
+}
+
+$("osConnect").addEventListener("click", connectOs);
+$("osForget").addEventListener("click", async () => {
+  const d = await api("/api/os/disconnect", {});
+  S.osLive = null;
+  paintConnections({ ...S.conns, os: d.connection });
+  note("Tesla OS disconnected. Pending Inventory will not run until it is connected again.");
+});
 
 /* ── the prompt on open ──
 
@@ -3806,6 +5464,20 @@ $("twSave").addEventListener("click", async e => {
    out. */
 let tnDeadline = null, tnEvery = 0, tnTick = 0;
 
+/* ── when the board stops answering ──
+
+   This used to swallow a failed poll and leave the previous reading on screen,
+   on the reasoning that a stale number beats a blank one. It does not, and the
+   reason is the operating-hours window: the last reading of any evening is
+   "closed", so a board that had simply stopped showed the one message that
+   looks like a working board reporting a shut centre. Nobody can tell those
+   apart, and the second one tells you not to bother looking.
+
+   So a miss is counted now. One is a blip — a slow reply, a laptop waking —
+   and the last reading stands. Two in a row is the board being down, and the
+   row says that instead of impersonating a Sunday. */
+let tnAnsweredAt = null, tnMisses = 0;
+
 function tnFmt(sec){
   const m = Math.floor(sec / 60), s = sec % 60;
   return m ? `${m}m ${String(s).padStart(2, "0")}s` : `${s}s`;
@@ -3814,7 +5486,7 @@ function tnFmt(sec){
 setInterval(async () => {
   const visible = $("adminModal").classList.contains("on") &&
                   $("secTeams").classList.contains("on");
-  if(!visible){ tnDeadline = null; tnTick = 0; return; }
+  if(!visible){ tnDeadline = null; tnTick = 0; tnMisses = 0; return; }
 
   // Ask the board every tenth second; count down locally in between.
   if(tnTick % 10 === 0){
@@ -3823,13 +5495,30 @@ setInterval(async () => {
       tnEvery = st.everyMin;
       tnDeadline = st.nextInSec == null ? null : Date.now() + st.nextInSec * 1000;
       S.teamsRun = st;
-    }catch{ /* leave the last reading up rather than blanking the row */ }
+      tnAnsweredAt = Date.now();
+      tnMisses = 0;
+    }catch{ tnMisses++; }
   }
   tnTick++;
 
   const st = S.teamsRun || {};
   const row = $("tnRow"), out = $("tnState");
   let text, ok = false;
+
+  /* Ahead of everything else, including closed. Whatever is in `st` is a
+     memory of the last time the board spoke, and none of it can be reported as
+     the present. */
+  if(tnMisses >= 2){
+    const seen = tnAnsweredAt
+      ? new Date(tnAnsweredAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+      : null;
+    out.textContent = "the board is not answering — " +
+      (seen ? `nothing here is current, last reply ${seen}`
+            : "it may have stopped; restart it and reopen this panel");
+    row.classList.remove("ok");
+    row.classList.add("bad");
+    return;
+  }
 
   if(st.busy){ text = "pushing now…"; ok = true; }
   /* Closed is its own answer, not a stalled countdown. Reported before the
@@ -3924,6 +5613,9 @@ for(const [id, path, what] of [["twCard", "/api/admin/teams-card", "card"],
 
 $("resetBoard").addEventListener("click", async e => {
   const d = await admin("/api/admin/reset", {}, e.target);
+  // The Tesla OS token goes with the file, so what the last probe said about
+  // it is now about a session that no longer exists.
+  S.osLive = null;
   paintConnections(d.connections);
   paintTeams(null);
   setTrt(null, null);
@@ -3945,6 +5637,10 @@ $("resetBoard").addEventListener("click", async e => {
     S.offsiteTrt   = st.offsiteTrt || null;
     paintSites();
     paintConnections(st.connections);
+    /* Only when there is something to check. The answer is a call to the
+       pipeline — cached on the server, but still a call — and a board with
+       Tesla OS never connected has nothing to ask about. */
+    if(st.connections && st.connections.os && st.connections.os.set) refreshOs(true);
     paintBilling(st.billingAddress);
     paintTeams(st.teams);
     // After the facets land: a saved selection is validated against them.

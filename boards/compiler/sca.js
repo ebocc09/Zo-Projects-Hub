@@ -548,6 +548,13 @@ async function ticketFor(token, vin){
         symptom  : a.symptomDescription || "",
         hyper    : a.hyperSymptom || "",
         category : a.description || "",
+        /* The three the concern editor needs and nothing else does: which
+           symptom this is, and which model's catalogue to search. SCA scopes
+           its own picker by `modelID` off the activity, so the board does
+           too — the same words are not on offer against every car. */
+        symptomId  : a.symptomID ?? null,
+        symptomCode: a.symptomCode || "",
+        modelId    : a.modelID ?? null,
         cosmetic : a.cosmeticIssue === "Yes",
         frtHours : typeof a.estimatedFRTHours === "number" ? a.estimatedFRTHours : null,
         /* Ids and names only. A single one of these came back 3.4 MB, so a
@@ -675,6 +682,275 @@ async function sites(token, term){
     }))
     // Both ids are required by the move; a row missing one cannot be offered.
     .filter(r => r.trtId != null);
+}
+
+/* ── SCA's own symptom catalogue ──
+
+   The list the app's concern picker searches as you type, and it is long:
+   "fend" returns 373 rows at Cypress, "glass" over a thousand. There is no
+   sense in the board keeping a copy of that, and a copy would be wrong the
+   first time Tesla added a symptom.
+
+   ```
+   POST /integration/api/persona/symptom/search?modelId=<n>&locale=
+        { term: "fend" }  →  responseObject[] of { symptomID, symptomCode, symptomName }
+   ```
+
+   **Scoped by model, and the model comes off the activity.** SCA passes
+   `caseActivityDTO.activityDTO.modelID` — a number, 36 for a Model 3 — and
+   the catalogue differs between them: a Cybertruck has no frunk latch symptom
+   in the same words a 3 does. Searching unscoped would offer symptoms that
+   cannot be saved against this car.
+
+   Found in the bundle rather than guessed, like everything else on this host:
+   `getSymptomByTerm()` in the integration service. Read-only. */
+async function symptoms(token, { term, modelId }){
+  const q = String(term || "").trim();
+  // Two characters, the same floor the app's own picker uses. One would
+  // return most of the catalogue and be useless to scroll.
+  if(q.length < 2) return [];
+
+  const j = await postJson(token, "https://serviceapp.tesla.com/integration/api/",
+    // en-US, the locale SCA's own picker sends. The catalogue carries
+    // translations and an empty locale is not the same request.
+    `persona/symptom/search?modelId=${encodeURIComponent(modelId || "")}&locale=en-US`,
+    { term: q });
+
+  const rows = (j && j.responseObject) || [];
+  const out = [];
+  const seen = new Set();
+  for(const r of rows){
+    if(!r || !r.symptomCode) continue;
+    /* De-duplicated on the code, which is what SCA's own picker does — the
+       catalogue returns the same symptom more than once when it is mapped to
+       several part groups. */
+    if(seen.has(r.symptomCode)) continue;
+    seen.add(r.symptomCode);
+    out.push({
+      symptomId  : r.symptomID ?? null,
+      symptomCode: r.symptomCode,
+      name       : r.symptomName || r.symptomDescription || "",
+      hyper      : r.hyperSymptom || ""
+    });
+  }
+  return out;
+}
+
+/* One symptom in full, which the search deliberately does not give you.
+
+   `GET /integration/api/persona/symptom/<symptomCode>/<modelId>` — note the
+   order: code first, model second. The other way round answers "Record not
+   found", which is how that was established.
+
+   It matters because two fields on a concern move WITH the symptom and are
+   not in the search results: `additionalAttributes.cosmeticIssue` and
+   `reportingAttribute.hyperSymptom`. SCA's own dialog reads exactly these two
+   when you pick a symptom — the assignment is right there in the bundle — and
+   the capture proved it: picking "FIXED GLASS ROOF to BACKLITE GLASS [ Gap ]"
+   sent `cosmeticIssue: "Yes"`, and this endpoint is the only place that "Yes"
+   exists. Without it the board would carry the old classification onto the
+   new symptom and quietly misfile the car, since hyperSymptom is what the
+   concern filter groups by. */
+async function symptomDetail(token, { symptomCode, modelId }){
+  const j = await getJson(token,
+    `/integration/api/persona/symptom/${encodeURIComponent(symptomCode)}` +
+    `/${encodeURIComponent(modelId)}?locale=en-US`);
+  const o = (j && j.responseObject) || null;
+  const one = Array.isArray(o) ? o[0] : o;
+  if(!one) return null;
+  return {
+    symptomId  : one.symptomID ?? null,
+    symptomCode: one.symptomCode || symptomCode,
+    name       : one.symptomName || "",
+    /* Both defaulted the way SCA defaults them: its own code falls back to a
+       constant when the attribute is missing rather than leaving the field
+       null, and a null here would be written onto the record. */
+    cosmetic   : (one.additionalAttributes && one.additionalAttributes.cosmeticIssue) || "No",
+    hyper      : (one.reportingAttribute && one.reportingAttribute.hyperSymptom) || ""
+  };
+}
+
+/* ── the activity record, in the shape the update wants it back ──
+
+   `POST /activity/api/activity/visit/<svid>/activities` returns one wrapper
+   per activity — `{vin, userID, modelCode, assetType, activityDTO,
+   correctionPartDTO, …}` — and the update PUT sends the first six of those
+   keys straight back.
+
+   **`includeParts=true` is not optional.** The PUT carries
+   `correctionPartDTO`, which on the captured ticket was a correction line
+   holding an $850 backlite glass and two more parts. Read it without the
+   parts and the body echoes an empty one, and a whole-object PUT writes
+   whatever is wrong in it. That is the same trap that made the visit move
+   read the record instead of a form. */
+async function activityWrappers(token, serviceVisitId){
+  const j = await postJson(token, "https://serviceapp.tesla.com/activity/api/",
+    `activity/visit/${encodeURIComponent(serviceVisitId)}/activities` +
+    `?locale=en_US&includeParts=true&includeNotes=true&includeActivityApproval=true`,
+    { data: [], pageNumber: 1, pageSize: 50, filterDTOs: [] });
+  const rows = (j && j.responseObject && j.responseObject.data) || [];
+  return rows.filter(w => w && w.activityDTO);
+}
+
+/* ── taking a line off a visit ──
+
+   ```
+   POST /case/api/visit/<svid>/removeactivities   body [<activityID>]
+   ```
+
+   **This is not `cancelActivity` and the difference is the whole point.**
+   Cancelling closes the ticket and disturbs billing — the thing this board
+   has been told twice never to do. This returns the activity to *outstanding
+   work*: SCA's own label for the button is
+   `activity_remove_and_return_to_outstanding_work`. The concern survives, it
+   is simply no longer on this visit, and it can be added back.
+
+   Captured off SCA's own UI rather than inferred, and proved by re-reading:
+   the visit went from two activities to one and the remaining ticket was
+   untouched. */
+async function removeActivity(token, { serviceVisitId, activityId }){
+  /* Read first, and refuse if the line is not on the visit.
+
+     Without this the check afterwards is worth nothing: "it is not on the
+     visit now" is also true of an activity that was never on it, so removing
+     something already gone would report a confident success. A stale tab is
+     exactly the caller that would do that. */
+  const before = await activityWrappers(token, serviceVisitId);
+  if(!before.some(w => Number(w.activityDTO.activityID) === Number(activityId))){
+    const e = new Error("That line is not on this visit any more — re-run the scan.");
+    e.gone = true;
+    throw e;
+  }
+
+  const j = await postJson(token, "https://serviceapp.tesla.com/case/api/",
+    `visit/${encodeURIComponent(serviceVisitId)}/removeactivities`, [Number(activityId)]);
+
+  /* Never trust a 200 from SCA. It answers success:true while doing something
+     else — that is exactly how cancelServiceVisits closed a ticket — so the
+     record is read back and the answer is what the read says, not what the
+     write claimed. */
+  const ok = Boolean(j && j.success);
+  const after = await activityWrappers(token, serviceVisitId).catch(() => null);
+  const gone = after ? !after.some(w => Number(w.activityDTO.activityID) === Number(activityId)) : null;
+
+  return {
+    ok: ok && gone === true,
+    said: (j && (j.localizedMessage || j.message)) || "",
+    /* Three states, not two. `null` is "the write said yes and the re-read
+       failed", which is neither a success to report nor a failure to retry —
+       and saying so is better than picking one. */
+    verified: gone,
+    remaining: after ? after.length : null
+  };
+}
+
+/* ── changing what a concern says ──
+
+   ```
+   PUT /case/api/case/activities/update/<activityID>?preventOverride=false
+   ```
+
+   The whole activity, echoed back with five fields changed. SCA's own dialog
+   builds that body from its form state; this one builds it from the record it
+   just read and touches only what the new symptom decides:
+
+     symptomID · symptomCode · symptomDescription   the symptom itself
+     cosmeticIssue · hyperSymptom                   its classification
+
+   Everything else — the narrative, the corrections, the parts, the estimate,
+   every id — goes back exactly as it came. Echoing the record is strictly
+   safer than reproducing a form, and on this host it is the difference
+   between an edit and a rewrite.
+
+   SCA follows its own PUT with an `activityextension/add` and a second PUT at
+   `preventOverride=true`. Neither is sent here: the capture shows the first
+   PUT already returns the new symptom on the record, and the extension call
+   carried nothing but nulls. Fewer writes, and none of them guessed. */
+async function setSymptom(token, { serviceVisitId, activityId, symptomCode }){
+  const wraps = await activityWrappers(token, serviceVisitId);
+  const wrap = wraps.find(w => Number(w.activityDTO.activityID) === Number(activityId));
+  if(!wrap){
+    const e = new Error("That concern is no longer on this visit — re-run the scan.");
+    e.gone = true;
+    throw e;
+  }
+
+  const dto = wrap.activityDTO;
+  const detail = await symptomDetail(token, { symptomCode, modelId: dto.modelID });
+  if(!detail){
+    throw new Error(`The Service App does not know symptom ${symptomCode} for this model.`);
+  }
+
+  const body = {
+    vin      : wrap.vin,
+    userID   : wrap.userID,
+    modelCode: wrap.modelCode ?? null,
+    assetType: wrap.assetType,
+    activityDTO: {
+      ...dto,
+      symptomID         : detail.symptomId,
+      symptomCode       : detail.symptomCode,
+      symptomDescription: detail.name,
+      cosmeticIssue     : detail.cosmetic,
+      // Only when the catalogue has an opinion. Blanking a classification the
+      // new symptom simply does not carry would lose a fact rather than
+      // correct one.
+      hyperSymptom      : detail.hyper || dto.hyperSymptom
+    },
+    correctionPartDTO: wrap.correctionPartDTO ?? null
+  };
+
+  const j = await putJsonAbs(token,
+    `/case/api/case/activities/update/${encodeURIComponent(activityId)}?preventOverride=false`,
+    body);
+
+  const said = (j.body && (j.body.localizedMessage || j.body.message)) || "";
+  if(!(j.status === 200 && j.body && j.body.success)){
+    throw new Error(said || `The Service App refused the change (HTTP ${j.status}).`);
+  }
+
+  // Read back, because a 200 on this host is a claim rather than a fact.
+  const after = await activityWrappers(token, serviceVisitId).catch(() => null);
+  const now = after && after.find(w => Number(w.activityDTO.activityID) === Number(activityId));
+  return {
+    ok      : true,
+    said,
+    verified: now ? String(now.activityDTO.symptomCode) === String(detail.symptomCode) : null,
+    symptom : now ? now.activityDTO.symptomDescription : detail.name,
+    hyper   : now ? now.activityDTO.hyperSymptom : detail.hyper,
+    cosmetic: now ? now.activityDTO.cosmeticIssue : detail.cosmetic
+  };
+}
+
+/* A PUT to an absolute path on this host, returning the status alongside the
+   body — the two writes above both have to judge on `success`, not on 200. */
+function putJsonAbs(token, path, body){
+  return new Promise((resolve, reject) => {
+    const pl = JSON.stringify(body);
+    const req = https.request({
+      hostname: "serviceapp.tesla.com", port: 443, path, method: "PUT",
+      headers: { Authorization: "Bearer " + token, Accept: "application/json",
+                 "Content-Type": "application/json", "Content-Length": Buffer.byteLength(pl) }
+    }, res => {
+      let buf = "";
+      res.on("data", c => buf += c);
+      res.on("end", () => {
+        if(res.statusCode === 401){
+          const e = new Error("Service App token expired — connect SCA again");
+          e.needsSca = true; return reject(e);
+        }
+        let b = null;
+        try { b = JSON.parse(buf); } catch { /* leave null */ }
+        resolve({ status: res.statusCode, body: b, raw: buf.slice(0, 300) });
+      });
+    });
+    req.on("error", err => {
+      if(!err.message) err.message = err.code || "connection failed";
+      reject(err);
+    });
+    req.write(pl);
+    req.end();
+  });
 }
 
 /* ── moving a visit to another centre ──
@@ -1031,7 +1307,8 @@ module.exports = {
   grabToken, openSignInWindow, browserStatus,
   beginSignIn, signInStatus, cancelSignIn,
   visitsByVin, activitiesOf, ticketFor, photoStream,
-  sites, moveVisit, moveVisitFull, cancelAppointment, visitById, isOpenVisit,
+  sites, symptoms, symptomDetail, activityWrappers, removeActivity, setSymptom,
+  moveVisit, moveVisitFull, cancelAppointment, visitById, isOpenVisit,
   contactsForCar, contactOnVisit, teslaContactIn, isTeslaContact, saveContact,
   carAsset, saveAddress, addressOnVisit
 };

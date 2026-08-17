@@ -86,12 +86,16 @@ function jobUpdate(p){
    actions from the person reading the screen. */
 function sendErr(res, err){
   const code = err.needsTrt ? 400
-             : (err.needsCookie || err.needsAuth || err.needsSca ? 401 : 502);
+             : (err.needsCookie || err.needsAuth || err.needsSca || err.needsOs ? 401 : 502);
   sendJson(res, code, {
     error      : err.message,
     needsCookie: Boolean(err.needsCookie),
     needsAuth  : Boolean(err.needsAuth),
     needsSca   : Boolean(err.needsSca),
+    /* A dead Tesla OS session must land on "connect it again", never on an
+       empty pipeline — that is the whole reason this flag is carried up from
+       os.js rather than being turned into a 502 like any other upstream. */
+    needsOs    : Boolean(err.needsOs),
     needsTrt   : Boolean(err.needsTrt),
     /* Half of a two-step write landed. Not the same as "it failed" — the page
        has to say so differently, because something in the world has changed
@@ -250,6 +254,63 @@ const server = http.createServer(async (req, res) => {
                                   connection: L.connectionsSummary().sca });
     }
 
+    /* ── Tesla OS ──
+       The same four routes as SCA, doing the same four things, because it is
+       the same kind of credential wearing a different hat. The one difference
+       is `live`: SCA's token says when it dies, this one has to be asked, so
+       the status route probes (cached in lib.js) rather than computing. */
+    if(p === "/api/os" && req.method === "GET"){
+      return sendJson(res, 200, {
+        connection: L.connectionsSummary().os,
+        live      : await L.osStatus(),
+        signin    : L.osSignInStatus(),
+        browser   : await L.osBrowserStatus()
+      });
+    }
+
+    if(p === "/api/os/connect" && req.method === "POST"){
+      const st = L.osSignIn();
+      log(`os sign-in -> ${st.phase}`);
+      return sendJson(res, 200, { ok: true, signin: st,
+                                  connection: L.connectionsSummary().os });
+    }
+
+    if(p === "/api/os/cancel" && req.method === "POST"){
+      return sendJson(res, 200, { ok: true, signin: L.osCancelSignIn(),
+                                  connection: L.connectionsSummary().os });
+    }
+
+    if(p === "/api/os/disconnect" && req.method === "POST"){
+      L.osDisconnect();
+      log("os disconnected");
+      return sendJson(res, 200, { ok: true, connection: L.connectionsSummary().os });
+    }
+
+    /* ── Pending Inventory: matched but not scheduled ──
+       One POST, no toggles. Unlike the other two scans there is nothing to
+       choose before running: the bucket is the bucket and the centre comes
+       from the picker, so everything narrowing happens on the rows afterwards. */
+    if(p === "/api/exp/scan" && req.method === "POST"){
+      const body  = await readBody(req);
+      const trtId = body.trtId ? String(body.trtId).trim() : null;
+
+      if(trtId && !/^\d+$/.test(trtId)){
+        return sendJson(res, 400, { error: "TRT must be numeric" });
+      }
+      if(!trtId){
+        return sendJson(res, 400, {
+          error: "No TRT set — choose a centre in the top corner", needsTrt: true });
+      }
+
+      jobStart();
+      let out;
+      try { out = await L.expScan({ trtId, onProgress: jobUpdate }); }
+      finally { jobEnd(); }
+
+      log(`expenable ${out.location.name}: ${out.rows.length} matched, not scheduled`);
+      return sendJson(res, 200, out);
+    }
+
     /* ── one photo off a concern ──
        A GET an <img src> can point at, so the page never handles the bearer
        token and the browser does its own caching. Streamed straight through:
@@ -292,6 +353,65 @@ const server = http.createServer(async (req, res) => {
       const q = (url.searchParams.get("q") || "").trim();
       if(q.length < 2) return sendJson(res, 200, { q, sites: [] });
       return sendJson(res, 200, { q, sites: await L.scaSites(q) });
+    }
+
+    /* ── SCA's symptom catalogue ──
+       Read-only, and the concern editor's type-ahead is the only caller. The
+       model scopes it: the same words are not offered against every car, so
+       an unscoped list would suggest symptoms this one cannot be saved with. */
+    if(p === "/api/sca/symptoms" && req.method === "GET"){
+      const q = (url.searchParams.get("q") || "").trim();
+      const modelId = (url.searchParams.get("modelId") || "").trim();
+      if(q.length < 2) return sendJson(res, 200, { q, symptoms: [] });
+      return sendJson(res, 200, { q, symptoms: await L.scaSymptoms({ term: q, modelId }) });
+    }
+
+    /* ── take a line off a visit ──
+       Returns the activity to outstanding work. It is NOT a cancel: the
+       ticket stays open and the concern survives, which is the distinction
+       this board has been told twice to keep. sca.js re-reads the visit and
+       this layer reports what the read said, not what the write claimed. */
+    if(p === "/api/sca/activity/remove" && req.method === "POST"){
+      const body = await readBody(req);
+      const num  = k => (/^\d+$/.test(String(body[k] ?? "").trim()) ? Number(body[k]) : null);
+      const svid = num("serviceVisitId"), act = num("activityId");
+      if(svid === null) return sendJson(res, 400, { error: "serviceVisitId must be numeric" });
+      if(act === null)  return sendJson(res, 400, { error: "activityId must be numeric" });
+
+      const out = await L.scaRemoveActivity({ serviceVisitId: svid, activityId: act });
+      log(`sca remove: activity ${act} off visit ${svid} -> ` +
+          (out.ok ? `gone, ${out.remaining} left` : `NOT removed (${out.said || "no reason given"})`));
+      if(!out.ok && out.verified === null){
+        return sendJson(res, 502, {
+          error: "The Service App accepted it but the board could not read the visit back, " +
+                 "so it cannot say whether the line came off. Re-run the scan.", partial: true });
+      }
+      if(!out.ok){
+        return sendJson(res, 502, {
+          error: out.said || "The Service App did not take that line off the visit." });
+      }
+      return sendJson(res, 200, out);
+    }
+
+    /* ── change what a concern says ──
+       Five fields on one activity; everything else is echoed from the record.
+       See sca.setSymptom() for why the body is read rather than built. */
+    if(p === "/api/sca/activity/symptom" && req.method === "POST"){
+      const body = await readBody(req);
+      const num  = k => (/^\d+$/.test(String(body[k] ?? "").trim()) ? Number(body[k]) : null);
+      const svid = num("serviceVisitId"), act = num("activityId");
+      const code = String(body.symptomCode || "").trim();
+      if(svid === null) return sendJson(res, 400, { error: "serviceVisitId must be numeric" });
+      if(act === null)  return sendJson(res, 400, { error: "activityId must be numeric" });
+      // The code comes from SCA's own catalogue, so anything else is a caller
+      // bug rather than something to pass upstream and see what happens.
+      if(!/^[A-Za-z0-9-]{1,32}$/.test(code))
+        return sendJson(res, 400, { error: "symptomCode must come from the Service App's list" });
+
+      const out = await L.scaSetSymptom({ serviceVisitId: svid, activityId: act, symptomCode: code });
+      log(`sca symptom: activity ${act} -> ${out.symptom}` +
+          (out.verified === true ? " (verified)" : out.verified === null ? " (UNVERIFIED)" : " !! READ BACK DIFFERENT"));
+      return sendJson(res, 200, out);
     }
 
     /* ── move a visit to another service centre ──
@@ -652,7 +772,12 @@ const server = http.createServer(async (req, res) => {
       const PRESETS = {
         "vin-delivery": ["vin", "scheduled"],
         "vin-ticket"  : ["vin", "svNumbers", "svSymptom", "svType", "svCategory",
-                         "svHours", "svWhere", "vriDone"]
+                         "svHours", "svWhere", "vriDone"],
+        /* Pending Inventory's two-column sheet. The pair of ids the delivery world is
+           keyed on, for pasting somewhere that is not a spreadsheet — the same
+           job "VIN + delivery date" does on the other two, which this bucket
+           cannot offer because not being given a date is what put a car in it. */
+        "vin-rn"      : ["vin", "rn"]
       };
       const preset = PRESETS[body.preset] ? body.preset : "all";
       const pick = cols => {
@@ -670,6 +795,78 @@ const server = http.createServer(async (req, res) => {
          the same span in hours as a number, so a column can be sorted,
          filtered above a threshold or averaged without anyone parsing a
          string back into a duration. */
+      /* ── Pending Inventory ──
+         The order and what the car is, one row per matched car. Days-since-
+         matched is written as a NUMBER beside the timestamp for the reason
+         dwell is on the Cars on Ground sheet: "3 days" cannot be sorted or
+         averaged, and the person exporting this is usually about to do one of
+         those. Computed here from the timestamp rather than taken from OS's
+         own `time_since_matched`, so the sheet and the screen agree. */
+      if(String(body.kind || "") === "exp"){
+        const days = at => at ? (Date.now() - new Date(at).getTime()) / 86400000 : "";
+
+        const expSheet = rows.map(r => ({
+          rn        : r.rn || "",
+          vin       : r.vin || "",
+          year      : r.year || "",
+          model     : r.modelName || r.model || "",
+          trim      : (r.spec && r.spec.trim) || "",
+          trimCode  : (r.spec && r.spec.trimCode) || "",
+          motor     : (r.spec && r.spec.motor) || "",
+          paint     : (r.spec && r.spec.paint) || "",
+          wheels    : (r.spec && r.spec.wheels) || "",
+          interior  : (r.spec && r.spec.interior) || "",
+          seats     : (r.spec && r.spec.seats) || "",
+          roof      : (r.spec && r.spec.roof) || "",
+          tow       : (r.spec && r.spec.tow) || "",
+          matchedAt : r.matchedAt ? String(r.matchedAt).slice(0, 16).replace("T", " ") : "",
+          matchedDays: r.matchedAt ? days(r.matchedAt) : "",
+          etaAt     : r.etaAt ? String(r.etaAt).slice(0, 10) : "",
+          /* Blank when the inventory call failed, rather than "In transit".
+             A sheet is read away from the screen that made it and away from
+             the notice that explained itself, so a guess written into a cell
+             outlives every warning the board could give about it. */
+          here      : r.here == null ? "" : (r.here ? "Arrived" : "In transit"),
+          arrivedAt : r.arrivedAt ? String(r.arrivedAt).slice(0, 10) : "",
+          options   : r.options || "",
+          // Same question the panel answers on screen: are the spec columns
+          // blank because the car is plain, or because it has not been built
+          // yet and there is nothing to describe?
+          spec      : r.inGarage ? "Built" : "Not built yet"
+        }));
+
+        const expBuf = xlsx.build({
+          // Named after the tool, like the other two sheets. Which bucket the
+          // rows came from is on the screen that produced them.
+          sheetName: "Pending inventory",
+          columns: pick([
+            { key: "vin",         header: "VIN",              width: 20 },
+            { key: "rn",          header: "RN",               width: 15 },
+            { key: "year",        header: "Year",             width: 7,  type: "number", digits: 0 },
+            { key: "model",       header: "Model",            width: 13 },
+            { key: "trim",        header: "Trim",             width: 17 },
+            { key: "trimCode",    header: "Trim code",        width: 11 },
+            { key: "motor",       header: "Motor",            width: 8 },
+            { key: "paint",       header: "Paint",            width: 16 },
+            { key: "wheels",      header: "Wheels",           width: 20 },
+            { key: "interior",    header: "Interior",         width: 17 },
+            { key: "seats",       header: "Seats",            width: 14 },
+            { key: "roof",        header: "Roof",             width: 13 },
+            { key: "tow",         header: "Tow hitch",        width: 13 },
+            { key: "matchedAt",   header: "Matched",          width: 18 },
+            { key: "matchedDays", header: "Days since matched", width: 18, type: "number", digits: 1 },
+            { key: "here",        header: "Arrival",          width: 12 },
+            { key: "arrivedAt",   header: "Arrived",          width: 13 },
+            { key: "etaAt",       header: "ETA to centre",    width: 14 },
+            { key: "spec",        header: "Build",            width: 14 },
+            { key: "options",     header: "Option codes",     width: 40 }
+          ]),
+          rows: expSheet
+        });
+        log(`export: ${expSheet.length} matched not scheduled (${preset}) -> ${label}.xlsx`);
+        return sendXlsx(res, expBuf, label);
+      }
+
       if(String(body.kind || "") === "cog"){
         /* Advisor is fetched here rather than carried in with the rows: it is
            the one column that is not already on screen, and paying for it at

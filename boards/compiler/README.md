@@ -5,13 +5,17 @@ A board of tools over the systems that between them describe a vehicle.
 **Intrepid** says what is *wrong* with it — service visits, containment
 campaigns, logistics holds. The **Service App** says what the work actually
 *is*: the symptom on each ticket, which neither of the other two carries.
-None of them can answer alone, so the board joins them.
+**Tesla OS** says who is *waiting* for it — the order a VIN has been matched
+to, which none of the others knows exists. None of them can answer alone, so
+the board joins them.
 
 Local, zero dependencies, no build step. `node server.js` and open the port.
 
-Two tools: **Service Visits**, which asks both systems what is holding a car
-up, and **Cars on Ground**, which asks Intrepid alone where each car stands in
-the receiving ladder. The board is built to take more.
+Three tools: **Service Visits**, which asks Garage and Intrepid what is
+holding a car up; **Cars on Ground**, which asks Intrepid alone where each car
+stands in the receiving ladder; and **Pending Inventory**, which asks Tesla OS which
+cars are matched to a customer with no appointment booked and Garage what
+those cars are. The board is built to take more.
 
 ---
 
@@ -24,13 +28,15 @@ node server.js            # http://localhost:3131
 Or double-click `Start The Compiler.cmd`.
 
 First run needs Garage and Intrepid connected, which happens once on the **Zo
-Projects Hub** and covers every board. The **Service App** connects on this
-board instead — Admin (code below) › Sources › Connect, or the prompt the
-board shows when it opens. All three share one isolated Chrome profile, so the
-second and third Connect usually need no second sign-in.
+Projects Hub** and covers every board. The **Service App** and **Tesla OS**
+connect on this board instead — Admin (code below) › Sources › Connect, or, for
+SCA, the prompt the board shows when it opens. All four share one isolated
+Chrome profile, so every Connect after the first usually needs no sign-in.
 
-Garage and Intrepid are required. SCA is not: without it a service visit shows
-as a bare number instead of what it is for, and nothing else changes.
+Garage and Intrepid are required. The other two are not, and they are missing
+in different ways: without SCA a service visit shows as a bare number instead
+of what it is for; without Tesla OS, Pending Inventory will not run at all, and the
+other two tools do not notice.
 
 ---
 
@@ -184,6 +190,87 @@ fallback.
 Only vehicles that already have a visit get here, so the cost tracks how many
 cars are in for work rather than the size of the centre: a 443-car scan of
 Cypress with 45 visits spends 90 calls and about two seconds.
+
+**The long form is in the ticket panel, above the images.** The row compresses
+a concern into one dot-joined line because it has one line; open the car and
+each concern gets its symptom at reading size, its classification under it,
+the narrative a technician typed, and who logged it and when. Every concern on
+the visit, not just the first — a visit with three of them is three pieces of
+work, and the panel that can move it should say so.
+
+Above the images rather than below, because the words come first: a photo of a
+scratched fender means something once you have read *FENDER, LH [ Paint /
+Chips ] · Logistics Damage*, and very little before it.
+
+### Remove a courtesy line, or change what a concern says
+
+Two buttons in the ticket panel, and which one you get depends on the concern:
+
+| | |
+|---|---|
+| **Courtesy Service Provided** | **Remove** — takes the line off the visit |
+| everything else | **Edit** — change the symptom, from SCA's own catalogue |
+
+The courtesy line is matched on its symptom text, because SCA has no flag for
+"this is the courtesy line" — the catalogue entry is a symptom like any other.
+
+**Remove is not a cancel, and that is the whole point.** Cancelling closes the
+ticket and disturbs billing, which this board has been told twice never to do.
+This returns the activity to *outstanding work* — SCA's own label for the
+button is `activity_remove_and_return_to_outstanding_work`. The concern
+survives, it is simply no longer on this visit, and the slider says so in
+those words before it will move.
+
+```
+POST /case/api/visit/<svid>/removeactivities         body [<activityID>]
+PUT  /case/api/case/activities/update/<id>?preventOverride=false
+POST /integration/api/persona/symptom/search?modelId=<n>&locale=en-US  {term}
+GET  /integration/api/persona/symptom/<symptomCode>/<modelId>?locale=en-US
+```
+
+#### All four were captured, not guessed
+
+The bundle gave the URLs; the bodies came off the wire while Ed pressed the
+buttons in the debug Chrome with `capture-act.js` recording. That is the rule
+on this host after `cancelServiceVisits` returned `success:true` while closing
+a ticket, and it earned its keep again here — three things a guess would have
+got wrong:
+
+1. **The update PUT carries the whole activity, parts included.** On the
+   captured ticket that was a correction line holding an $850 backlite glass
+   and two more parts. Read the record without `includeParts=true`, echo it
+   back, and the PUT writes an empty parts list. So the body is built from
+   `POST /activity/api/activity/visit/<svid>/activities?includeParts=true`,
+   which returns the wrapper in exactly the shape the PUT wants it — 112
+   fields, verified field-for-field against what SCA itself sent.
+2. **Two fields move with the symptom and are not in the search results.**
+   `cosmeticIssue` and `hyperSymptom` come from
+   `additionalAttributes` / `reportingAttribute` on the *single-symptom* GET,
+   which the search never populates. SCA reads exactly those two when you pick
+   a symptom. Carrying the old ones over would misfile the car, since
+   hyperSymptom is what the concern filter groups by.
+3. **The GET is code-then-model.** `persona/symptom/<symptomCode>/<modelId>`.
+   The other way round answers *"Record not found"*.
+
+SCA follows its own PUT with an `activityextension/add` and a second PUT at
+`preventOverride=true`. Neither is sent here: the first PUT already returns the
+new symptom on the record, and the extension call carried nothing but nulls.
+
+#### Judged on the read-back, never on the 200
+
+Both writes re-read the record and report what the read said. Remove also
+reads **before** it fires and refuses if the line is not on the visit — without
+that, "it is not on the visit now" is equally true of something that was never
+there, so a stale tab would get a confident success for doing nothing.
+
+The round trip was measured on a live ticket: change the symptom, change it
+back, then diff the activity against what it was beforehand. **One field
+differed — `modifyDate`, which the server sets.** Parts, narrative, estimate
+and status were byte-identical.
+
+Four ways to be refused, all of them tested: a line already off the visit, an
+activity that is not on this visit, a symptom code the model's catalogue does
+not have, and a code that did not come from SCA's list at all.
 
 ### The photos are fetched when you ask, never on a scan
 
@@ -880,6 +967,310 @@ reading a different environment and the run was meaningless.
 
 ---
 
+## Pending Inventory
+
+Pick a centre and press **Pending Inventory**. There is no modal: the bucket is
+the bucket and the centre is already chosen, so a dialog would be a click spent
+on nothing.
+
+> The tool was called **Expenable** until 2026-08-16 and the code still says
+> `exp` — `expScan`, `/api/exp/scan`, `S.expFilters`, `expBtn`. The name
+> changed; renaming forty identifiers across three files to match a label did
+> not seem worth the churn, so this note is here instead.
+
+It answers one question — **which cars are matched to a customer and have no
+delivery appointment booked** — and it answers it as a wheel of cards with the
+car rendered on each one. Cypress runs about 55 cars in ten seconds.
+
+Four systems, each the only one that can say its part:
+
+| | |
+|---|---|
+| **Tesla OS** | that an order exists, which VIN it is matched to, and when |
+| **Garage** | what that car actually is — paint, wheels, interior, seats, roof, tow |
+| **Intrepid** | whether it has turned up, and whether it has a service visit |
+| **Service App** | what that visit is for, if there is one |
+
+Most of it is free: OS returns the bucket 25 rows at a time, Garage answers
+every VIN 50 to a query, and the on-ground inventory is one call for the whole
+centre. The one per-vehicle cost is the service-visit check — the same call
+Service Visits makes, once per VIN — and the SCA and VRI lookups behind it run
+only on the handful of cars that come back with a visit. Cypress: 54 cars, 8
+with a visit, about eight seconds.
+
+### The picture is the point
+
+A row reading *Quicksilver, Glider 18, Black Console 2* is three lookups for
+anyone who then has to walk out and find the car. The rendered car is
+recognised at a glance, so the list is cards and the words sit underneath the
+picture rather than replacing it.
+
+The card is portrait with the picture at the top — the shape a trading card
+is, for the same reason — then year and model, then the VIN, with the RN in
+the bottom corner. The **spec sits in a panel beside the focused card** rather
+than inside it, so the picture keeps the card and the words get room to be
+read straight.
+
+### The wheel
+
+Cards are stacked vertically: one in focus, its neighbours cut off above and
+below, and the whole thing turns when you scroll it. Arrow keys work, the two
+buttons under the spec work, and clicking a half-visible neighbour brings it
+into focus.
+
+### The SV bubble opens the Service Visits editor — the actual one
+
+A card whose car has a service visit carries an **SV** bubble beside the
+days-waiting badge. Pressing it opens the ticket panel: move the visit to
+another centre, its photos, its contacts, the billing address — the whole
+thing.
+
+**It is not a second copy of that panel, and that is the requirement rather
+than an implementation detail.** The bubble calls `openTicket(r)`, which is
+the same function the Service Visits list calls on a row click, which calls
+the same `editPanelHtml()` and `wireEditPanel()`. Whatever that editor grows
+next — another write, another guard, another line of detail — the bubble has
+it the same day.
+
+For that to work the two rows have to be the same shape, and they are because
+the server makes them so:
+
+- `expScan` builds `visits[]` with the same fields, from the same
+  `getScaServiceVisitByVin` call, as the Service Visits scan does.
+- Both then run those rows through **`enrichVisits()`**, lifted out of
+  `scanVehicles` whole. That is the subtle part — matching SCA's ticket to
+  Intrepid's visit by printed number, dropping visits SCA has already closed,
+  attaching the receiving inspection — and there is exactly one of it. Two
+  copies would drift, and the second panel would become a lie about the first.
+- The row also carries `delivered`, read from Garage with the spec, because
+  that is what decides whether the panel offers to cancel an appointment as
+  part of a move. The server re-reads it before writing either way.
+
+Only the focused card's bubble is live; on a card half off the screen it is
+inert, like the RN link next to it.
+
+#### The position is a number, not an index
+
+The first version moved a card per wheel event with a cooldown to stop a
+trackpad flying through the lot. It stepped, and you could feel every notch
+land — *"not smooth like I'm imagining"*, which was fair.
+
+So the deck has a **position**, `deckPos`, a float in card units. The scroll
+adds a *distance* to a target, an animation loop eases the position toward it
+at 17% of the remaining gap per frame, and each frame writes the transform of
+the cards near it. Halfway between two cards is now a real state: both are
+half-sized and half-faded, passing each other. When the scrolling stops, the
+target rounds to the nearest card, so it always comes to rest **on** one.
+
+Four things this depends on:
+
+- **The scroll adds to the TARGET, not to the current position.** A flick
+  arrives as thirty events in a quarter-second and the eased position is
+  always behind them; adding each event to the lagging position throws most of
+  the gesture away. Measured that way round first — a hard flick moved one
+  card instead of three.
+- **`deltaMode` is normalised.** Firefox reports lines and pages where Chrome
+  reports pixels, and a line is not three pixels.
+- **The markup is built once per list, never per frame.** Every card exists as
+  a box, but only the nine nearest are `display:` anything, and each card's
+  image sits in `data-src` until the wheel brings it near. Rebuilding markup at
+  60fps is what made the first version feel like it was chewing. One image size
+  for every card, too: swapping an `<img>` src as a card comes into focus
+  reloads it, and a card that flickers on arrival is worse than one rendered
+  at 500px for a slot 360 wide.
+- **The wheel only takes the scroll once it is in view, and hands it back at
+  the ends.** The deck starts below the fold, and a wheel that swallowed the
+  scroll on its way past would trap the page. Scrolling down on the last card
+  carries on to the footer rather than sitting there refusing. A finished scan
+  scrolls the deck into view by itself.
+
+#### It turns on an arc, and the axis is off to the left
+
+A card leaving the centre does not slide straight up or down — it **swings
+left as it goes**, above and below alike, because a wheel turns about an axis
+and this one's is off to the left of the column. That is what the reference
+sketch showed, and it is the whole difference between a wheel and a list that
+slides.
+
+The horizontal offset is the sagitta of that turn, `R(1 − cos θ)`: nearly
+nothing for the first few degrees and then opening up, which is how a circle
+actually reads. It is capped at 190px, because the column is only so wide and
+a card that swings out of it is clipped rather than turned — which is also why
+the card column is 540px for a 360px card, and why the cards are anchored to
+its **right** edge. The focused card sits next to the spec panel it belongs
+to, and everything to its left is room to turn into.
+
+Three numbers set the feel, all at the top of the deck section in
+`index.html`:
+
+| | |
+|---|---|
+| `DECK_STEP` 455 | centre to centre. A card is ~410 tall, so this leaves ~55px of air between one and the next. Tuned from both ends: at 420 they nearly touched and read as clutter, at 500 they were too far apart to read as one wheel |
+| `DECK_ARC` 1000 / `DECK_ANG` 0.45 | the swing: ~100px left at one card of distance, capped at 190 |
+| `.wheel` 1000px | the height. With the step above, most of each neighbour shows and the card beyond it stays off screen |
+
+The step and the height are read together — the step alone decides the gap,
+and the two of them decide how much of a neighbour you see. The neighbours
+only shrink 5.5% and fade 26% per card of distance, so they stay big enough to
+read the model off: a stack you can only see one and a half cards of is a card
+with a smudge above it.
+
+The card shows the tow hitch only when there is one — a card line that says
+"none" is spent saying nothing — but the **panel names every field even when
+it is empty**, because in eight labelled rows a silently absent one reads as a
+car that has no roof. There the value says *not on record*.
+
+The renderer is Tesla's own configurator compositor, and it takes **no
+credential at all** — a plain `<img src>`, unlike the SCA photos, which have to
+be proxied so the bearer never reaches the page. The recipe is copied from OS's
+own `CompositorImage` component: `STUD_3QTR` (`_V2` for S and X), and a
+different crop for Cybertruck.
+
+**Feed it the marketing codes, not Garage's.** `cfg_mkt_option_codes` off the
+OS row is the short `$`-prefixed list. Garage's 50-code *manufacturing*
+`option_codes` renders the car and leaves **black voids where the wheels should
+be** — a real dead end, not a compositor bug.
+
+### Trim: the code is shown beside the name, on purpose
+
+Ed asked for trim as Standard / Premium. **Neither system says that.** Garage's
+`cfg_trim` is the battery/variant code (`74`, `62D`, `P74D`) and OS renders
+`ord_trim_code` raw — its own bundle has no label map either, so the pipeline
+screen shows a code too.
+
+What every OS row carries is exactly one `MT…` marketing code, and
+cross-tabulating those against Garage over a real centre split cleanly:
+
+| | | | | | |
+|---|---|---|---|---|---|
+| `MT367` | Model 3 | 62 RWD | `MTY77` | Model Y | 62D AWD |
+| `MT369` | Model 3 | 74 RWD | `MTY60` | Model Y | 74 RWD |
+| `MT370` | Model 3 | 74D AWD | `MTY48` | Model Y | 74D AWD |
+| | | | `MTY70` | Model Y | P74D AWD |
+| `MTC04` / `MTC07` / `MTC08` | Cybertruck | AWD | | | |
+
+The grouping is measured. The **names** are read off Tesla's current lineup —
+62 is the Standard pack, 74 the Premium one, a leading P is Performance — and
+that is the only inference in the tool. So the card shows the code beside the
+name: a wrong label is then obvious to anyone who sells these, instead of being
+a quiet fiction. An unknown code shows as itself rather than being guessed at
+from the number.
+
+### Reading a card
+
+The **RN opens the order in Tesla OS** (`os.tesla.com/vehicle-order/<RN>/`) and
+the VIN beside it opens the car in Garage, so a card opens both halves of what
+it is made of.
+
+The badge in the corner of the picture is **days since the car was matched**,
+and the border warms at 7 days and reddens at 14. The counter under the spec
+says which card of how many is in focus. That is a reading aid, not a
+policy — nobody has said what counts as too long — and it is the same job dwell
+does on a car on ground. Cards are sorted longest-waiting first; a car with no
+match date sorts last, because an unknown wait cannot claim to be the longest.
+
+The age is **derived on the page from the timestamp**. OS also sends
+`time_since_matched`, in minutes, as a string, fixed at the moment the row was
+fetched — a tab left open would keep reporting the age it had on load.
+
+**A VIN Garage has never heard of is a car that has not been built yet** — the
+order exists and the VIN is assigned, but nothing has come down the line to be
+indexed. Its panel says exactly that, in one sentence, and it keeps its
+picture: the order and the option codes are OS's, so the render still works. A
+column of blank spec lines would read as a car without a colour, which is a
+different and wrong thing. The count gets its own tile and a notice.
+
+The board says *not built* rather than *not in Garage's index* everywhere it
+comes up — on the card, in the notice, in the filter panel, and in the export
+column. `inGarage` is still the test; it is just not what the reader is asking
+about. One describes a database, the other describes the car.
+
+### Filters and sort
+
+**Filters** in the list head opens a panel of every facet the cards carry —
+waiting, model, year, trim, motor, paint, wheels, interior, seats, roof, tow
+hitch, and whether Garage has the car at all. Multi-select within a group (two
+colours means either will do), AND across groups. **Sort** beside it offers
+longest waiting, newest matched, soonest ETA, and by model.
+
+**None of it is part of the scan, and it could not be.** The bucket is the
+bucket: Tesla OS decides what is in it and there is no narrower one to ask
+for, so a rescan would return the same cars and spend ten seconds doing it.
+Same argument as the ticket-concern filter on Service Visits, and the same
+door — `visibleRows()`, which the count, the subtitle and the export all read,
+so the three cannot disagree about what is listed. On the other two tools a
+facet narrows the Lucene query and makes the scan genuinely cheaper, which is
+why they work the other way round. Neither is a house style; each follows from
+whether the filter can save any work.
+
+The counts beside each option are measured **against the other groups**, so
+the number next to *Pearl White* is what you would have if you added it to
+everything already picked. Options that would reach nothing are dropped rather
+than shown at zero, and a group whose single option covers every card left —
+every centre is all one model year — is dropped entirely rather than offered
+as a button that does nothing.
+
+Two consequences worth knowing:
+
+- **A car that has not been built vanishes the moment you pick a colour.** It
+  has no colour yet, so it cannot match one. The panel says so above the
+  groups, with the count.
+- **A window is "7 days or more", not "under"** — the opposite of Cars on
+  Ground, because the question is the opposite. A car with no match date is
+  dropped by a window rather than kept, the same call the time-on-ground
+  filter makes about a missing arrival.
+
+Filters clear on every scan; the sort order survives one. A colour picked at
+one centre is a claim about a fleet the next scan may not contain, whereas an
+order is a habit about how you read a list. What is applied is named in the
+subtitle and counted on the chip, and it lands in the export filename, because
+a sheet of 6 cards and a sheet of 55 are otherwise the same file with
+different contents.
+
+### Four ways this API says "nothing here" when it means "you asked wrongly"
+
+All four were found by probing, and every one of them is **HTTP 200** with an
+empty page and no error:
+
+1. **`recordsPerPage: 100` returns zero rows.** 25 works, and 25 is what the
+   pipeline itself asks for. This is not a tuning knob.
+2. **`currentPage` is 1-based.** `0` is another silent empty.
+3. **The TRT must be a string.** `["17589"]` works; `[17589]` returns nothing.
+4. **The `order-range` sub-tab is dead** — `Missing required parameter:
+   endPoint`. `pending-actions` is the live one, and for this bucket
+   `bucket-totals` reports both as the same number.
+
+The one signal that separates a wrong question from a quiet centre is
+`dependentOnFilters`: a response that accepted the filter echoes the bucket's
+filter names back, and one that ignored it echoes `[]`. A zero-row page with an
+empty echo is **thrown, not rendered** — see `assertFiltered()` in `os.js`.
+
+The bucket is found by **name**, not by a pinned id, because buckets are
+configured per site — Cypress's list carries a Lease Return bucket another
+centre will not have. A missing bucket throws too: "not published to this role"
+and "nothing in it" render identically and mean opposite things.
+
+### Keep-alive had to be turned off
+
+Node has kept sockets alive by default since v19, and the OS BFF closes an idle
+connection sooner than Node forgets about it. A scan, then a second scan
+straight after it, died with `socket hang up` before a byte was sent; a third
+fifteen seconds later was fine, because by then Node had dialled fresh. `os.js`
+uses its own agent with `keepAlive: false`, and retries once — and only once,
+and only on a connection that never carried a reply. Everything it sends is a
+search, so a re-send cannot double anything up.
+
+### Export
+
+**All data** is 18 columns: the order, the ids, the whole spec, the match date
+and *Days since matched* as a **number** beside it, so a column can be sorted
+or averaged without anyone parsing "3 days". **VIN + RN** is the two ids, for
+pasting somewhere that is not a spreadsheet — the same job *VIN + delivery
+date* does on the other two tools, which this bucket cannot offer, because not
+having been given a date is what put a car in it.
+
+---
+
 ## Credentials
 
 | | |
@@ -888,6 +1279,7 @@ reading a different environment and the run was meaningless.
 | Garage | `…_s_garage_session` cookie, signed in on the Hub |
 | Intrepid | `cogs-authorization` cookie, signed in on the Hub |
 | Service App | 9-hour bearer token, signed in **here**, in `.connections.json` |
+| Tesla OS | `osAccessToken`, signed in **here**, resent as a header — see below |
 
 All of it lands in one gitignored file. The admin password is a guard against
 fat fingers rather than an attacker, but it is checked server-side all the
@@ -965,11 +1357,63 @@ The token lasts about nine hours, which is a working day, and the board treats
 anything under five minutes remaining as already gone rather than starting a
 scan that will die halfway through.
 
-**Read-only.** The token carries `SCA_All_Default_Create` and `SCA_PartPick`.
-The write paths exist and are mapped — update an activity, change visit motion
-status, add an activity to a visit — but several would 403 on that role and
-every one of them touches a real customer record. Nothing on this board writes
-to SCA.
+**Not read-only, and every write is named.** The token carries
+`SCA_All_Default_Create` and `SCA_PartPick`. The board makes exactly these
+calls that change a record, and nothing else:
+
+| | |
+|---|---|
+| move a visit to another centre | `PUT visit/<svid>/dateTime` |
+| clear a booking | TSS `CancelAppointment`, then the same dateTime PUT |
+| switch a contact to Tesla, set the billing address | `saveContact` / `saveaddress` |
+| take a courtesy line off a visit | `POST visit/<svid>/removeactivities` |
+| change a concern's symptom | `PUT case/activities/update/<id>` |
+
+Every one of them was captured off SCA's own UI rather than inferred, checks
+`success` rather than the status code, and re-reads the record afterwards.
+**`cancelActivity` is not among them and never will be** — it closes the
+ticket and disturbs billing. Neither is `cancelServiceVisits`, which is
+deleted from this board rather than merely unused, because it answers
+`success:true` while cancelling both the visit and its open tickets.
+
+### Tesla OS is a cookie you have to resend as a header
+
+The second board-local credential, for the same reason as the first: nothing
+else in the estate speaks to `os.tesla.com`, so a Hub row for it would serve
+exactly one board.
+
+Entra SSO leaves two cookies on the host, `osAccessToken` and `expiresIn`.
+**The cookie alone is not enough.** A same-origin `fetch` from inside the
+signed-in page, with `credentials:'include'`, still gets `401 Authentication
+failed`. The app's own axios factory resends the cookie *value* as a header,
+and that is what the BFF actually reads:
+
+```
+X-Os-Access-Token: <osAccessToken>
+X-Requested-With : XMLHttpRequest
+Accept-Language  : en
+```
+
+The good consequence is that **no browser is needed at runtime** — with those
+headers the BFF answers plain Node over https, so the board holds a token
+rather than driving a page.
+
+Unlike SCA's, this token is **opaque**: it does not state its own expiry, so
+"there is a token" and "there is a session" are different questions. The panel
+answers the second one by asking `GET /v1/auth/check`, the cheapest
+authenticated call the pipeline has, cached a minute so polling is free. The
+load-bearing guard is neither of those, though — `os.js` turns a 401 into
+`needsOs`, so a session that dies mid-scan surfaces as *connect it again*
+rather than as a centre with nothing matched.
+
+That guard was worth having twice. `expScan()` used to swallow the error from
+its first call and report a live centre as an **unknown TRT** — the wrong
+message *and* the wrong fix, sending the reader to the picker to repair a
+sign-in. Only an answer of "no such site" means that now; errors propagate.
+
+**Read-only.** Three POSTs and a GET, all searches. The pipeline has write
+paths — reassign, reschedule, bulk actions — and they are deliberately not
+mapped.
 
 ---
 
@@ -979,13 +1423,20 @@ to SCA.
 config.json     port, hosts, concurrency, the shipped admin password
 lib.js          everything that talks to Garage or Intrepid, plus the facets
 sca.js          the Service App: its sign-in, and the two calls that read a ticket
+os.js           Tesla OS: its sign-in, and the delivery-pipeline bucket
 server.js       thin HTTP layer; no tool logic lives here
 index.html      the board — ZO-1, one file, no build
 ```
 
-`sca.js` is self-contained and stores nothing: it hands a captured token to
-`lib.js`, which stays the only writer of `.connections.json`. Deleting the
-file would cost the board its ticket column and break nothing else.
+`sca.js` and `os.js` are self-contained and store nothing: each hands a
+captured token to `lib.js`, which stays the only writer of
+`.connections.json`. Deleting `sca.js` would cost the board its ticket column;
+deleting `os.js` would cost it Pending Inventory. Neither would break anything else.
+
+They are siblings rather than one shared module, and that is the same trade
+`credstore.js` and `xlsx.js` already make on this estate: two is not a
+pattern, and the two differ in the one place that matters — SCA's credential
+states its own expiry and this one has to be asked.
 
 `FACETS` and `HOLD_KINDS` are defined once in `lib.js` and sent to the page at
 boot, so the filter menu, the query builder and the row labels cannot drift
@@ -1002,16 +1453,27 @@ micro-labels tracking wide, display numerals tracking tight, 18px cards and
 
 ## Adding the next tool
 
-Put a button in `.tools` in the hero, a modal for its options, and a route in
-`server.js` that calls into `lib.js`. The nav, TRT picker, admin panel,
-progress bar, notices and both connections are already there and are not
-specific to either existing tool.
+Put a button in `.tools` in the hero, a modal for its options if it has any,
+and a route in `server.js` that calls into `lib.js`. The nav, TRT picker,
+admin panel, progress bar, notices and every connection are already there and
+are not specific to any existing tool.
 
-What Cars on Ground had to touch, and a third tool will too: `S.tool` decides
-which renderer the list uses, `paintStats()` writes the strip rather than
-filling in fixed tiles, and `/api/export` branches on `kind`. Two tools
+What Cars on Ground had to touch, and Pending Inventory touched again: `S.tool`
+decides which renderer the list uses, `paintStats()` writes the strip rather
+than filling in fixed tiles, and `/api/export` branches on `kind`. Tools
 sharing one hardcoded strip would leave whichever ran last staring at tiles
-that count the other one's question.
+that count another one's question.
+
+Pending Inventory added one thing to that list and nothing else: the `.list` element
+gets a `cards` class and holds a wheel instead of a column of rows. The head,
+the empty state, the export and the count are all one implementation still —
+a second list would have been three more places for the screen and the sheet
+to disagree. `S.expIndex` is an index into the rows *currently listed*, not a
+VIN: the list it indexes is rebuilt by every filter and sort, so the position
+is clamped rather than followed.
+
+A tool with no options needs no modal. Pending Inventory's hero button *is* its run
+button, spinner and all.
 
 One trap, twice now: a class rule setting `display` beats the browser's own
 `[hidden]` rule, so anything hidden by attribute needs a `[hidden]` rule of

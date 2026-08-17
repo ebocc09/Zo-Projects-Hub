@@ -18,6 +18,9 @@ const crypto = require("crypto");
 
 const credstore = require("./credstore");
 const sca       = require("./sca");
+/* `osx`, not `os`, purely to keep the name free: `os` is node's own module and
+   this file would be one `require("os")` away from a silent shadow. */
+const osx       = require("./os");
 
 const HERE = __dirname;
 
@@ -58,8 +61,8 @@ const CONN_FILE = path.join(HERE, ".connections.json");
    token that guards the trigger URL. Empty until somebody pastes a webhook
    under Admin › Teams. */
 const CONN_DEFAULTS = { intrepidCookie: "", garageCookie: "", trtId: null,
-                        offsiteTrtId: null, sca: null, billingAddress: null,
-                        teams: null };
+                        offsiteTrtId: null, sca: null, os: null,
+                        billingAddress: null, teams: null };
 
 /* Stored as a number or null, never a string, so callers can compare without
    worrying which layer they got it from. */
@@ -130,6 +133,86 @@ const scaDisconnect  = () => { saveConnections({ sca: null }); return { ok: true
 
 /* Type-ahead over SCA's site directory, for the move picker. */
 const scaSites = term => sca.sites(scaToken(), term);
+
+/* SCA's symptom catalogue, for the concern editor's type-ahead. Scoped by the
+   model of the car being edited — see sca.symptoms(). */
+const scaSymptoms = opts => sca.symptoms(scaToken(), opts);
+
+/* The two writes on a concern. Both were captured off SCA's own UI rather
+   than inferred, both check `success` and then re-read the record, and
+   neither is `cancelActivity` — see the long notes in sca.js.
+
+   Remove returns the line to outstanding work; the ticket is not closed. */
+const scaRemoveActivity = opts => sca.removeActivity(scaToken(), opts);
+const scaSetSymptom     = opts => sca.setSymptom(scaToken(), opts);
+
+/* ── the Tesla OS token ──
+   Second board-local credential, same arrangement as SCA and for the same
+   reason; os.js has the write-up. lib.js stays the only writer of the file.
+
+   ── why this one cannot be checked without a network call ──
+
+   SCA's credential is a JWT: it states its own expiry, so scaConnected() is a
+   pure function of the stored value. This one is opaque, so "have a token"
+   and "have a session" are different questions and only the second one
+   matters. osConnected() answers the cheap one for the dot; osStatus() asks
+   the pipeline, briefly cached so polling the panel does not hammer it.
+
+   The load-bearing guard is neither of those: os.js turns a 401 into
+   `needsOs`, so a session that dies mid-scan surfaces as "connect again"
+   rather than as a centre with nothing matched. */
+
+function osSaved(){
+  const s = loadConnections().os;
+  return s && s.token ? s : null;
+}
+
+function osToken(){
+  const s = osSaved();
+  if(!s){
+    const err = new Error("Not connected to Tesla OS — connect it in Admin › Sources");
+    err.needsOs = true;
+    throw err;
+  }
+  return s.token;
+}
+
+const osConnected = () => Boolean(osSaved());
+
+/* Cached because the panel polls. Short enough that a session dying is
+   noticed within a minute, long enough that the poll is free. */
+let osProbe = { at: 0, live: false, who: null };
+const OS_PROBE_MS = 60_000;
+
+async function osStatus(){
+  const s = osSaved();
+  if(!s) return { connected: false, user: null, name: null, title: null };
+  if(Date.now() - osProbe.at < OS_PROBE_MS){
+    return { connected: osProbe.live, ...(osProbe.who || {}),
+             user: s.user, name: s.name || null, title: s.title || null };
+  }
+  const who = await osx.authCheck(s.token).catch(() => null);
+  osProbe = { at: Date.now(), live: Boolean(who && who.username), who: null };
+  return { connected: osProbe.live,
+           user : (who && who.username) || s.user || null,
+           name : (who && who.name)     || s.name || null,
+           title: (who && who.title)    || s.title || null };
+}
+
+function osCommit(got){
+  osProbe = { at: 0, live: false, who: null };   // force a fresh probe
+  return saveConnections({
+    os: { token: got.token, user: got.user, name: got.name || "",
+          title: got.title || "", capturedAt: new Date().toISOString() }
+  });
+}
+
+const osSignIn     = () => osx.beginSignIn(osCommit);
+const osDisconnect = () => {
+  osProbe = { at: 0, live: false, who: null };
+  saveConnections({ os: null });
+  return { ok: true };
+};
 
 /* ── this centre's billing address ──
 
@@ -2425,6 +2508,371 @@ async function titleStatusFor(vin){
   };
 }
 
+/* ══════════════════════ Pending Inventory — matched, not scheduled ══════════════════
+
+   Tesla OS enumerates and Garage describes. OS is the only system that knows
+   an order exists, so it says WHICH cars have a customer waiting and no
+   appointment booked; Garage is the only one that says what those cars ARE in
+   words a person can read. Neither can answer alone.
+
+   Unlike the service-visits scan this costs no per-vehicle calls: OS returns
+   the whole bucket 25 rows at a time, and Garage answers every VIN in one
+   batched index query. A 61-car centre is about ten seconds, nearly all of it
+   OS paging.                                                                */
+
+/* ── option codes are the only trim there is ──
+
+   Ed asked for trim as Standard / Premium. Neither system says that:
+   Garage's `cfg_trim` is the battery/variant code (`74`, `62D`, `P74D`) and
+   OS renders `ord_trim_code` raw — its own bundle has no label map, so the
+   pipeline screen shows a code too.
+
+   What every OS row does carry is exactly one `MT…` marketing code, and
+   cross-tabulating those against Garage over a real centre gave a clean 1:1
+   split with no ambiguity:
+
+     MT367  Model 3   62    RWD        MTY77  Model Y   62D   AWD
+     MT369  Model 3   74    RWD        MTY60  Model Y   74    RWD
+     MT370  Model 3   74D   AWD        MTY48  Model Y   74D   AWD
+                                       MTY70  Model Y   P74D  AWD
+     MTC04 / MTC07 / MTC08  Cybertruck  AWD
+
+   The grouping is measured. The NAMES are read off Tesla's current lineup —
+   62 is the Standard pack, 74 the Premium one, a leading P is Performance —
+   and that last step is the only inference here. So the card shows the code
+   beside the name: a wrong label is then obvious to anyone who sells these,
+   rather than being a quiet fiction. Unknown codes degrade to the bare code
+   rather than guessing from the number. */
+const TRIM_BY_MT = {
+  MT367: "Standard RWD",     MT369: "Premium RWD",      MT370: "Premium AWD",
+  MTY77: "Standard AWD",     MTY60: "Premium RWD",      MTY48: "Premium AWD",
+  MTY70: "Performance AWD",
+  MTC04: "Cybertruck AWD",   MTC07: "Cybertruck AWD",   MTC08: "Cybertruck AWD"
+};
+
+/* `$PN00,$W38A,…` → `["PN00","W38A",…]`. The $ is decoration in OS's own
+   payload; the compositor accepts the string either way (proven byte-identical
+   both ways), but everything else here wants it gone. */
+const mktCodes = s => String(s || "").split(",")
+  .map(x => x.trim().replace(/^\$/, "")).filter(Boolean);
+
+/* SNAKE_CASE → words. Garage writes `PEARL_WHITE`, `HELIX_V2_20_DARK`,
+   `BLACK_CONSOLE_2`. Read as-is these are shouty and unreadable; read as
+   Title Case they are the names people use.
+
+   `NONE` becomes empty rather than the word "None", because the caller
+   decides how an absent feature reads — "No tow hitch" is a sentence, "None"
+   beside a label is a shrug. */
+function pretty(v){
+  const s = String(v == null ? "" : v).trim();
+  if(!s || /^(none|null|default|unknown)$/i.test(s)) return "";
+  return s.replace(/_/g, " ")
+          .toLowerCase()
+          .replace(/\b([a-z])/g, (_, c) => c.toUpperCase())
+          // Keep the shapes that are names rather than words.
+          .replace(/\bV(\d)\b/gi, "V$1")
+          .replace(/\bRwd\b/g, "RWD").replace(/\bAwd\b/g, "AWD")
+          .replace(/\bLh\b/g, "LH").replace(/\bRh\b/g, "RH");
+}
+
+/* The spec, as one flat object of already-readable strings.
+
+   Every field is a string, "" meaning Garage did not answer. Deliberately not
+   null: the card renders an unanswered field as "not on record" rather than
+   dropping the row, because a missing line reads as a car without the feature
+   and that is the one wrong impression worth engineering against. */
+/* The seat grade, without the actuator hardware.
+
+   Garage answers this in two different fields depending on the car — 3 and Y
+   carry `cfg_frontseattype`, Cybertruck carries `cfg_seattrimtype`, and each
+   is empty on the other — so both are read and the first answer wins.
+
+   The 3/Y value is `PREMIUM_L_TESLA_MINITILT_R_TESLA_MINITILT`: a grade
+   followed by which recliner is fitted on each side. Only the grade is a
+   spec anybody reads, so everything from the per-side description onward is
+   cut. Cut rather than mapped, so a grade this has never seen still comes
+   through instead of falling to blank. */
+const seatGrade = v => pretty(String(v || "").replace(/_[LR]_[A-Z0-9_]+$/, ""));
+
+function specOf(g, mt, model){
+  const wheels = pretty(g && g.cfg_wheeltype);
+  const tow    = pretty(g && g.cfg_towpackage);
+
+  /* Cybertruck has no `cfg_exteriorcolor` at all — not blank, absent, on every
+     one of them. That is the product rather than a gap in the record: the body
+     is bare stainless unless it is wrapped. Said in words, because a card with
+     an empty Paint line reads as missing data. */
+  const paint = pretty(g && g.cfg_exteriorcolor) ||
+                (model === "ct" && g ? "Stainless steel" : "");
+
+  return {
+    paint,
+    wheels   : wheels + (g && g.staggered_wheels ? " (staggered)" : ""),
+    interior : pretty(g && g.cfg_interiortrimtype),
+    seats    : seatGrade(g && (g.cfg_frontseattype || g.cfg_seattrimtype)),
+    roof     : pretty(g && g.cfg_rooftype),
+    motor    : String((g && g.cfg_drivetraintype) || "").toUpperCase(),
+    // "" from pretty() means the code said NONE, which here is a real answer.
+    tow      : tow,
+    towed    : Boolean(g && g.cfg_towpackage && !/^none$/i.test(g.cfg_towpackage)),
+    trim     : TRIM_BY_MT[mt] || "",
+    trimCode : mt || ""
+  };
+}
+
+/* Model year from the VIN, which is the one place it is always present.
+   Position 10 is the model-year character and Tesla is on the ordinary
+   ISO 3779 cycle; the letters that can appear on a car in a delivery pipeline
+   today are the only ones worth listing. */
+const VIN_YEAR = { R: 2024, S: 2025, T: 2026, V: 2027, W: 2028 };
+const yearOf = vin => {
+  const c = String(vin || "")[9];
+  return (c && VIN_YEAR[c.toUpperCase()]) || null;
+};
+
+const MODEL_NAME = { m3: "Model 3", my: "Model Y", ms: "Model S",
+                     mx: "Model X", ct: "Cybertruck", ts: "Semi" };
+
+/* The Garage fields the card and the filters need, and nothing else. Asking
+   the index for the whole document would move megabytes to render ten lines. */
+const SPEC_FIELDS = ["vin", "model", "option_codes", "staggered_wheels",
+  "cfg_exteriorcolor", "cfg_wheeltype", "cfg_interiortrimtype", "cfg_seattrimtype",
+  "cfg_frontseattype", "cfg_rooftype", "cfg_drivetraintype", "cfg_towpackage",
+  "cfg_trim",
+  /* Not for the card — for the ticket panel. It gates whether a visit's
+     appointment may be cancelled as part of a move, because a booking on a
+     delivered car belongs to a customer rather than to Tesla. The server
+     re-reads it from Garage before writing either way; this only decides what
+     the panel offers. */
+  "delivered"];
+
+/* Garage, by VIN and in batches.
+
+   By VIN rather than by `vehicle_routing_location`, which is how every other
+   scan on this board enumerates. A matched car has a customer but need not
+   have arrived — several in a real Cypress bucket are still at the factory —
+   so the centre's VRL would silently drop them. The VIN is the join key OS
+   already gave us and it does not care where the car is standing. */
+async function specsByVin(vins, onProgress){
+  const out = new Map();
+  const BATCH = 50;
+  for(let i = 0; i < vins.length; i += BATCH){
+    const slice = vins.slice(i, i + BATCH);
+    /* Not caught. A batch that fails would otherwise leave fifty cars looking
+       like cars Garage has never indexed, which is a different and much more
+       alarming thing than a call that did not go through — and the card says
+       so in those words. Garage is a required source here as everywhere else
+       on the board, so a scan that cannot reach it fails rather than
+       describing the fleet wrongly. */
+    const page = await tesladexSearch({
+      query : "vin:(" + slice.join(" OR ") + ")",
+      fields: SPEC_FIELDS,
+      size  : BATCH
+    });
+    for(const r of (page && page.results) || []) if(r.vin) out.set(r.vin, r);
+    if(onProgress) onProgress({ phase: "spec", done: Math.min(i + BATCH, vins.length),
+                                total: vins.length });
+  }
+  return out;
+}
+
+/* ── which of them have actually turned up ──
+
+   A matched car is not necessarily a car you can walk out to. Some are still
+   at the factory, some are on a truck, and the ones standing on the lot are
+   the only ones anybody can prepare.
+
+   **Intrepid's on-ground inventory is the answer, and it is one call.**
+   `getCogInventoryCars` lists every car physically at the centre with its
+   arrival stamp — no date in the query and nothing per vehicle, which is why
+   Cars on Ground can read a 700-car lot in three seconds. This asks the same
+   question of the same endpoint, so the two tools cannot disagree about which
+   cars are here.
+
+   Three sources were considered and two rejected:
+
+   - **OS's `eta_to_service_center_dt`** is a plan, not an observation. Real
+     rows carry ETAs months in the past on cars that are standing here and
+     ETAs in the future on cars that already arrived. A date that has passed
+     is not an arrival.
+   - **Garage's routing location** says where a car belongs, not where it is.
+   - The inventory list says a car is on the ground because it is on the
+     ground.
+
+   Returns a Map of VIN → arrival timestamp, or **null** if the call failed —
+   null means "not known", which the caller must keep distinct from "not
+   here". A dead Intrepid cookie must not quietly report a centre with nothing
+   on the lot. */
+async function onGroundAt(trtId, notes){
+  try{
+    const inv = await intrepidGet(
+      `/getCogInventoryCars?trtId=${encodeURIComponent(trtId)}` +
+      `&matchStatus=&vehicleTypes=&pageSize=${COG_PAGE}`);
+
+    const out = new Map();
+    /* The inventory repeats a VIN when a car has more than one shipment leg
+       behind it, and the first row wins — the same dedupe Cars on Ground
+       makes on the same list, so a car's arrival date reads the same on both
+       screens. */
+    for(const r of Array.isArray(inv) ? inv : []){
+      if(r && r.vin && !out.has(r.vin)) out.set(r.vin, r.arrivalTimeStamp || null);
+    }
+    return out;
+  }catch(err){
+    /* Not thrown. Arrival is one column of one filter; the pipeline, the
+       specs and the pictures are all still good, and failing the whole scan
+       over it would be the tail wagging the dog. But it is SAID, because the
+       Arrival filter simply vanishing would look like a centre where every
+       car is in the same state. */
+    notes.push(`Intrepid did not answer, so this scan cannot say which cars have ` +
+               `arrived — the Arrival filter is not offered. ${err.message}`);
+    return null;
+  }
+}
+
+async function expScan({ trtId, onProgress } = {}){
+  const trt = asTrt(trtId) || savedTrtId();
+  if(!trt){
+    const err = new Error("Set a TRT first — the pipeline is read one centre at a time.");
+    err.needsTrt = true;
+    throw err;
+  }
+
+  const token = osToken();
+  const notes = [];
+
+  /* Named before anything is counted. A TRT the pipeline has never heard of
+     otherwise returns an empty bucket that reads exactly like a quiet centre,
+     which is the failure this whole file keeps guarding against.
+
+     Errors are NOT caught here, and that is the point: a dead session throws
+     from this same call, and swallowing it would report a live centre as an
+     unknown TRT and send the reader to the picker to fix a sign-in. Only an
+     answer of "no such site" means what the message below says. Caught once
+     during testing, from exactly that expiry. */
+  const location = await osx.locationFor(token, trt);
+  if(!location){
+    const err = new Error(
+      `Tesla OS does not know TRT ${trt}. Check the TRT in the picker — the ` +
+      `pipeline uses the same numbers the rest of the board does.`);
+    err.needsTrt = true;
+    throw err;
+  }
+
+  const { bucket, total, rows: osRows } = await osx.matchedNotScheduled(token, trt, onProgress);
+
+  const vins = [...new Set(osRows.map(r => r.vin).filter(Boolean))];
+  const specs = vins.length ? await specsByVin(vins, onProgress) : new Map();
+  if(onProgress && vins.length) onProgress({ phase: "arrival" });
+  const here = vins.length ? await onGroundAt(trt, notes) : null;
+
+  /* ── does this car have a service visit ──
+
+     One Intrepid call per VIN, which is the only per-vehicle cost in this
+     scan and the same call the Service Visits tool makes. It buys the SV
+     bubble on the card, and the bubble opens the Service Visits editor over
+     this row — so the row has to carry visits in that tool's shape, not a
+     shape of its own.
+
+     Caught per car rather than as a batch: one VIN that fails is one card
+     without a bubble, and failing the whole scan over it would trade a
+     complete answer for a missing one. */
+  const visitsBy = new Map();
+  if(vins.length){
+    let done = 0;
+    if(onProgress) onProgress({ phase: "holds", done, total: vins.length });
+    await pool(vins, CONFIG.concurrency, async vin => {
+      const sv = await intrepidGet(
+        `/getScaServiceVisitByVin?vin=${encodeURIComponent(vin)}`).catch(() => null);
+      if(Array.isArray(sv) && sv.length) visitsBy.set(vin, sv);
+      done++;
+      if(onProgress) onProgress({ phase: "holds", done, total: vins.length });
+    });
+  }
+
+  const missing = [];
+  const rows = osRows.map(r => {
+    const g  = (r.vin && specs.get(r.vin)) || null;
+    const mt = mktCodes(r.cfg_mkt_option_codes).find(c => /^MT/.test(c)) || "";
+    if(r.vin && !g) missing.push(r.vin);
+
+    /* OS's `model` is already the compositor's own code ("m3", not "3"), so it
+       is carried as-is and Garage's differently-spelled one is not used. One
+       fewer mapping to keep correct. */
+    const model = String(r.model || "").toLowerCase();
+
+    return {
+      rn    : r.rn || "",
+      vin   : r.vin || "",
+      model,
+      modelName: MODEL_NAME[model] || (model ? model.toUpperCase() : ""),
+      year  : yearOf(r.vin),
+      /* The timestamp, not OS's `time_since_matched`. That field is minutes as
+         a string and is computed when the row is fetched, so a tab left open
+         would keep reporting the age it had on load. Derived on the page
+         instead — see the estate rule about latency in dashboards. */
+      matchedAt: r.match_dt || null,
+      etaAt    : r.eta_to_service_center_dt || null,
+      /* Straight to the compositor. The MARKETING codes, not Garage's
+         manufacturing `option_codes` — feeding it the latter renders the car
+         correctly but leaves black voids where the wheels should be. */
+      options  : mktCodes(r.cfg_mkt_option_codes).join(","),
+      spec     : specOf(g, mt, model),
+      inGarage : Boolean(g),
+      /* Three states, and the third one matters: true is standing on this
+         lot, false is somewhere else, and **null is "nobody asked"** — the
+         inventory call failed and the board does not know. A null rendered as
+         false would put every car in transit and read as a centre with an
+         empty lot, which is the failure this whole file keeps guarding
+         against. */
+      here     : here ? here.has(r.vin) : null,
+      arrivedAt: (here && here.get(r.vin)) || null,
+      /* The Service Visits row shape, exactly — this is what the SV bubble
+         hands to that tool's editor, and the editor is not copied. Mapped
+         with the same fields in the same order as scanVehicles builds them,
+         because the panel reads them by name. */
+      visits: (visitsBy.get(r.vin) || []).map(v => ({
+        id    : v.serviceVisitNumber || String(v.serviceVisitID || ""),
+        svId  : v.serviceVisitID || null,
+        opened: v.createDate || null,
+        due   : v.estimatedCompletionDateTime || null,
+        trt   : v.trtid || null,
+        source: v.serviceVisitSourceID || "",
+        ticket: null,
+        vriAt : null
+      })),
+      /* Two fields the panel reads off the vehicle rather than the visit.
+         `delivered` decides whether it will offer to cancel an appointment;
+         `site` is the third line of its heading and this tool has no site
+         pill, so it is left empty rather than invented. */
+      delivered: Boolean(g && g.delivered),
+      site     : ""
+    };
+  });
+
+  /* The tickets and the receiving inspections, through the very same function
+     the Service Visits scan uses — see enrichVisits(). Its notes are its own
+     and are carried up with ours, because "the Service App failed for 2 cars"
+     means the same thing on either screen. */
+  const svRows = rows.filter(r => r.visits.length);
+  if(svRows.length){
+    notes.push(...await enrichVisits({ rows: svRows, trtId: trt, onProgress, notes: [] }));
+  }
+
+  /* A VIN the index has never heard of is a car that has not been built yet —
+     the order exists and the VIN is assigned, but nothing has come down the
+     line to be indexed. Said that way round because "not in Garage's index"
+     describes a database and "not built" describes the car, and only one of
+     those is what the reader wants to know. */
+  if(missing.length){
+    notes.push(`${missing.length} of ${rows.length} ${missing.length === 1 ? "car has" : "cars have"} ` +
+               `not been built yet — ${missing.length === 1 ? "its" : "their"} card shows the ` +
+               `order and the picture, but no configuration.`);
+  }
+
+  return { trtId: trt, location, bucket, total, rows, notes };
+}
+
 /* ─────────────────────────── service visits scan ───────────────────────────
 
    Two systems, in order. Garage's index says which cars exist and what they
@@ -2660,7 +3108,25 @@ async function scanVehicles({ trtId, offsiteTrtId, sites = "onsite",
      columns have never needed it and a missing optional source must not turn
      a working scan into a failed one — the panel is where "connect SCA" gets
      said, not here. */
-  if(want.has("sv") && scaConnected()){
+  if(want.has("sv")) await enrichVisits({ rows, trtId, onProgress, notes });
+
+  return { query, total: total ?? cars.length, scanned: cars.length,
+           rows, notes, kinds: [...want], sca: scaConnected() };
+}
+
+/* ─────────────── what each visit is for, and when it cleared ───────────────
+
+   Two passes over the cars that have a service visit: SCA's ticket, then the
+   receiving inspection. Lifted out of scanVehicles whole so that **Pending
+   Inventory can open the same panel over the same data**. That tool shows an
+   SV bubble on a card and hands the row straight to the Service Visits
+   editor; if the two had separate copies of this, the two panels would drift
+   and the second one would be a lie about the first.
+
+   Takes rows that already carry `.vin` and `.visits[]` in the scan's shape,
+   and fills `ticket` and `vriAt` on each visit in place.                    */
+async function enrichVisits({ rows, trtId, onProgress, notes = [] }){
+  if(scaConnected()){
     const withVisits = rows.filter(r => r.visits.length);
     /* Read defensively even though scaConnected() just said yes. This is the
        only optional source on the board, and the whole point of it being
@@ -2728,7 +3194,7 @@ async function scanVehicles({ trtId, offsiteTrtId, sites = "onsite",
      Intrepid is a required source, so unlike the SCA block this is not
      guarded on a connection — but it is still caught, because a car with no
      VRI date is a car with no VRI date and not a failed scan. */
-  if(want.has("sv")){
+  {
     const withVisits = rows.filter(r => r.visits.length);
     if(withVisits.length){
       const vri = await vriCompletions(trtId, withVisits.map(r => r.vin), onProgress)
@@ -2748,8 +3214,7 @@ async function scanVehicles({ trtId, offsiteTrtId, sites = "onsite",
     }
   }
 
-  return { query, total: total ?? cars.length, scanned: cars.length,
-           rows, notes, kinds: [...want], sca: scaConnected() };
+  return notes;
 }
 
 /* ─────────────────── when the car cleared receiving ───────────────────
@@ -3266,6 +3731,29 @@ function connectionsSummary(){
                : `${s.user} · ${mins > 90 ? Math.round(mins / 60) + "h" : mins + "m"} left`,
         required: false
       };
+    })(),
+
+    /* Tesla OS. Board-local like SCA, and not required for the same kind of
+       reason — without it the board loses one whole tool rather than one
+       column, but Service Visits and Cars on Ground are untouched.
+
+       No expiry line, unlike SCA. That token is a JWT and states its own; this
+       one is opaque, so the honest answer is who it belongs to and when it was
+       captured. Whether it still WORKS is a question only the pipeline can
+       answer, and osStatus() asks it — this summary stays synchronous because
+       every other row here is. */
+    os: (() => {
+      const s = osSaved();
+      return {
+        set     : Boolean(s),
+        user    : s ? (s.user || "") : "",
+        name    : s ? (s.name || "") : "",
+        title   : s ? (s.title || "") : "",
+        since   : s ? (s.capturedAt || null) : null,
+        detail  : s ? [s.user, s.title].filter(Boolean).join(" · ") || "connected"
+                    : "not connected",
+        required: false
+      };
     })()
   };
 }
@@ -3274,7 +3762,13 @@ module.exports = {
   CONFIG, loadConnections, saveConnections, adminPassword, savedTrtId, savedOffsiteTrtId,
   intrepidCookie, intrepidGet, intrepidPost, appointmentsOn,
   scaToken, scaConnected, scaSignIn, scaDisconnect, vriCompletions,
-  scaSites, scaMoveVisit, scaCancelAppointment, scaSwitchContactToTesla, scaContacts,
+  /* Pending Inventory — Tesla OS. `osStatus` is async and probes; `osConnected` is the
+     synchronous "is there a token at all" the scan guard uses. */
+  osToken, osConnected, osStatus, osSignIn, osDisconnect, expScan,
+  osSignInStatus: osx.signInStatus, osCancelSignIn: osx.cancelSignIn,
+  osBrowserStatus: osx.browserStatus,
+  scaSites, scaSymptoms, scaRemoveActivity, scaSetSymptom,
+  scaMoveVisit, scaCancelAppointment, scaSwitchContactToTesla, scaContacts,
   scaSetContact, scaSetAddress,
   billingAddress, saveBillingAddress,
   teamsConfig, saveTeamsWebhook, saveTeamsSettings, teamsSettings,
