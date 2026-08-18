@@ -509,6 +509,229 @@ const teamsEnvelope = card => ({
   }]
 });
 
+/* ══════════════════════ SV Call — bring it onsite ══════════════════════
+
+   A car with an open service visit sitting at the overflow lot is a car
+   nobody at the centre can work on, and the person who notices is looking at
+   this board rather than standing next to it. One press posts the VIN into a
+   Teams chat with what needs doing.
+
+   ── its own webhook, and its own key in the file ──
+
+   Stored beside `teams` rather than inside it. The VRI-list webhook is
+   cleared by saving an empty URL — `saveTeamsWebhook("")` sets `teams: null`
+   and takes the poll URL and the interval with it — and this must not be
+   collateral in that. They also go to different chats: a list of cars awaiting
+   inspection is for whoever runs the lot, and this is for whoever drives it. */
+
+function svCallConfig(){
+  const url = loadConnections().svCallWebhook;
+  return url ? { webhook: url } : null;
+}
+
+function svCallSettings(){
+  const url = loadConnections().svCallWebhook || "";
+  let host = "";
+  // The host, never the path. A webhook URL's path IS the credential, which
+  // is the same reason the VRI one only ever shows its host.
+  try { host = url ? new URL(url).hostname : ""; } catch { host = "saved"; }
+  return { has: Boolean(url), host };
+}
+
+function saveSvCallWebhook(url){
+  const raw = String(url || "").trim();
+  if(!raw){
+    saveConnections({ svCallWebhook: "" });
+    return { saved: false, cleared: true };
+  }
+  const u = checkMicrosoftUrl(raw, "SV Call webhook");
+  saveConnections({ svCallWebhook: raw });
+  return { saved: true, cleared: false, host: u.hostname };
+}
+
+/* The message. Three facts and nothing else: which car, where it is, and what
+   to do about it. A card that has to be read twice to find the VIN would be
+   worse than a text message, and this one is read on a phone in a lot. */
+function svCallCard({ vin, siteName, svNumbers, centreName }){
+  return {
+    $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+    type: "AdaptiveCard", version: "1.4",
+    body: [
+      { type: "TextBlock", text: "Bring this car onsite", weight: "Bolder",
+        size: "Large", wrap: true },
+      // The VIN large and on its own line: it is the one thing that gets
+      // typed into something else afterwards.
+      { type: "TextBlock", text: vin, size: "ExtraLarge", weight: "Bolder",
+        spacing: "Small", wrap: true, fontType: "Monospace" },
+      { type: "TextBlock", wrap: true, spacing: "Small",
+        // "at the offsite lot (TRT 487417)" reads as a sentence; "at TRT
+        // 487417" reads as a field somebody forgot to fill in.
+        text: `It has an open service visit and it is at **${siteName}**.` },
+      { type: "TextBlock", wrap: true, spacing: "None",
+        text: "Please bring it onsite and check it in with service." },
+      ...(svNumbers ? [{ type: "TextBlock", wrap: true, isSubtle: true, size: "Small",
+        spacing: "Small", text: `${svNumbers}${centreName ? " · " + centreName : ""}` }] : [])
+    ]
+  };
+}
+
+/* Where Garage says the car is standing, read fresh.
+
+   The page knows this already — it is on the row it drew the button on — but
+   the page is a tab that may have been open since this morning, and a car
+   that has since been driven onsite would send somebody out to fetch a car
+   that is already here. Costs one indexed query, and it is also what names
+   the lot in the message.
+
+   Fails closed: anything it cannot confirm is a refusal, not a send. */
+async function offsiteCheck(vin){
+  const offsite = savedOffsiteTrtId();
+  if(!offsite) return { ok: false, why: "no offsite lot is set in the TRT picker" };
+  try{
+    const page = await tesladexSearch({
+      query : `vin:${vin}`,
+      fields: ["vin", "trt_id", "vehicle_routing_location"],
+      size  : 2
+    });
+    const rows = (page && page.results) || [];
+    if(rows.length !== 1)
+      return { ok: false, why: rows.length ? "matches more than one record in Garage"
+                                           : "is not in the Garage index" };
+    const trt = rows[0].trt_id;
+    if(Number(trt) !== Number(offsite))
+      return { ok: false, trtId: trt ?? null,
+               why: trt == null ? "has no site on its Garage record"
+                                : `is at TRT ${trt}, not the offsite lot` };
+    return { ok: true, trtId: Number(trt) };
+  }catch(err){
+    return { ok: false, why: "could not be checked against Garage (" + err.message + ")" };
+  }
+}
+
+/* The body-shop message. Same webhook, same chat, different ask — and this
+   one leads with the work rather than the place, because the person reading
+   it needs to know what the car is going over for. */
+function bodyCallCard({ vin, concerns, svNumbers, centreName }){
+  return {
+    $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+    type: "AdaptiveCard", version: "1.4",
+    body: [
+      { type: "TextBlock", text: "Take this car to the body shop", weight: "Bolder",
+        size: "Large", wrap: true },
+      { type: "TextBlock", text: vin, size: "ExtraLarge", weight: "Bolder",
+        spacing: "Small", wrap: true, fontType: "Monospace" },
+      { type: "TextBlock", text: concerns.length === 1 ? "Concern" : "Concerns",
+        weight: "Bolder", size: "Small", spacing: "Medium", wrap: true },
+      // One line each. A comma-joined list of three symptoms is unreadable on
+      // a phone, and this is read on a phone.
+      ...concerns.map(c => ({ type: "TextBlock", wrap: true, spacing: "None",
+                              text: "• " + c })),
+      { type: "TextBlock", wrap: true, spacing: "Medium",
+        text: "Please take the car to the body shop and check it in." },
+      ...(svNumbers ? [{ type: "TextBlock", wrap: true, isSubtle: true, size: "Small",
+        spacing: "Small", text: `${svNumbers}${centreName ? " · " + centreName : ""}` }] : [])
+    ]
+  };
+}
+
+/* ── what the car is actually in for ──
+
+   Read from SCA at the moment the button is pressed, not taken from the row.
+   The board can now edit a symptom and remove a line, so a tab open since the
+   morning may be describing concerns that have since changed — and this
+   message is somebody's instruction for a job.
+
+   The courtesy line is left out by name, as asked: it is a standing
+   inspection item on nearly every visit and it is not why a car goes to the
+   body shop. */
+const COURTESY_RE = /courtesy service provided/i;
+
+async function concernsForBody(vin){
+  if(!scaConnected())
+    return { ok: false, why: "the Service App is not connected, so the board cannot name the concerns" };
+  let got;
+  try { got = await sca.ticketFor(scaToken(), vin); }
+  catch(err){ return { ok: false, why: "the Service App did not answer (" + err.message + ")" }; }
+
+  const visits = (got && got.open) || [];
+  if(!visits.length) return { ok: false, why: "has no open service visit in the Service App" };
+
+  const names = [], svNumbers = [];
+  for(const v of visits){
+    svNumbers.push(v.number);
+    for(const a of v.activities || []){
+      const text = a.symptom || a.narrative || "";
+      if(!text || COURTESY_RE.test(text)) continue;
+      if(!names.includes(text)) names.push(text);
+    }
+  }
+  if(!names.length)
+    return { ok: false, why: "has nothing on its visit but the courtesy line, so there is no concern to send" };
+
+  return { ok: true, concerns: names, svNumbers: svNumbers.join(", "),
+           centreName: (visits[0] && visits[0].location) || "" };
+}
+
+async function sendBodyCall({ vin }){
+  const v = String(vin || "").trim().toUpperCase();
+  if(!isVin(v)) throw new Error("A valid VIN is required");
+
+  const cfg = svCallConfig();
+  if(!cfg){
+    const e = new Error("No SV Call webhook saved — paste one under Admin › Teams.");
+    e.needsWebhook = true;
+    throw e;
+  }
+
+  const c = await concernsForBody(v);
+  if(!c.ok)
+    throw new Error(`Not sending: ${v} ${c.why}. The message names the work, so the ` +
+                    `board will not send one it cannot name.`);
+
+  await postToUrl(cfg.webhook, teamsEnvelope(bodyCallCard({
+    vin: v, concerns: c.concerns, svNumbers: c.svNumbers, centreName: c.centreName })));
+
+  return { ok: true, vin: v, concerns: c.concerns };
+}
+
+/* One press: check, then post. */
+async function sendSvCall({ vin, svNumbers, centreName }){
+  const v = String(vin || "").trim().toUpperCase();
+  if(!isVin(v)) throw new Error("A valid VIN is required");
+
+  const cfg = svCallConfig();
+  if(!cfg){
+    const e = new Error("No SV Call webhook saved — paste one under Admin › Teams.");
+    e.needsWebhook = true;
+    throw e;
+  }
+
+  const at = await offsiteCheck(v);
+  if(!at.ok)
+    throw new Error(`Not sending: ${v} ${at.why}. The message says a car is at the ` +
+                    `offsite lot, so the board checks that it still is.`);
+
+  /* ── naming the lot ──
+
+     The directory cannot name it, and that is not a gap to paper over: the
+     offsite lot exists only in Garage. Intrepid has never heard of 487417 —
+     not in `getLocations`, not in `getCogInventoryCars` — which is the same
+     fact that stops the TRT picker finding it by name.
+
+     So the message says "the offsite lot" and carries the number, rather than
+     the bare "TRT 487417" a lookup miss would leave. The reader knows which
+     lot; the number is there for whoever needs to type it somewhere. */
+  const site = await trtInfo(at.trtId).catch(() => null);
+  const siteName = (site && site.name)
+    ? `${site.name} (TRT ${at.trtId})`
+    : `the offsite lot (TRT ${at.trtId})`;
+
+  await postToUrl(cfg.webhook, teamsEnvelope(
+    svCallCard({ vin: v, siteName, svNumbers: svNumbers || "", centreName: centreName || "" })));
+
+  return { ok: true, vin: v, siteName };
+}
+
 /* ── the Update button ──
 
    Always an Action.Submit, because the flow on the other end is always a
@@ -1590,6 +1813,15 @@ async function intrepidGet(pathAndQuery, base = INTREPID){
   if(res.status !== 200){
     throw new Error(`Intrepid HTTP ${res.status}: ${res.body.slice(0, 160)}`);
   }
+  /* An empty 200 is Intrepid saying "none", not a failure.
+
+     `getScaServiceVisitByVin` answers zero bytes for a car with no open visit
+     — about one car in ten at Cypress — and parsing that as an error made
+     every one of them look like a call that had gone wrong. It reached the
+     right answer only because the caller swallowed the throw and read the
+     absence as "no visits", which meant a real failure, a cookie dying
+     mid-scan, was indistinguishable from a clean car. Now the two are. */
+  if(!res.body.trim()) return null;
   try { return JSON.parse(res.body); }
   catch { throw new Error("Intrepid did not return JSON — the cookie may be a sign-in redirect"); }
 }
@@ -1615,6 +1847,15 @@ async function intrepidPost(pathAndQuery, payload, base = INTREPID){
   if(res.status !== 200){
     throw new Error(`Intrepid HTTP ${res.status}: ${res.body.slice(0, 160)}`);
   }
+  /* An empty 200 is Intrepid saying "none", not a failure.
+
+     `getScaServiceVisitByVin` answers zero bytes for a car with no open visit
+     — about one car in ten at Cypress — and parsing that as an error made
+     every one of them look like a call that had gone wrong. It reached the
+     right answer only because the caller swallowed the throw and read the
+     absence as "no visits", which meant a real failure, a cookie dying
+     mid-scan, was indistinguishable from a clean car. Now the two are. */
+  if(!res.body.trim()) return null;
   try { return JSON.parse(res.body); }
   catch { throw new Error("Intrepid did not return JSON — the cookie may be a sign-in redirect"); }
 }
@@ -2781,7 +3022,7 @@ async function expScan({ trtId, onProgress } = {}){
   if(vins.length){
     let done = 0;
     if(onProgress) onProgress({ phase: "holds", done, total: vins.length });
-    await pool(vins, CONFIG.concurrency, async vin => {
+    await pool(vins, READ_CONCURRENCY, async vin => {
       const sv = await intrepidGet(
         `/getScaServiceVisitByVin?vin=${encodeURIComponent(vin)}`).catch(() => null);
       if(Array.isArray(sv) && sv.length) visitsBy.set(vin, sv);
@@ -2884,16 +3125,46 @@ async function expScan({ trtId, onProgress } = {}){
    visit and a logistics hold are one call each per vehicle, so a thousand
    cars is two thousand round trips. Containment batches five to a call. */
 
+/* ── how hard the reads are allowed to push ──
+
+   `CONFIG.concurrency` is 6 and stays 6 for the things that WRITE: waking a
+   car and popping its trunk are pokes at a fleet, and the batch endpoint that
+   would have done them in one call is 403 for this role, so that pool is
+   deliberately gentle.
+
+   Reads are a different question and 6 was leaving most of the scan waiting.
+   Measured against Cypress on the same sixty cars: 6 took 11.2s, 12 took
+   4.7s, 20 took 3.6s, 30 took 3.1s — and the failure count did not move at
+   any of them, because the "failures" were empty bodies rather than Intrepid
+   pushing back. Sixteen is where the curve flattens; past it the gain is
+   tenths of a second against a fleet endpoint somebody else also uses. */
+const READ_CONCURRENCY = 16;
+
 const SCAN_CAP = 1200;
 
 async function scanVehicles({ trtId, offsiteTrtId, sites = "onsite",
-                              filters = {}, kinds, onProgress } = {}){
+                              filters = {}, kinds, vin, onProgress } = {}){
   const want = new Set((kinds && kinds.length ? kinds : HOLD_KINDS.map(k => k.v)));
   const notes = [];
 
   await ensureSession();
 
-  const query = buildQuery({ trtId, offsiteTrtId, sites, filters });
+  /* ── one car, and every filter ignored ──
+
+     A VIN is not a narrower version of a centre scan, it is a different
+     question: "what is going on with this car", asked about a car that may be
+     at another site, delivered, or in a state no facet on the menu selects.
+     Applying the site or the facets to it would answer "no cars found" for a
+     car the reader is looking at, which is the worst possible reply.
+
+     Everything downstream is unchanged — the same holds, the same tickets,
+     the same row shape — so one VIN renders exactly as it would inside a
+     centre scan, and the panel and its writes work on it identically. */
+  const one = String(vin || "").trim().toUpperCase();
+  if(one && !isVin(one)) throw new Error(`${one} is not a 17-character VIN`);
+
+  const query = one ? `vin:${one}`
+                    : buildQuery({ trtId, offsiteTrtId, sites, filters });
   /* The scheduled date is fetched whether or not the facet is set: it costs
      nothing extra on a query that is already running, and the export offers
      it as a column. Nested projection works — asking for
@@ -2944,7 +3215,7 @@ async function scanVehicles({ trtId, offsiteTrtId, sites = "onsite",
   if(wantTitle.length){
     titles = new Map();
     let tdone = 0;
-    await pool(cars, CONFIG.concurrency, async c => {
+    await pool(cars, READ_CONCURRENCY, async c => {
       titles.set(c.vin, await titleStatusFor(c.vin));
       tdone++;
       if(onProgress) onProgress({ phase: "title", done: tdone, total: cars.length });
@@ -2971,24 +3242,48 @@ async function scanVehicles({ trtId, offsiteTrtId, sites = "onsite",
   }
 
 
-  /* ── containment, five VINs to a call ── */
+  /* ── containment, a hundred VINs to a call ──
+
+     It was five, and five was costing eleven seconds a scan for nothing:
+     measured against a real centre, a hundred VINs come back in the same
+     second five did — the call spends its time on the round trip, not on the
+     cars. 483 cars went from 97 calls to 5.
+
+     **A hundred is the ceiling and it truncates in silence.** Asked for 200
+     VINs it answers 200 OK with exactly 100 keys and no complaint, which is
+     the same shape of trap as the delivery pipeline's page size. So the batch
+     is pinned here, and the guard below counts what came back rather than
+     trusting it. */
+  const CONTAINMENT_BATCH = 100;
   const containment = {};
   if(want.has("containment")){
     const batches = [];
-    for(let i = 0; i < cars.length; i += 5) batches.push(cars.slice(i, i + 5).map(c => c.vin));
-    let done = 0;
-    await pool(batches, CONFIG.concurrency, async b => {
+    for(let i = 0; i < cars.length; i += CONTAINMENT_BATCH)
+      batches.push(cars.slice(i, i + CONTAINMENT_BATCH).map(c => c.vin));
+    let done = 0, short = 0;
+    await pool(batches, READ_CONCURRENCY, async b => {
       const got = await intrepidGet(
         `/bulkGetCampaignContainmentHolds?vins=${b.join(",")}`).catch(() => null);
-      if(got && typeof got === "object") Object.assign(containment, got);
+      if(got && typeof got === "object"){
+        Object.assign(containment, got);
+        // Every VIN asked about should come back, holds or not. Fewer keys
+        // than VINs means cars were dropped, and a dropped car reads as a car
+        // with no containment — which is the wrong answer, quietly.
+        if(Object.keys(got).length < b.length) short += b.length - Object.keys(got).length;
+      }
       done++;
       if(onProgress) onProgress({ phase: "containment", done, total: batches.length });
     });
+    if(short){
+      notes.push(`Intrepid returned containment for ${short} fewer ${
+        short === 1 ? "car" : "cars"} than were asked about — those cars show no ` +
+        `containment hold, which may not be true. Re-run the scan.`);
+    }
   }
 
   /* ── service visit and logistics, per vehicle ── */
   let done = 0;
-  const rows = await pool(cars, CONFIG.concurrency, async c => {
+  const rows = await pool(cars, READ_CONCURRENCY, async c => {
     const [sv, lg] = await Promise.all([
       want.has("sv")
         ? intrepidGet(`/getScaServiceVisitByVin?vin=${encodeURIComponent(c.vin)}`).catch(() => null)
@@ -3135,7 +3430,7 @@ async function enrichVisits({ rows, trtId, onProgress, notes = [] }){
     const tok = (() => { try { return scaToken(); } catch { return null; } })();
     if(withVisits.length && tok){
       let seen = 0, failed = 0, dropped = 0;
-      await pool(withVisits, CONFIG.concurrency, async r => {
+      await pool(withVisits, READ_CONCURRENCY, async r => {
         const got = await sca.ticketFor(tok, r.vin).catch(() => null);
         seen++;
         if(onProgress) onProgress({ phase: "tickets", done: seen, total: withVisits.length });
@@ -3268,7 +3563,7 @@ async function vriCompletions(trtId, vins, onProgress){
   }
 
   let done = 0;
-  await pool([...recs.values()], CONFIG.concurrency, async rec => {
+  await pool([...recs.values()], READ_CONCURRENCY, async rec => {
     const d = await intrepidGet(`/getVehicleStatusLogByVinWithPdiTask` +
       `?vin=${encodeURIComponent(rec.vin)}` +
       `&vehicleShipmentId=${encodeURIComponent(rec.id)}`).catch(() => null);
@@ -3772,6 +4067,9 @@ module.exports = {
   scaSetContact, scaSetAddress,
   billingAddress, saveBillingAddress,
   teamsConfig, saveTeamsWebhook, saveTeamsSettings, teamsSettings,
+  /* SV Call — its own webhook beside the VRI one, and the two messages that
+     go through it. Both check before they post. */
+  svCallSettings, saveSvCallWebhook, sendSvCall, sendBodyCall,
   postVriList, postVriControlCard, pushVri, teamsStatus, startTeamsLoop, stopTeamsLoop,
   scaVisitState, isUndelivered,
   scaPhotoStream: sca.photoStream,

@@ -365,6 +365,34 @@ a.rnl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 .veh-edit .sitelist .site{padding:12px 14px;font-size:13.5px;gap:12px}
 .veh-edit .sitelist .site b{font-weight:600}
 .veh-edit .sitelist .site span{font-size:11.5px}
+/* ── asking for a car to be moved ──
+   Two buttons, stacked, on a car with an open visit that is standing at the
+   overflow lot. Stacked rather than side by side because they ask for two
+   different journeys and a row of two would invite the wrong one. */
+.svcall{display:flex;flex-direction:column;gap:6px;align-items:stretch}
+/* Fixed width, and it is load-bearing rather than tidy: the label becomes
+   "Sending" mid-press, and a button that resized itself under the cursor
+   would shift the one below it out from under a second click. */
+.svcall .mini{justify-content:center;min-width:132px}
+.svcall .svc-msg{margin-top:2px;max-width:34ch}
+.svcall .svc-msg:empty{display:none}
+
+/* ── on a list row ──
+   Its own column between the car and its holds, vertically centred, rather
+   than tacked under the hold lines: down there it read as another line of
+   the ticket, and on a row with four concerns it ended up somewhere near the
+   floor. The column only exists on rows that have the pair. */
+/* Both right-hand columns fixed, not `auto`. Sized to their content they
+   track the longest hold line on each row, so the buttons landed at a
+   different x on every card and the list read as ragged down the middle.
+   430px is the width `.hold-note` already wraps at. */
+.veh.has-call{grid-template-columns:1fr 148px minmax(0,430px)}
+.veh .svcall{align-self:center}
+/* No message element on a row at all — the outcome goes to the notice strip
+   above the list. A row that grew a line of text when pressed would push
+   every row below it down, which is what happens when you report inside a
+   list item. */
+
 /* ── the concern, in full ──
    The list row has one line for this and has to compress it to a dot-joined
    string. Here there is room, so the symptom leads at reading size, the
@@ -624,6 +652,10 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 .field textarea{height:80px;padding:10px 12px;resize:vertical;font-size:12px}
 .field input:focus,.field textarea:focus{border-color:var(--ink)}
 .hint{margin-top:7px;font-size:11.5px;color:var(--ink-mute)}
+/* A hint that has become an answer — "that is not a VIN", "not in the index".
+   Same slot, so the dialog does not jump; a different colour, so it is not
+   mistaken for the standing explanation it replaced. */
+.hint.bad{color:var(--red)}
 /* The one sentence a modal is actually asking. Above .hint in weight because
    a count of cars about to be touched must not read as small print. */
 .lead{margin:0 0 4px;font-size:13px;line-height:1.5;color:var(--ink-soft)}
@@ -1077,6 +1109,24 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
     <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
   </div>
   <div class="modal-body">
+    <!-- ── one car ──
+         Above the facets, because it ignores every one of them. Most of this
+         dialog is for asking about a centre; sometimes the question is just
+         "what is going on with this VIN", and making that person choose sites
+         and kinds first is making them describe a population of one. -->
+    <div class="field" id="svOneWrap">
+      <label>One VIN</label>
+      <div class="row2">
+        <div class="grow">
+          <input id="svOne" autocomplete="off" spellcheck="false" maxlength="17"
+                 placeholder="Paste a VIN to look at just that car">
+        </div>
+        <button class="btn btn-dark" id="svOneGo">Look up</button>
+      </div>
+      <div class="hint" id="svOneMsg">Ignores the filters below — it goes
+        straight to the one car, wherever it is and whatever state it is in.</div>
+    </div>
+
     <!-- Sites first: it decides the population every facet below it narrows. -->
     <div class="facet" id="svSites"></div>
     <div class="field">
@@ -1370,6 +1420,28 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
       <div class="conn" id="twRow"><i class="dot"></i><b>Webhook</b><span id="twState">—</span></div>
       <button class="btn-block" id="twSave">Save webhook</button>
 
+      <!-- ── SV Call ──
+           A second webhook, kept apart from the one above rather than folded
+           into it: the VRI list is a standing report for whoever runs the lot,
+           and these are one-off asks for whoever moves cars. Clearing one must
+           not clear the other, which is why it has its own key in the file. -->
+      <div class="sec-title">SV Call</div>
+      <p class="sec-p">The chat the <b>Call Onsite</b> and <b>Send to Body</b>
+        buttons post to. Those two appear on a car with an open service visit
+        that Garage places at the <b>offsite lot</b> — one asks for it to be
+        brought onsite and checked in with service, the other names its
+        concerns and asks for it to go to the body shop.</p>
+      <div class="field">
+        <label>SV Call webhook</label>
+        <input type="text" id="svcUrl" autocomplete="off"
+               placeholder="https://…logic.azure.com/… or …webhook.office.com/…">
+        <div class="hint">Made the same way as the one above, in whichever chat
+          should get these. Leave it empty and the two buttons say so when
+          pressed rather than disappearing.</div>
+      </div>
+      <div class="conn" id="svcRow"><i class="dot"></i><b>SV Call</b><span id="svcState">—</span></div>
+      <button class="btn-block" id="svcSave">Save SV Call webhook</button>
+
       <!-- ── push ──
            The board leaves the finished card in a SharePoint row and the
            button's flow reads it. Nothing reaches inward and nothing in the
@@ -1500,6 +1572,10 @@ const S = {
   /* The Service App. `conns` is the last full connections payload, so the
      sign-in poll can repaint one source without refetching the other two;
      `scaPhase` is the sign-in state machine's phase as of the last poll. */
+  /* Whether an SV Call webhook is saved, for the admin row. The two buttons
+     do not read it — they ask the server and let it answer, so a page loaded
+     before the webhook was pasted is not wrong about it. */
+  svcall:null,
   conns:null, sca:null, scaPhase:"idle", scaDetail:null, scaDismissed:false,
   rowsHaveSca:false, scanTrtId:null,
   /* Tesla OS, the same pair of fields as the Service App and for the same
@@ -2072,6 +2148,81 @@ async function runScan(btn){
 
 $("runScan").addEventListener("click", () => runScan($("runScan")));
 
+/* ── one VIN ──
+
+   The same route, the same renderer, the same rows — the server just
+   enumerates `vin:<VIN>` instead of a centre, and every filter on this dialog
+   is ignored rather than applied. A car at another site, or delivered, or in
+   a state no facet selects, still comes back; making the reader guess which
+   boxes to tick to find a car they are already holding the VIN for would be
+   the wrong answer to the question they asked.
+
+   The kinds are not sent either. All three are cheap on one car, and a
+   lookup that quietly omitted the containment because a toggle was off would
+   be a lie about the car rather than a saving. */
+async function lookupVin(){
+  const box = $("svOne");
+  const vin = box.value.trim().toUpperCase();
+  const msg = $("svOneMsg");
+  const say = (t, kind) => { msg.className = "hint" + (kind ? " " + kind : ""); msg.textContent = t; };
+
+  if(!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)){
+    say("That is not a 17-character VIN — 17 characters, no I, O or Q.", "bad");
+    box.focus();
+    return;
+  }
+  if(S.busy) return;
+
+  S.busy = true;
+  const btn = $("svOneGo");
+  const restore = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<i class="spin"></i>Looking';
+  clearNotes(); progWatch();
+
+  try{
+    const data = await api("/api/scan", { trtId: S.trtId, vin });
+    if(!data.rows.length){
+      /* Not an empty scan — a specific car that is not in the index, which is
+         a different sentence and a different next move. */
+      say(`${vin} is not in Garage's index. Check the VIN, or it may be a car ` +
+          `this account cannot see.`, "bad");
+      return;
+    }
+    render(data);
+    /* Everything, not just what is flagged: somebody who typed a VIN wants
+       that car on screen whether or not it has a hold, and "Nothing flagged"
+       in answer to a VIN reads as "no such car". */
+    S.view = "all";
+    S.listSub = `${vin} · one car` + (data.trt && data.trt.name ? ` · looked up from ${data.trt.name}` : "");
+    paintList();
+    hideModal();
+    box.value = "";
+  }catch(err){
+    say(err.message, "bad");
+  }finally{
+    S.busy = false; progHide();
+    btn.disabled = false; btn.innerHTML = restore;
+  }
+}
+
+$("svOneGo").addEventListener("click", lookupVin);
+// Enter in the box does what the button does. A VIN is pasted and the hand is
+// already on the keyboard.
+$("svOne").addEventListener("keydown", e => {
+  if(e.key !== "Enter") return;
+  e.preventDefault();
+  e.stopPropagation();
+  lookupVin();
+});
+/* Pasting a VIN with spaces around it is the common case — it comes out of a
+   spreadsheet or a message — and typing is upper-cased as it goes so the box
+   reads like the thing it holds. */
+$("svOne").addEventListener("input", () => {
+  const b = $("svOne");
+  const up = b.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if(up !== b.value) b.value = up;
+});
+
 /* ─────────────────────── saved selections ───────────────────────
    Setting up a Service Visits scan means picking sites, kinds and a handful of
    facets, and the same handful comes up every morning. A saved selection is
@@ -2426,17 +2577,27 @@ document.addEventListener("click", e => {
    Closed visits never reach here: sca.js drops them on the way in. */
 
 function editPanelHtml(r){
+  /* The two asks come FIRST, above everything else, and they are the one part
+     of this panel that does not need SCA: they post a message rather than
+     touch a service record. So they are built before the guards below, and a
+     board with the Service App disconnected can still ask for a car to be
+     brought in. */
+  const asks = svCallHtml(r, true);
+  const head = asks ? `<div class="veh-edit" style="margin-bottom:14px">
+      <div class="ed-h"><b>At the offsite lot</b><span>${esc(r.site || "")}</span></div>
+      ${asks}</div>` : "";
+
   if(!S.conns || !S.conns.sca || !S.conns.sca.set){
-    return `<div class="veh-edit"><div class="why">Connect the <b>Service App</b>
+    return head + `<div class="veh-edit"><div class="why">Connect the <b>Service App</b>
       to move this car between centres.</div></div>`;
   }
   const withTicket = r.visits.filter(v => v.ticket);
   if(!withTicket.length){
-    return `<div class="veh-edit"><div class="why">No Service App ticket loaded for
+    return head + `<div class="veh-edit"><div class="why">No Service App ticket loaded for
       this car, so there is nothing to move. Re-run the scan with SCA connected.</div></div>`;
   }
 
-  return `<div class="veh-edit">${withTicket.map(v => {
+  return head + `<div class="veh-edit">${withTicket.map(v => {
     const t = v.ticket;
     const head = `<div class="ed-h"><b>${esc(v.id)}</b>
         <span>${esc(t.location || "no centre on record")}</span></div>`;
@@ -3468,7 +3629,12 @@ function rowHtml(r){
   /* data-vin makes the row expandable — the click handler above looks the car
      up by it. Only the Service Visits row carries it; a car on ground has
      nothing to edit. */
-  return `<div class="veh ${cls}" data-vin="${esc(r.vin)}">
+  /* Between the car and its holds, so the pair sits in the middle of the row
+     and stays vertically centred however many concerns are listed beside it.
+     The extra grid column only exists when there is something to put in it. */
+  const asks = svCallHtml(r);
+
+  return `<div class="veh ${cls}${asks ? " has-call" : ""}" data-vin="${esc(r.vin)}">
     <div>
       <div class="vin-row">${vinLink(r)}
         <span class="mdl">${esc(labelFor("model", r.model))}</span>
@@ -3476,6 +3642,7 @@ function rowHtml(r){
       </div>
       <div class="veh-sub">${bits.map(b => esc(b)).join(' <span class="dot"></span> ')}</div>
     </div>
+    ${asks}
     <div class="holds">${lines.join("") || '<div class="hold-line" style="color:var(--ink-mute)">No holds</div>'}</div>
   </div>`;
 }
@@ -3573,6 +3740,87 @@ const daysSince = at => {
   const t = new Date(at).getTime();
   return isNaN(t) ? null : Math.floor((Date.now() - t) / 86400000);
 };
+
+/* ══════════════ Call Onsite / Send to Body ══════════════
+
+   A car with an open service visit standing at the overflow lot is a car
+   nobody at the centre can work on, and the person who spots it is looking at
+   this board rather than standing next to it. One press puts the VIN in a
+   Teams chat with what needs doing.
+
+   Both buttons post through the same SV Call webhook — one chat, two asks —
+   and both are drawn from one function so the row and the ticket panel cannot
+   drift into offering different things about the same car.
+
+   Shown rather than hidden when no webhook is saved: pressing then says where
+   to paste one, which is more use than a button that quietly is not there. */
+function svCallHtml(r, inPanel){
+  const offsite = S.offsiteTrtId && Number(r.trtId) === Number(S.offsiteTrtId);
+  if(!offsite || !(r.visits && r.visits.length)) return "";
+  return `<div class="svcall" data-vin="${esc(r.vin)}">
+    <button class="mini svc-on">Call Onsite</button>
+    <button class="mini svc-body">Send to Body</button>
+    ${/* Only in the panel, which is a modal with room to grow. On a row the
+          answer goes to the notice strip instead — see the CSS. */
+      inPanel ? `<div class="why svc-msg"></div>` : ""}
+  </div>`;
+}
+
+/* One handler for both places. The list is rewritten on every render and the
+   panel is built on open, so anything bound per button would be bound to a
+   button that no longer exists. */
+document.addEventListener("click", async e => {
+  const btn = e.target.closest(".svc-on, .svc-body");
+  if(!btn) return;
+  e.stopPropagation();
+
+  const wrap = btn.closest(".svcall");
+  const vin  = wrap.dataset.vin;
+  const msg  = wrap.querySelector(".svc-msg");
+  const body = btn.classList.contains("svc-body");
+  const row  = S.rows.find(x => x.vin === vin);
+
+  /* Into the panel's own line when there is one, and into the notice strip
+     when there is not — which is every press made from a list row, because a
+     row that grew a line of text would push the whole list down under the
+     cursor that pressed it. */
+  const say = (text, kind) => {
+    if(msg){
+      msg.className = "why svc-msg" + (kind ? " " + kind : "");
+      msg.textContent = text;
+      return;
+    }
+    if(text) note(text, kind === "bad");
+  };
+
+  const was = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Sending";
+  say("");
+  try{
+    const d = await api("/api/svcall", {
+      kind: body ? "body" : "onsite",
+      vin,
+      /* Context for the message footer only. The facts the message ASSERTS —
+         where the car is, what the concerns are — are read server-side at the
+         moment of the press, because this tab may have been open all morning
+         and the board can now change a concern itself. */
+      svNumbers : row ? row.visits.map(v => v.id).join(", ") : "",
+      centreName: row && row.visits[0] && row.visits[0].ticket
+                    ? (row.visits[0].ticket.location || "") : ""
+    });
+    say(body
+      ? `Sent — ${d.concerns.length} concern${d.concerns.length === 1 ? "" : "s"} posted to the chat.`
+      : `Sent — asked for it to come onsite from ${d.siteName}.`, "done");
+  }catch(err){
+    // Why it refused, in its own words: "is at TRT 17589, not the offsite lot"
+    // is the whole answer, and rewording it would lose it.
+    say(err.message, "bad");
+  }finally{
+    btn.disabled = false;
+    btn.textContent = was;
+  }
+});
 
 /* The order, in Tesla OS. The card's one way back to the system the row came
    from — the VIN beside it goes to Garage, so between them a card opens both
@@ -5450,6 +5698,41 @@ $("twSave").addEventListener("click", async e => {
   }
 });
 
+/* ── the SV Call webhook ──
+   Painted from its own slice of /api/state, so saving or clearing the VRI
+   webhook above cannot make this row lie about what is stored. */
+function paintSvCall(s){
+  S.svcall = s || { has: false, host: "" };
+  const on = Boolean(S.svcall.has);
+  $("svcUrl").value = "";
+  $("svcUrl").placeholder = on
+    ? `saved · ${S.svcall.host} — paste a new one to replace it`
+    : "https://…logic.azure.com/… or …webhook.office.com/…";
+  $("svcState").textContent = on ? S.svcall.host : "not set";
+  $("svcRow").classList.remove("bad");
+  $("svcRow").classList.toggle("ok", on);
+}
+
+$("svcSave").addEventListener("click", async e => {
+  const msg = $("twMsg");
+  try{
+    await admin("/api/admin/svcall-webhook", { webhook: $("svcUrl").value }, e.target);
+    // From the server, not from what was typed: the panel should show what is
+    // stored, and an empty box means "cleared" rather than "unchanged".
+    const st = await api("/api/state");
+    paintSvCall(st.svcall);
+    msg.className = "why done";
+    msg.textContent = st.svcall && st.svcall.has
+      ? "Saved. Call Onsite and Send to Body will post there."
+      : "SV Call webhook cleared. The two buttons will say so when pressed.";
+  }catch(err){
+    msg.className = "why bad";
+    msg.textContent = err.message;
+    $("svcRow").classList.remove("ok");
+    $("svcRow").classList.add("bad");
+  }
+});
+
 /* ── the countdown ──
 
    One second-ticking interval for the life of the page, which does nothing at
@@ -5643,6 +5926,7 @@ $("resetBoard").addEventListener("click", async e => {
     if(st.connections && st.connections.os && st.connections.os.set) refreshOs(true);
     paintBilling(st.billingAddress);
     paintTeams(st.teams);
+    paintSvCall(st.svcall);
     // After the facets land: a saved selection is validated against them.
     paintQuick();
   }catch(err){

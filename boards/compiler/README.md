@@ -100,6 +100,28 @@ rather than starting empty.
 Pick a centre in the nav, press **Service Visits**, choose what to look for and
 which cars to look at, and run the scan.
 
+### One VIN, and none of the filters
+
+The dialog opens with a **One VIN** box above everything else. Paste a VIN,
+press Look up, and the board goes straight to that car.
+
+**Every filter below it is ignored, deliberately.** A VIN is not a narrower
+version of a centre scan — it is a different question, asked about a car that
+may be at another site, delivered, or in a state no facet on the menu selects.
+Applying the site or the facets would answer *"no cars found"* about a car the
+reader is holding the VIN for, which is the worst possible reply. The kinds go
+unsent too: all three are cheap on one car, and a lookup that quietly skipped
+containment because a toggle was off would be a lie rather than a saving.
+
+It is the same route, the same enumeration and the same row shape — the server
+just queries `vin:<VIN>` instead of a centre — so the ticket panel, the
+concern editor, the export and every write behave on it exactly as they do
+inside a scan. The view opens on **All scanned** rather than Flagged, because
+"Nothing flagged" in answer to a VIN reads as "no such car".
+
+A VIN that is not in the index says so in those words, which is a different
+sentence from an empty scan and points at a different next move.
+
 ### What it looks for
 
 | Kind | Source | Meaning |
@@ -271,6 +293,51 @@ and status were byte-identical.
 Four ways to be refused, all of them tested: a line already off the visit, an
 activity that is not on this visit, a symptom code the model's catalogue does
 not have, and a code that did not come from SCA's list at all.
+
+### Call Onsite / Send to Body
+
+A car with an open service visit that Garage places at the **offsite lot**
+gets two buttons, stacked, on its row and at the top of its ticket panel:
+
+| | |
+|---|---|
+| **Call Onsite** | the VIN, that it is at the offsite lot, and to bring it onsite and check it in with service |
+| **Send to Body** | the VIN, its concerns, and to take it to the body shop and check it in |
+
+Both post to the **SV Call** webhook — its own field under Admin › Teams, kept
+apart from the VRI-list one because clearing that one sets `teams: null` and
+would take this with it, and because the two go to different chats: a standing
+list for whoever runs the lot, one-off asks for whoever moves cars.
+
+**Each message is checked before it is sent, against a fresh read rather than
+against the tab.**
+
+- *Call Onsite* re-reads `trt_id` from Garage and refuses if the car is not at
+  the offsite lot any more — the message asserts where the car is, so the
+  board confirms it still is. A tab open since the morning is exactly the
+  caller that would send somebody out for a car already onsite.
+- *Send to Body* re-reads the ticket from SCA and names the concerns from
+  that, **leaving the courtesy line out**. It refuses if there is nothing but
+  the courtesy line, or if SCA is not connected: the message names the work,
+  so the board will not send one it cannot name. This matters more since the
+  board can now edit a symptom and remove a line — the row on screen may be
+  describing concerns that have changed.
+
+With no webhook saved the buttons stay put and say where to paste one when
+pressed, rather than vanishing and leaving nothing to ask about.
+
+**On a row they sit in their own middle column and the row never changes
+size.** Two details, both learned by getting them wrong: the outcome goes to
+the notice strip rather than into the row, because a row that grows a line of
+text pushes the whole list down under the cursor that just pressed it; and
+both the button column and the holds column are fixed widths, because sized to
+their content they tracked the longest hold line on each card and the buttons
+landed at a different x on every row. The buttons themselves have a minimum
+width so that becoming "Sending" mid-press cannot resize them.
+
+The offsite lot has **no name to print** — it exists only in Garage, so the
+site directory cannot resolve it — and the message says "the offsite lot (TRT
+487417)" rather than the bare "TRT 487417" a lookup miss would leave.
 
 ### The photos are fetched when you ask, never on a scan
 
@@ -662,6 +729,61 @@ necessarily appear on any date: one VIN with an open SV, an appointment on the
 Tesladex has no such gap — a car is in the index whether or not anyone
 scheduled it — so scope comes from Garage and only the holds come from
 Intrepid.
+
+### What the scan spends its time on
+
+A Cypress scan of ~480 undelivered cars was 43 seconds and is now 7–13,
+depending mostly on how Intrepid feels at that moment. Measured per phase,
+before and after:
+
+| phase | was | now | |
+|---|---|---|---|
+| enumerate | 5.8s | 1.1s | Garage, 5 pages of 100 |
+| containment | 12.2s | 0.2s | 97 calls became 5 |
+| holds | 21.4s | 4.5s | 2 calls per car, at a higher concurrency |
+| tickets | 2.8s | 5.4s | SCA, and it is real work — 56 cars with visits |
+| VRI | 0.8s | 0.6s | |
+
+Two changes did it, and one of them was free:
+
+**The containment batch was five VINs and is a hundred.** Measured against a
+real centre, a hundred come back in the same second five did — the call spends
+its time on the round trip, not on the cars. That is 483 cars in five calls
+instead of ninety-seven.
+
+> **A hundred is the ceiling and it truncates in silence.** Asked for 200 it
+> answers 200 OK with exactly 100 keys and no complaint — the same shape of
+> trap as the delivery pipeline's page size. The batch is pinned, and the scan
+> counts the keys that come back rather than trusting them: fewer keys than
+> VINs raises a notice, because a dropped car reads as a car with no
+> containment hold.
+
+**Reads run sixteen at a time, writes still run six.** `CONFIG.concurrency`
+stays at 6 for waking cars and popping trunks — that pool poking a fleet is
+deliberately gentle. Reads had no business inheriting it. Interleaved A/B on
+the same 100 VINs, alternating to cancel out upstream drift: **1.4s at six,
+0.6s at sixteen.** Past sixteen the curve flattens and the gain is tenths of a
+second against an endpoint other people also use.
+
+**The rest is upstream and outside the board's control.** Back-to-back scans
+returning byte-identical results have come in at 12.8s, 24.0s and 39.7s: both
+Garage and Intrepid vary by minute, and the same 100-call probe that takes
+1.4s at one moment takes 14 seconds at another. The phase timings above are
+one honest run each, not a promise.
+
+There is **no bulk logistics endpoint** — `bulkGetLogisticsHoldByVin`,
+`bulkGetLogisticsHolds` and `getLogisticsHoldByVins` are all 404 — so the
+per-car pass stays two calls per car. Containment is the only one of the three
+Intrepid publishes in bulk.
+
+### An empty 200 means "none", not "it failed"
+
+`getScaServiceVisitByVin` answers **zero bytes** for a car with no open visit —
+about one car in ten at Cypress. The board parsed that as "did not return
+JSON" and threw, and the caller swallowed the throw and recorded no visits.
+Right answer, wrong route, and it had a real cost: a cookie dying mid-scan
+would have been indistinguishable from a clean car. An empty body is now
+`null` and a genuine failure still throws.
 
 ### Cost and the cap
 

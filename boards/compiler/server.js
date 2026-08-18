@@ -155,7 +155,11 @@ const server = http.createServer(async (req, res) => {
         teams: (() => {
           const t = L.teamsSettings();
           return (t.hasWebhook || t.hasPush || t.autoMinutes) ? t : null;
-        })()
+        })(),
+        /* Whether an SV Call webhook is saved, and its host — never its path.
+           The page needs the boolean to know whether the two buttons can do
+           anything, and says so on the button rather than failing on press. */
+        svcall: L.svCallSettings()
       });
     }
 
@@ -568,6 +572,42 @@ const server = http.createServer(async (req, res) => {
     if(p === "/api/scan" && req.method === "POST"){
       const body  = await readBody(req);
       const trtId = body.trtId ? String(body.trtId).trim() : null;
+
+      /* ── one VIN ──
+         Answered before any of the checks below, because none of them apply.
+         A single car needs no site, no facets and no kinds argument about
+         cost; it does still need a TRT, but only so the receiving-inspection
+         lookup knows which centre's log to read. */
+      const oneVin = String(body.vin || "").trim().toUpperCase();
+      if(oneVin){
+        if(!L.isVin(oneVin))
+          return sendJson(res, 400, { error: `${oneVin} is not a 17-character VIN` });
+        jobStart();
+        let out;
+        try { out = await L.scanVehicles({ trtId, vin: oneVin, onProgress: jobUpdate }); }
+        finally { jobEnd(); }
+        log(`vin lookup: ${oneVin} · ${out.rows.length ? "found" : "not in the index"}`);
+        /* The same envelope a centre scan returns, so render() needs no idea
+           that this one came from a VIN box — one renderer, one row shape,
+           and every filter, export and write on the page behaves identically
+           on the result. */
+        return sendJson(res, 200, {
+          vin    : oneVin,
+          trtId  : trtId ? Number(trtId) : null,
+          trt    : trtId ? await L.trtInfo(trtId) : null,
+          sites  : "onsite",
+          query  : out.query,
+          total  : out.total,
+          scanned: out.scanned,
+          kinds  : out.kinds,
+          filters: {},
+          reasons: out.rows.some(r => r.logistics.length) ? await L.logisticsHoldReasons() : {},
+          notes  : out.notes,
+          sca    : out.sca,
+          summary: L.summarise(out.rows),
+          rows   : out.rows
+        });
+      }
 
       if(trtId && !/^\d+$/.test(trtId)){
         return sendJson(res, 400, { error: "TRT must be numeric" });
@@ -1110,6 +1150,43 @@ const server = http.createServer(async (req, res) => {
       // The host, never the URL: the path carries the secret.
       log(out.cleared ? "teams webhook cleared" : `teams webhook -> ${out.host}`);
       return sendJson(res, 200, { ok: true, ...out });
+    }
+
+    /* ── the SV Call webhook ──
+       Its own key in the file rather than a field on the VRI settings, so
+       clearing that one cannot take this with it. Admin-gated for the same
+       reason as the other: a webhook URL decides where VINs get posted. */
+    if(p === "/api/admin/svcall-webhook" && req.method === "POST"){
+      const body = await readBody(req);
+      if(!authed(body)) return sendJson(res, 401, { error: "Wrong password" });
+      const out = L.saveSvCallWebhook(body.webhook);
+      log(out.cleared ? "sv call webhook cleared" : `sv call webhook -> ${out.host}`);
+      return sendJson(res, 200, { ok: true, ...out, svcall: L.svCallSettings() });
+    }
+
+    /* ── the two messages ──
+       Not admin-gated: pressing these is using the board, the way opening a
+       trunk is, and gating them would mean unlocking Admin to ask for a car
+       to be moved. Each one checks its own claim before it posts — see
+       sendSvCall() and sendBodyCall(). */
+    if(p === "/api/svcall" && req.method === "POST"){
+      const body = await readBody(req);
+      const kind = String(body.kind || "onsite");
+      const vin  = String(body.vin || "").trim().toUpperCase();
+      if(!L.isVin(vin)) return sendJson(res, 400, { error: "A valid VIN is required" });
+
+      if(kind === "body"){
+        const out = await L.sendBodyCall({ vin });
+        log(`sv call: ${vin} -> body shop (${out.concerns.length} concern${out.concerns.length === 1 ? "" : "s"})`);
+        return sendJson(res, 200, out);
+      }
+      const out = await L.sendSvCall({
+        vin,
+        svNumbers : String(body.svNumbers || "").slice(0, 120),
+        centreName: String(body.centreName || "").slice(0, 120)
+      });
+      log(`sv call: ${vin} -> onsite from ${out.siteName}`);
+      return sendJson(res, 200, out);
     }
 
     /* The poll URL and the refresh interval. Saved together with the webhook
