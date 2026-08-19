@@ -477,7 +477,8 @@ const activitiesOf = (token, svid) =>
 
    Only the fields the board renders come back. The visit header also carries
    the customer's contact block, which has no business leaving the server —
-   the same line the existing scan already draws. */
+   the same line the existing scan already draws. What does leave is one word
+   about it, `contact`; see contactState(). */
 
 /* ── open only ──
 
@@ -518,10 +519,17 @@ async function ticketFor(token, vin){
   if(!visits.length) return { open: [], closed };
 
   const open = await Promise.all(visits.map(async v => {
-    const acts = await activitiesOf(token, v.serviceVisitID).catch(() => []);
+    const [acts, contact] = await Promise.all([
+      activitiesOf(token, v.serviceVisitID).catch(() => []),
+      contactState(token, v)
+    ]);
     return {
       svId    : v.serviceVisitID || null,
       number  : v.serviceVisitNumber || "",
+      /* One word — "tesla" / "nontesla" / "none" / "unknown" — and never the
+         contact itself. See contactState() for why that word is nearly free
+         and why the record stays here. */
+      contact,
       /* Carried so a caller can refuse to write to anything that is not open,
          without having to re-read the record to find out. */
       statusId: v.serviceVisitStatusID ?? null,
@@ -571,6 +579,58 @@ async function ticketFor(token, vin){
     };
   }));
   return { open, closed };
+}
+
+/* ── whose contact is on the visit ──
+
+   One word per visit, so the list can be narrowed to the cars still carrying
+   a customer without opening them one at a time:
+
+     "nontesla"  main is the customer, or main is Tesla and billing is not
+     "tesla"     both are Tesla — or Tesla on main and no billing record
+     "none"      the visit carries no main contact at all
+     "unknown"   the billing read failed twice and the answer is not known
+
+   Never the contact itself. The panel's read is still the only thing that
+   moves a name or an address off this server; the scan carries the verdict
+   and nothing else, and `isTeslaContact` is the same rule both use.
+
+   **The main contact is free.** `visitsByVin` already asks for
+   `includeContact=true` and the header's `serviceVisitContact` is the record
+   `getcontacts?contactType=1` returns — identical on 10 of 10 Cypress cars,
+   name, email and all. Nothing is added to the scan for it.
+
+   **Billing is not on the header and is not free.** `serviceVisitBillingContact`
+   is null on every visit sampled, including cars whose billing contact
+   demonstrably exists, and there is no other source: `visitById`, and three
+   guessed `include…` parameters, all return null for it too. Its own read
+   runs ~1.4s, so asking on all 69 Cypress visits would cost ~20s on a scan
+   that takes 7-13s.
+
+   So it is asked for **only when main is already Tesla**, which is the only
+   case where it can change the answer — a car with the customer on main is a
+   non-Tesla car whatever billing says. That also happens to be the case worth
+   catching: Tesla on main with the customer still on billing is the car that
+   needs pressing. At Cypress it is 1 visit in 69, so the whole filter costs
+   about one call per scan.
+
+   A billing read that fails is `unknown`, never clean, and is retried once
+   first: the endpoint returned null on 8 of 69 in one pass and 0 of 69 in the
+   next, so a single null is not evidence of anything. */
+async function contactState(token, visit){
+  const main = visit && visit.serviceVisitContact && visit.serviceVisitContact.contacts;
+  if(!main) return "none";
+  if(!isTeslaContact(main)) return "nontesla";
+
+  for(let attempt = 0; attempt < 2; attempt++){
+    const got = await readContact(token, visit.serviceVisitID, 2);
+    if(!got.ok) continue;
+    /* No billing record at all is not a customer on the bill — there is
+       nobody there for it to go to. */
+    const c = got.contact && got.contact.contacts;
+    return !c || isTeslaContact(c) ? "tesla" : "nontesla";
+  }
+  return "unknown";
 }
 
 /* ── the photos on a concern ──
@@ -994,12 +1054,21 @@ const contactsForCar = (token, userId, vin) =>
                  `?userId=${encodeURIComponent(userId)}&vin=${encodeURIComponent(vin)}&productType=1`)
     .then(j => unwrap(j) || []);
 
-const contactOnVisit = (token, serviceVisitId, contactType) =>
+/* The same read twice over. The panel wants the contact or nothing; the scan's
+   contactState() has to tell "there is no billing contact" apart from "the
+   call did not answer", because one of those is a clean car and the other is
+   a car nobody has looked at. */
+const readContact = (token, serviceVisitId, contactType) =>
   getJson(token, `/case/api/servicevisitcontacts/getcontacts` +
                  `?serviceVisitID=${encodeURIComponent(serviceVisitId)}` +
                  `&contactType=${encodeURIComponent(contactType)}&interceptionexcluded=true`)
-    .then(j => unwrap(j) || null)
-    .catch(() => null);   // "Record not found" for a type the car does not use
+    .then(j => ({ ok: true, contact: unwrap(j) || null }))
+    .catch(() => ({ ok: false, contact: null }));
+
+const contactOnVisit = (token, serviceVisitId, contactType) =>
+  // "Record not found" for a type the car does not use reads the same as no
+  // contact here, which is what this caller wants.
+  readContact(token, serviceVisitId, contactType).then(r => r.contact);
 
 /* Which of a car's contacts is the Tesla one. Matched on the tesla.com email
    domain rather than the name: the name is spelled two different ways across

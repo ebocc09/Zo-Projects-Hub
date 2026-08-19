@@ -1010,6 +1010,15 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
                 title="Show only the cars whose tickets name these concerns">Concern: All</button>
         <div class="qmenu down" id="concernMenu" role="menu"></div>
       </div>
+      <!-- Who is on the visit. Reading it a car at a time is the job this
+           replaces: pick Non-Tesla and the list is every car still carrying
+           the customer on main or on billing. Same door as the concern chip
+           beside it — the verdict is already on the rows. -->
+      <div class="qwrap" id="ctWrap" hidden>
+        <button class="chip" id="ctBtn" aria-haspopup="true" aria-expanded="false"
+                title="Show only the cars whose service visit still has a non-Tesla contact on it">Contact: All</button>
+        <div class="qmenu down" id="ctMenu" role="menu"></div>
+      </div>
       <!-- Pending Inventory only. Everything a card shows is filterable, and none of
            it is part of the scan: the bucket is the bucket, so narrowing can
            only ever happen over rows already fetched. Same reasoning as the
@@ -1562,6 +1571,11 @@ const S = {
      export and the empty state all read — so none of them can disagree with
      the screen about what is listed. */
   concern:[],
+  /* Which contact states the list is narrowed to, empty meaning all of them.
+     Same argument as the concern above: whose contact is on a visit is known
+     only once SCA has answered, so this narrows rows already on screen and
+     goes through visibleRows() with everything else. */
+  contact:[],
   cogStatuses:null, cogChosen:[], cogSort:"dwell", cogTally:[], cogTotal:0, cogNoRecord:0,
   /* Two of them: `cogDwell` is what the menu has selected, `cogWindow` is what
      the rows on screen were actually scanned with. They diverge the moment
@@ -2318,6 +2332,7 @@ document.addEventListener("click", e => {
   const wrap = e.target.closest(".qwrap");
   if(wrap !== $("savedBtn").closest(".qwrap")) closeQuick();
   if(wrap !== $("concernWrap")) closeConcerns();
+  if(wrap !== $("ctWrap")) closeContacts();
   if(wrap !== $("expSortWrap")) closeExpSort();
 });
 /* Before the shared Escape handler, which closes the whole modal: one press
@@ -2328,6 +2343,7 @@ document.addEventListener("keydown", e => {
   // Same bargain for the concern menu, which sits over the list rather than
   // inside a modal — Escape should dismiss it before it reaches anything else.
   if($("concernMenu").classList.contains("on")){ e.stopPropagation(); closeConcerns(); }
+  if($("ctMenu").classList.contains("on")){ e.stopPropagation(); closeContacts(); }
   if($("expSortMenu").classList.contains("on")){ e.stopPropagation(); closeExpSort(); }
 }, true);
 
@@ -4556,12 +4572,21 @@ function visibleRows(){
        and the other order is the same rows read the other way up. */
     return S.cogSort === "recent" ? [...S.rows].reverse() : S.rows;
   }
-  const rows = scannedRows();
-  if(!S.concern.length) return rows;
+  let rows = scannedRows();
   // Any of them, not all of them: two concerns picked means either will do,
   // which is the only reading under which picking a second one adds cars.
-  const want = new Set(S.concern);
-  return rows.filter(r => { for(const c of concernsOf(r)) if(want.has(c)) return true; });
+  if(S.concern.length){
+    const want = new Set(S.concern);
+    rows = rows.filter(r => { for(const c of concernsOf(r)) if(want.has(c)) return true; });
+  }
+  /* The two chips narrow each other rather than widening: "cosmetic" and
+     "non-Tesla contact" picked together is the cosmetic tickets still on a
+     customer, which is the question somebody asking both is holding. */
+  if(S.contact.length){
+    const want = new Set(S.contact);
+    rows = rows.filter(r => { for(const c of contactsOf(r)) if(want.has(c)) return true; });
+  }
+  return rows;
 }
 
 /* ── the concern menu ──
@@ -4644,13 +4669,125 @@ $("concernMenu").addEventListener("click", e => {
   paintList();
 });
 
+/* ─────────────────────── whose contact is on the visit ───────────────────────
+
+   Ed's ask in his words: going down the list one by one to see all the
+   contacts is hard, so "All Non-Tesla Contacts" should list the cars in one
+   go. It is the concern filter's twin — the verdict is already on every row
+   the scan brought back, so this narrows what is on screen and never asks for
+   a second scan.
+
+   Four states and no more, all decided in sca.js by the same `isTeslaContact`
+   the panel and the Switch → Tesla button use, so the chip cannot disagree
+   with the row it opens. `nontesla` covers a customer on EITHER contact —
+   main, or Tesla on main with the customer still on billing, which is the one
+   that hides best and needs pressing most.
+
+   The order is fixed rather than by size, unlike the concerns: these four are
+   a fixed vocabulary, non-Tesla is the reason anyone opens the menu, and the
+   two states that mean "no answer" belong at the bottom. */
+const CONTACT_STATES = [
+  { v: "nontesla", label: "Non-Tesla contact" },
+  { v: "tesla",    label: "Tesla contact" },
+  { v: "none",     label: "No contact on the visit" },
+  { v: "unknown",  label: "Contact could not be read" }
+];
+const CONTACT_LABEL = Object.fromEntries(CONTACT_STATES.map(s => [s.v, s.label]));
+
+function contactsOf(r){
+  const out = new Set();
+  for(const v of r.visits || []) if(v.ticket && v.ticket.contact) out.add(v.ticket.contact);
+  return out;
+}
+
+/* Counted in cars, like the concerns, because a car is what the filter
+   produces. A car with two visits in different states is counted under both,
+   so the column does not sum to the list length and is not meant to. */
+function contactTally(rows){
+  const n = new Map();
+  for(const r of rows) for(const c of contactsOf(r)) n.set(c, (n.get(c) || 0) + 1);
+  return CONTACT_STATES.filter(s => n.has(s.v)).map(s => ({ ...s, count: n.get(s.v) }));
+}
+
+const contactLabel = c => (CONTACT_LABEL[c] || c).toLowerCase();
+
+/* Repainted from the rows on every list paint, for the same reasons as the
+   concern menu: the view toggle, a new scan and a cleared selection all reach
+   it without anything having to remember to call it. */
+function paintContactChip(){
+  const wrap = $("ctWrap");
+  if(S.tool !== "sv"){ wrap.hidden = true; closeContacts(); return; }
+
+  const scanned = scannedRows();
+  const tally = contactTally(scanned);
+  /* Hidden rather than greyed when there is nothing to group by — the
+     ordinary state with the Service App disconnected, where every ticket
+     comes back null and the prompt above the list already says so.
+
+     Also hidden when one state already covers every row on screen, which is
+     the flagged view at a centre where nothing has been switched yet:
+     offering "Non-Tesla 69" over a list of 69 is a click that cannot change
+     anything. Measured against the rows rather than the number of states, so
+     the same 69 out of 1,200 on All scanned still gets its chip. */
+  wrap.hidden = !tally.length || (tally.length === 1 && tally[0].count === scanned.length);
+  if(wrap.hidden){ S.contact = []; closeContacts(); return; }
+
+  const live = new Set(tally.map(t => t.v));
+  S.contact = S.contact.filter(c => live.has(c));
+
+  const picked = tally.filter(t => S.contact.includes(t.v));
+  $("ctBtn").classList.toggle("on", picked.length > 0);
+  $("ctBtn").textContent =
+    !picked.length        ? "Contact: All"
+    : picked.length === 1 ? "Contact: " + picked[0].label.replace(/ contact$/, "")
+                          : `Contact: ${picked.length} of ${tally.length}`;
+
+  const tick = `<svg class="qtick" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
+
+  $("ctMenu").innerHTML =
+    `<button class="qrow crow${S.contact.length ? "" : " on"}" data-cs="">
+       ${tick}<span class="qt">All contacts</span>
+       <span class="qn">${scannedRows().length.toLocaleString()}</span></button>
+     <div class="qsep"></div>` +
+    tally.map(t => `
+      <button class="qrow crow${S.contact.includes(t.v) ? " on" : ""}" data-cs="${t.v}">
+        ${tick}<span class="qt">${esc(t.label)}</span>
+        <span class="qn">${t.count.toLocaleString()}</span>
+      </button>`).join("");
+}
+
+const closeContacts = () => {
+  $("ctMenu").classList.remove("on");
+  $("ctBtn").setAttribute("aria-expanded", "false");
+};
+
+$("ctBtn").addEventListener("click", e => {
+  e.stopPropagation();
+  const open = $("ctMenu").classList.toggle("on");
+  $("ctBtn").setAttribute("aria-expanded", String(open));
+});
+
+// Stays open across a pick, like the concern menu beside it.
+$("ctMenu").addEventListener("click", e => {
+  const row = e.target.closest("[data-cs]");
+  if(!row) return;
+  e.stopPropagation();
+  const v = row.dataset.cs;
+  if(!v) S.contact = [];
+  else S.contact = S.contact.includes(v) ? S.contact.filter(x => x !== v) : [...S.contact, v];
+  paintList();
+});
+
 function paintList(){
   const cog  = S.tool === "cog";
   const exp  = S.tool === "exp";
   /* Before the rows are taken, not after: this is what prunes a concern the
      view toggle has just retired, and visibleRows() must not be asked for a
-     selection that paintConcerns is about to drop. */
+     selection that paintConcerns is about to drop. Same for the contact
+     states beside it. */
   paintConcerns();
+  paintContactChip();
   const rows = visibleRows();
   $("empty").hidden = rows.length > 0 || S.rows.length > 0;
   if(exp){
@@ -4696,7 +4833,8 @@ function paintList(){
      a screen showing 31 rows when the centre has 443 must say why, or it
      reads as a scan that went wrong. */
   const slice = S.tool === "sv"
-    ? (S.concern.length ? " · " + S.concern.map(concernLabel).join(" + ") : "")
+    ? (S.concern.length ? " · " + S.concern.map(concernLabel).join(" + ") : "") +
+      (S.contact.length ? " · " + S.contact.map(contactLabel).join(" + ") : "")
     : (exp && expActive() ? " · " + expSlice().join(" · ") : "");
   $("listSub").textContent = S.listSub + slice + (rows.length ? ` · showing ${rows.length}` : "");
   if(!rows.length && S.rows.length){
@@ -4969,7 +5107,10 @@ $("runExport").addEventListener("click", async () => {
       : { label: `compiler-service-visits-${site}-${S.view}${
             S.concern.length ? "-" + S.concern
               .map(c => (c === NO_TYPE ? "untyped" : c).replace(/[^A-Za-z0-9]+/g, ""))
-              .join("-") : ""}-${stamp}`,
+              .join("-") : ""}${
+            // Same convention: a sheet of the 68 cars still on a customer is
+            // not the same file as a sheet of all 69.
+            S.contact.length ? "-" + S.contact.join("-") : ""}-${stamp}`,
           rows : rows.map(r => ({
             ...r,
             modelLabel   : labelFor("model", r.model),
@@ -5054,8 +5195,11 @@ function render(data){
   S.view = "flagged";
   /* Cleared with the rows. The concerns are a property of the tickets just
      fetched, so a selection carried over from the last centre would filter
-     this one against names it may not even use. */
+     this one against names it may not even use. The contact states are a
+     fixed four and would survive, but a filter nobody has looked at since the
+     last scan is still a hidden reason for a short list. */
   S.concern = [];
+  S.contact = [];
   paintList();
 
   const msgs = [...(data.notes || [])];
@@ -5147,9 +5291,11 @@ function renderExp(data){
   S.rows = data.rows || [];
   S.expBucket = data.bucket || null;
   S.scanTrtId = data.trtId || null;
-  /* A concern picked on a Service Visits scan has nothing to say about these
-     rows, and leaving it set would put a stale word in the subtitle. */
+  /* A concern or a contact state picked on a Service Visits scan has nothing
+     to say about these rows, and leaving either set would put a stale word in
+     the subtitle. */
   S.concern = [];
+  S.contact = [];
   /* Cleared with the rows, for the same reason: a colour picked at one centre
      is a filter against a fleet this scan may not contain, and it would hide
      cars before anyone had seen them. The ORDER survives — that is a habit
