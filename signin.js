@@ -141,7 +141,7 @@ async function startCookieSignIn(source, env, label, log){
 
   let opened;
   try{
-    opened = connector.openUrl(targetUrl(source, env), support.windowUp);
+    opened = await connector.openUrl(targetUrl(source, env), support.windowUp);
   }catch(err){
     setPhase(key, "failed", err.message, { error: err.message, deadline: null });
     return statusOf(source, env);
@@ -207,7 +207,7 @@ async function startMcpSignIn(log){
 
   try{
     const url  = await mcpAuth.authorizeUrl();
-    const out  = connector.openUrl(url, await connector.portIsLive());
+    const out  = await connector.openUrl(url, await connector.portIsLive());
     setPhase(key, "waiting", `${out.browser} is opening — sign in to Garage there.`,
              { browser: out.browser });
   }catch(err){

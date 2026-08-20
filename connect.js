@@ -178,6 +178,48 @@ function cdpCookies(port = DEBUG_PORT){
   });
 }
 
+/* Opens a tab in the browser that is already on the debug port, and brings it
+   forward. Same one-shot-socket shape as cdpCookies above; two messages
+   because activating needs the targetId the first one hands back. Activation
+   is best-effort — a browser that will not raise its window still signs in. */
+function cdpOpenTab(url, port = DEBUG_PORT){
+  return httpGetJSON(port, "/json/version").then(v => {
+    const wsUrl = v.webSocketDebuggerUrl;
+    if(!wsUrl) throw new Error("browser did not advertise a debugger endpoint");
+
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(wsUrl);
+      let settled = false;
+      const done = (err, val) => {
+        if(settled) return;
+        settled = true;
+        try { ws.close(); } catch {}
+        err ? reject(err) : resolve(val);
+      };
+      const timer = setTimeout(() => done(new Error("timed out talking to the browser")), 15000);
+
+      ws.addEventListener("open", () =>
+        ws.send(JSON.stringify({ id: 1, method: "Target.createTarget", params: { url } })));
+      ws.addEventListener("message", ev => {
+        let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+        if(msg.id === 1){
+          if(msg.error){ clearTimeout(timer); return done(new Error(msg.error.message)); }
+          const targetId = msg.result && msg.result.targetId;
+          ws.send(JSON.stringify({ id: 2, method: "Target.activateTarget", params: { targetId } }));
+          /* Do not wait on the activate to call this a success — the tab is
+             open either way, and that is the part the sign-in needs. */
+          clearTimeout(timer);
+          return done(null, targetId);
+        }
+      });
+      ws.addEventListener("error", () => {
+        clearTimeout(timer);
+        done(new Error("could not open a debugger connection to the browser"));
+      });
+    });
+  });
+}
+
 /* A cookie set for ".tesla.com" is valid for intrepidapi.tesla.com too, so
    match by suffix rather than equality. */
 function appliesTo(domain, host){
@@ -190,15 +232,40 @@ function appliesTo(domain, host){
 
 /* Opens the isolated sign-in window at one source's sign-in page. Detached,
    so closing the dashboard does not kill the browser someone is mid-sign-in
-   on. If a window is already up this opens another tab in the same profile
-   rather than a second browser, which is what makes signing into both sources
-   one session rather than two. */
-/* `alreadyUp` is the caller's knowledge of whether a window is already open on
-   this profile — it changes nothing about the spawn (a second launch against
-   the same --user-data-dir becomes a tab in the existing browser either way)
-   and only decides what the panel says: "a tab just opened" reads very
-   differently from "Chrome is opening" when Chrome is already on screen. */
-function openUrl(url, alreadyUp = false){
+   on.
+
+   ── the spawn does NOT open a tab in a browser that is already running ──
+
+   This used to say that "a second launch against the same --user-data-dir
+   becomes a tab in the existing browser either way", and that `alreadyUp`
+   therefore "changes nothing about the spawn and only decides what the panel
+   says". Both sentences are wrong, and they are why the failure went
+   unsuspected in all three copies of this file.
+
+   Chrome's singleton forwards the command line to the running instance, prints
+   "Opening in existing browser session.", and then drops the navigation. The
+   tab list is unchanged afterwards. The launcher still exits 0 and the debug
+   port stays live, so nothing downstream can tell the difference between "a
+   tab is open and nobody has signed in" and "no tab was ever opened" — the
+   capture loop just waits out its deadline and blames the user.
+
+   So `alreadyUp` now selects the mechanism rather than the wording: a live
+   debug port takes the tab over CDP, and the spawn is the cold-start path.
+   Measured on Chrome 151, 2026-08-20; the two copies in boards/compiler carry
+   the same note. */
+async function openUrl(url, alreadyUp = false){
+  if(alreadyUp || await portIsLive()){
+    try{
+      await cdpOpenTab(url);
+      const b = findBrowser();
+      return { browser: b ? b.label : "the debug browser",
+               profileDir: null, url, reused: true };
+    }catch{
+      /* Fall through and spawn. Not expected to help against a live port, but
+         it is honest — better than returning a window that does not exist. */
+    }
+  }
+
   const browser = findBrowser();
   if(!browser){
     const err = new Error("No Chrome or Edge found to open a sign-in window with");
@@ -218,12 +285,12 @@ function openUrl(url, alreadyUp = false){
   ], { detached: true, stdio: "ignore" });
   child.unref();
 
-  return { browser: browser.label, profileDir: dir, url, reused: Boolean(alreadyUp) };
+  return { browser: browser.label, profileDir: dir, url, reused: false };
 }
 
-function openSignInWindow(target, env){
+async function openSignInWindow(target, env){
   const t = targetFor(target, env);
-  return { ...openUrl(t.url), target: t.label };
+  return { ...(await openUrl(t.url)), target: t.label };
 }
 
 /* Reads one source's cookie out of that window. Returns {ok, cookie} or a

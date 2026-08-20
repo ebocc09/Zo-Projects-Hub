@@ -504,6 +504,54 @@ a.rnl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 .veh-edit .gate .arm{margin-top:8px}
 .veh-edit .gate .arm .mini{margin-top:0}
 
+/* ── pull the lever ──
+
+   The slider's cousin, for the one control that writes to a whole list at
+   once. Same bargain — a deliberate drag cannot be a stray click — turned on
+   its side, because it lives in the chip row and a chip row has no width to
+   give away but all the room in the world below it.
+
+   At rest it is an ordinary chip. The track only drops once the knob is
+   grabbed, so nothing hangs over the list until somebody has hold of it, and
+   it springs back up if they let go early. The knob follows the pointer with
+   the transition off — a lever that lags behind your hand does not feel like
+   a lever — and gets it back for the spring, which is where the bounce is
+   worth having. */
+.lever{position:relative;display:inline-flex;height:30px;touch-action:none;user-select:none}
+.lever[hidden]{display:none}
+.lever .lv-track{
+  position:absolute;left:0;top:0;width:100%;height:114px;   /* knob 30 + LV_THROW 84 */
+  z-index:29;border-radius:var(--r-sm);overflow:hidden;
+  background:var(--paper);border:1px solid var(--line);
+  box-shadow:0 10px 40px rgba(0,0,0,.28);
+  opacity:0;pointer-events:none;transform:scaleY(.55);transform-origin:top center;
+  transition:opacity .16s ease,transform .18s cubic-bezier(.2,1.4,.4,1)}
+.lever.pulling .lv-track{opacity:1;transform:none}
+/* Drawn from the top down so it reads as the lever's travel, not as a bar
+   filling up: it is under the knob and moves with it. */
+.lever .lv-fill{position:absolute;left:0;right:0;top:0;height:30px;
+  background:rgba(62,106,225,.14);transition:height .22s cubic-bezier(.2,1.5,.45,1),background .16s}
+.lever.armed .lv-fill{background:rgba(10,122,69,.20)}
+.lever.pulling .lv-fill{transition:background .16s}
+.lever .lv-foot{position:absolute;left:0;right:0;bottom:0;height:32px;display:grid;place-items:center;
+  font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-mute);border-top:1px dashed var(--line)}
+.lever.armed .lv-foot{color:var(--green,#0A7A45)}
+.lever .lv-knob{position:relative;z-index:30;cursor:grab;white-space:nowrap;
+  background:var(--paper);
+  transition:transform .22s cubic-bezier(.2,1.5,.45,1),background .15s,border-color .15s,color .15s}
+.lever.pulling .lv-knob{cursor:grabbing;transition:background .15s,border-color .15s,color .15s}
+.lever.armed .lv-knob{background:var(--green,#0A7A45);border-color:var(--green,#0A7A45);color:#fff}
+.lever.busy .lv-knob,.lever.off .lv-knob{cursor:default}
+.lever.busy .lv-knob:hover,.lever.off .lv-knob:hover{border-color:var(--line);color:var(--ink-soft)}
+/* The grip. Three bars, so the thing you are meant to take hold of looks like
+   something you can take hold of. */
+.lever .lv-grip{display:inline-flex;flex-direction:column;gap:2px;margin-right:8px}
+.lever .lv-grip i{display:block;width:11px;height:1.5px;border-radius:1px;background:currentColor;opacity:.55}
+@media (prefers-reduced-motion:reduce){
+  .lever .lv-track,.lever .lv-knob,.lever .lv-fill{transition-duration:.01ms}
+}
+
 /* ── thumbnails in the card ──
    A fixed box so a portrait and a landscape photo sit on the same line, and
    object-fit:cover so neither is squashed to manage it. Detail is one click
@@ -1019,6 +1067,22 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
                 title="Show only the cars whose service visit still has a non-Tesla contact on it">Contact: All</button>
         <div class="qmenu down" id="ctMenu" role="menu"></div>
       </div>
+      <!-- Beside the filter because it is the filter's other half: the chip
+           finds the cars still on a customer, this puts Tesla on them without
+           opening sixty rows one at a time. It pulls rather than clicks for
+           the same reason the Move slider slides — it writes to real service
+           records, and one stray click is not a mandate for forty of them. -->
+      <div class="lever" id="ctSwitch" hidden>
+        <div class="lv-track">
+          <div class="lv-fill"></div>
+          <div class="lv-foot">Release to switch</div>
+        </div>
+        <button class="chip lv-knob" type="button" aria-describedby="ctSwitchHow">
+          <span class="lv-grip" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lv-text">Switch all to Tesla contact</span>
+        </button>
+        <span id="ctSwitchHow" hidden>Grab and pull down to switch every listed car</span>
+      </div>
       <!-- Pending Inventory only. Everything a card shows is filterable, and none of
            it is part of the scan: the bucket is the bucket, so narrowing can
            only ever happen over rows already fetched. Same reasoning as the
@@ -1143,6 +1207,14 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
       <div class="kinds" id="kinds"></div>
       <div class="hint">Each one costs a call per vehicle, so leaving one off is a
         real saving on a wide selection. Containment is batched five to a call.</div>
+    </div>
+    <!-- Said out loud, because a filter that used to be here and is now gone
+         reads as a bug otherwise. It is also the honest description of every
+         count on the next screen. -->
+    <div class="hint" id="undelOnly" style="margin-bottom:14px">
+      <b>Undelivered cars only.</b> Every scan is, and there is no longer a switch for it —
+      the board writes to service records, and a delivered car's are the customer's.
+      The One VIN box above still answers about any car.
     </div>
     <div id="facets"></div>
   </div>
@@ -4720,16 +4792,22 @@ function paintContactChip(){
 
   const scanned = scannedRows();
   const tally = contactTally(scanned);
-  /* Hidden rather than greyed when there is nothing to group by — the
-     ordinary state with the Service App disconnected, where every ticket
+  /* Hidden rather than greyed only when there is nothing to group by at all —
+     the ordinary state with the Service App disconnected, where every ticket
      comes back null and the prompt above the list already says so.
 
-     Also hidden when one state already covers every row on screen, which is
-     the flagged view at a centre where nothing has been switched yet:
-     offering "Non-Tesla 69" over a list of 69 is a click that cannot change
-     anything. Measured against the rows rather than the number of states, so
-     the same 69 out of 1,200 on All scanned still gets its chip. */
-  wrap.hidden = !tally.length || (tally.length === 1 && tally[0].count === scanned.length);
+     It used to hide when a single state covered every row too, on the grounds
+     that offering "Non-Tesla 69" over a list of 69 is a click that cannot
+     change anything. That was measured against a scan full of delivered cars,
+     where two states always existed. Undelivered-only scans made one state the
+     NORMAL case — a Service Visits scan flags only cars that have a visit, so
+     a tidy centre is 59 rows all reading Tesla — and the chip disappeared
+     exactly when the news was good, which reads as the filter having broken.
+
+     The chip is also the readout, not just the filter: "Contact: All" over a
+     menu saying "Tesla contact 59" is the answer to the question it was built
+     to ask. A click that changes nothing is a smaller cost than hiding that. */
+  wrap.hidden = !tally.length;
   if(wrap.hidden){ S.contact = []; closeContacts(); return; }
 
   const live = new Set(tally.map(t => t.v));
@@ -4779,6 +4857,269 @@ $("ctMenu").addEventListener("click", e => {
   paintList();
 });
 
+/* ─────────────────── switch the whole list to the Tesla contact ───────────────────
+
+   The filter beside this one answers "which cars are still on a customer".
+   This is the answer to it — the same job the Switch button in a row does,
+   done to every car the list is showing, because doing it by hand is opening
+   sixty rows and pulling the same lever sixty times.
+
+   ── it is the row's button, not a second way of doing it ──
+
+   Every car goes through `/api/sca/contact-to-tesla`, one call each, the same
+   route the panel uses. Nothing about the write is re-implemented here: the
+   pre-delivery gate, the fresh Garage read that fails closed, reading the
+   Tesla record off the car rather than a saved copy, the read-back that
+   catches SCA's 200/success:false — all of it is already in there and gets to
+   stay in one place. What this adds is a queue and a progress readout.
+
+   ── undelivered only, and that is not this control's rule to bend ──
+
+   The gate is Ed's: a delivered car's contact is the customer's own, "cars
+   we're not supposed to mess with". The server enforces it per car, so a
+   delivered car in the queue would come back refused — but sending forty
+   requests to be told no forty times is not a plan. They are counted out
+   here, and when the list is ALL delivered the lever still appears and says
+   so, rather than vanishing and leaving the filter looking broken.
+
+   A scan cannot produce a delivered car any more — see the note above FACETS
+   in lib.js. The One VIN lookup still can, deliberately, so this branch is
+   the state that box lands in and is worded for it. */
+
+const LV_THROW = 84;                 // matches .lv-track height minus the knob
+/* Three at a time. These are writes, so it is not the read pool's 16 — but
+   they are writes to sixty different visits, and the one place serial
+   actually matters (main and billing on the SAME visit) is already serial
+   inside scaSwitchContactToTesla. Three keeps a run of forty to about a
+   minute without ever having two calls in flight against one record. */
+const CT_SWITCH_CONCURRENCY = 3;
+
+/* Which visits the lever would write to, and which ones it is holding back.
+   Read off the rows on screen, like every other bulk control here — the
+   export and the trunk button read the same visibleRows(), so the three
+   cannot disagree about what "the list" is. */
+function ctSwitchPlan(){
+  const go = [], blocked = [];
+  for(const r of visibleRows()){
+    for(const v of r.visits || []){
+      if(!v.ticket || v.ticket.contact !== "nontesla") continue;
+      if(r.delivered) blocked.push(r.vin);
+      else go.push({ vin: r.vin, svId: v.ticket.svId || v.svId });
+    }
+  }
+  return { go, blocked };
+}
+
+let ctPlan = [];
+
+function paintCtSwitch(){
+  const el = $("ctSwitch");
+  // Mid-run the knob IS the progress readout, and repainting it would wipe
+  // the count off the front of somebody's forty-car job.
+  if(el.classList.contains("busy")) return;
+
+  const { go, blocked } = ctSwitchPlan();
+  el.hidden = S.tool !== "sv" || (!go.length && !blocked.length);
+  if(el.hidden){ ctPlan = []; return; }
+
+  ctPlan = go;
+  el.classList.toggle("off", !go.length);
+  const knob = el.querySelector(".lv-knob");
+  if(go.length){
+    /* The count is in the words, for the reason the trunk button's is: "switch
+       all to Tesla contact" and "switch all 41 to Tesla contact" are different
+       sentences, and only one of them can be pulled by mistake. */
+    setLeverText(`Switch all ${go.length.toLocaleString()} to Tesla contact`);
+    knob.title = `Grab and pull down to put the Tesla contact on ${go.length.toLocaleString()} ` +
+      `service visit${go.length === 1 ? "" : "s"} — the cars listed, read off each car's own record.`;
+  }else{
+    setLeverText(`${blocked.length.toLocaleString()} non-Tesla · all delivered`);
+    knob.title = "Every non-Tesla contact on screen is on a delivered car, and this board " +
+      "will not switch those — a delivered car's contact is the customer's own. " +
+      "Only the One VIN lookup reaches a delivered car; scans never do.";
+  }
+}
+
+const setLeverText = t => { $("ctSwitch").querySelector(".lv-text").textContent = t; };
+
+/* ── the pull ──
+   A button that is never clicked: there is no click handler, so a stray one
+   does nothing at all. Only a drag the length of the track fires it. */
+(() => {
+  const el   = $("ctSwitch");
+  const knob = el.querySelector(".lv-knob");
+  const fill = el.querySelector(".lv-fill");
+  let pulling = false, startY = 0, dy = 0;
+
+  const armedAt = LV_THROW - 4;      // the last few px are travel, not a target
+  const paint = () => {
+    const armed = dy >= armedAt;
+    knob.style.transform = `translateY(${dy}px)`;
+    fill.style.height = (30 + dy) + "px";
+    el.classList.toggle("armed", armed);
+    setLeverText(armed ? `Release to switch ${ctPlan.length.toLocaleString()}`
+               : dy > 8 ? "Keep pulling…"
+               : `Switch all ${ctPlan.length.toLocaleString()} to Tesla contact`);
+  };
+  /* Always through here, whichever way the pull ends, so the lever can never
+     be left half down with the track hanging over the list. */
+  const spring = () => {
+    pulling = false; dy = 0;
+    el.classList.remove("pulling", "armed");
+    knob.style.transform = ""; fill.style.height = "";
+    paintCtSwitch();
+  };
+  const canPull = () => !el.classList.contains("off") &&
+                        !el.classList.contains("busy") && !S.busy && ctPlan.length > 0;
+
+  knob.addEventListener("pointerdown", e => {
+    if(!canPull()) return;
+    pulling = true; startY = e.clientY; dy = 0;
+    el.classList.add("pulling");
+    // Capture, or dragging off the side of a 130px knob drops the gesture.
+    knob.setPointerCapture(e.pointerId);
+    paint();
+  });
+  knob.addEventListener("pointermove", e => {
+    if(!pulling) return;
+    dy = Math.max(0, Math.min(LV_THROW, e.clientY - startY));
+    paint();
+  });
+  knob.addEventListener("pointerup", () => {
+    if(!pulling) return;
+    const go = dy >= armedAt;
+    spring();
+    if(go) runCtSwitch();
+  });
+  knob.addEventListener("pointercancel", () => { if(pulling) spring(); });
+
+  /* The same lever from the keyboard: pull it down a quarter at a time or with
+     End, then Enter to let go. Space and Enter on their own do nothing until
+     it is at the bottom — a press is not a pull, which is the whole point. */
+  knob.addEventListener("keydown", e => {
+    if(!canPull()) return;
+    if(e.key === "ArrowDown" || e.key === "End"){
+      e.preventDefault();
+      el.classList.add("pulling"); pulling = true;
+      dy = e.key === "End" ? LV_THROW : Math.min(LV_THROW, dy + LV_THROW / 4);
+      paint();
+    }else if(e.key === "ArrowUp" || e.key === "Escape"){
+      if(pulling){ e.preventDefault(); e.stopPropagation(); spring(); }
+    }else if(e.key === "Enter" || e.key === " "){
+      e.preventDefault();
+      if(dy < armedAt) return;
+      spring(); runCtSwitch();
+    }
+  });
+  knob.addEventListener("blur", () => { if(pulling) spring(); });
+})();
+
+/* Believed only because the server read it back. `/api/sca/contact-to-tesla`
+   answers 200 after re-reading the visit and matching on the email domain, so
+   a car marked here is one SCA has confirmed — not one that was posted at. */
+function markContactSwitched(svId){
+  for(const r of S.rows) for(const v of r.visits || [])
+    if(v.ticket && (v.ticket.svId || v.svId) === svId) v.ticket.contact = "tesla";
+}
+
+async function runCtSwitch(){
+  if(S.busy || !ctPlan.length) return;
+  /* Snapshotted, because the rows repaint at the end and the switched cars
+     drop out of the list the plan was read from. */
+  const plan = ctPlan.slice();
+
+  S.busy = true;
+  const el = $("ctSwitch"), knob = el.querySelector(".lv-knob"), fill = el.querySelector(".lv-fill");
+  // Held down for the duration: the track stays open and the fill becomes the
+  // progress bar, so the thing that started the job is the thing reporting it.
+  el.classList.add("busy", "pulling");
+  el.classList.remove("armed");
+  knob.style.transform = "translateY(0)";
+  clearNotes();
+
+  let done = 0;
+  const ok = [], bad = [];
+  const tick = () => {
+    setLeverText(`Switching ${done.toLocaleString()} of ${plan.length.toLocaleString()}`);
+    fill.style.height = (30 + LV_THROW * (done / plan.length)) + "px";
+  };
+  tick();
+
+  let next = 0;
+  const worker = async () => {
+    for(;;){
+      const i = next++;
+      if(i >= plan.length) return;
+      const t = plan[i];
+      try{
+        const d = await api("/api/sca/contact-to-tesla",
+                            { vin: t.vin, serviceVisitId: Number(t.svId) });
+        ok.push({ vin: t.vin, now: d.now, ticketsIntact: d.ticketsIntact !== false });
+        markContactSwitched(t.svId);
+      }catch(err){
+        bad.push({ vin: t.vin, reason: err.message || "no reply" });
+      }
+      done++; tick();
+    }
+  };
+
+  try{
+    await Promise.all(Array.from({ length: Math.min(CT_SWITCH_CONCURRENCY, plan.length) }, worker));
+  }finally{
+    S.busy = false;
+    el.classList.remove("busy", "pulling", "armed");
+    knob.style.transform = ""; fill.style.height = "";
+    // Here, not per car: the switched ones leave the Non-Tesla list, and doing
+    // it forty times would move the lever out from under the cursor mid-run.
+    paintList();
+  }
+  paintCtSwitchResult(ok, bad);
+}
+
+/* Reports after, like the trunks do, and for the same reason: a refusal is
+   the useful half of the answer. A car that is really an inventory car but
+   reads as delivered, or a visit somebody closed while the scan was on
+   screen, is a car to go and look at — and it is named. */
+function paintCtSwitchResult(ok, bad){
+  const n = ok.length + bad.length;
+  const mono = "font-family:ui-monospace,SFMono-Regular,Menlo,monospace;" +
+               "word-break:break-all;color:var(--ink-mute)";
+
+  const head = bad.length
+    ? `${ok.length.toLocaleString()} of ${n.toLocaleString()} switched to the Tesla contact · ` +
+      `${bad.length.toLocaleString()} refused, and nothing was changed on those.`
+    : `${n.toLocaleString()} service visit${n === 1 ? "" : "s"} now ` +
+      `carr${n === 1 ? "ies" : "y"} the Tesla contact on main and billing.`;
+
+  /* Grouped on the reason with the car taken out of it. Every refusal from
+     this route names the VIN inside the sentence — "Refusing to switch the
+     contact: 5YJ… is delivered" — so grouping on the message as it stands
+     puts every car in a group of one and prints the same paragraph forty
+     times. The VIN is already in the list underneath. */
+  const byReason = new Map();
+  for(const b of bad){
+    const key = b.vin ? b.reason.split(b.vin).join("that car") : b.reason;
+    if(!byReason.has(key)) byReason.set(key, []);
+    byReason.get(key).push(b.vin);
+  }
+  const blocks = [...byReason]
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([reason, vins]) => `<div style="margin-top:8px">${
+      esc(`${vins.length.toLocaleString()} refused — ${reason}`)}<br>
+      <span style="${mono}">${vins.map(esc).join("  ")}</span></div>`);
+
+  /* A changed ticket status is the one outcome that is worse than a refusal,
+     so it goes first and it is named as a warning. The single-car button says
+     the same thing; a run of forty must not say it more quietly. */
+  const shaken = ok.filter(o => !o.ticketsIntact).map(o => o.vin);
+  if(shaken.length) blocks.unshift(`<div style="margin-top:8px"><b>${
+    esc(`WARNING — a ticket status changed on ${shaken.length}`)}</b><br>
+    <span style="${mono}">${shaken.map(esc).join("  ")}</span></div>`);
+
+  $("notes").innerHTML =
+    `<div class="note${bad.length || shaken.length ? " err" : ""}">${esc(head)}${blocks.join("")}</div>`;
+}
+
 function paintList(){
   const cog  = S.tool === "cog";
   const exp  = S.tool === "exp";
@@ -4788,6 +5129,9 @@ function paintList(){
      states beside it. */
   paintConcerns();
   paintContactChip();
+  /* After the chip, never before: the lever counts what the filter has left on
+     screen, so it has to be told the same story the list is about to be. */
+  paintCtSwitch();
   const rows = visibleRows();
   $("empty").hidden = rows.length > 0 || S.rows.length > 0;
   if(exp){
@@ -6058,9 +6402,9 @@ $("resetBoard").addEventListener("click", async e => {
     S.kinds = st.kinds;
     S.garageUrl = st.garageUrl;
     for(const k of Object.keys(st.facets)) S.filters[k] = [];
-    // The obvious default: the question is almost always about cars that have
-    // not gone out yet, and it is one click to widen.
-    S.filters.delivery = ["undelivered"];
+    /* Undelivered used to be set here as a default that could be widened.
+       It is not a default any more, it is the rule, and it lives in
+       buildQuery() on the server where no click can reach it. */
     if(st.trtId) setTrt(st.trtId, st.trt);
     S.offsiteTrtId = st.offsiteTrtId || null;
     S.offsiteTrt   = st.offsiteTrt || null;

@@ -215,7 +215,34 @@ async function grabToken(){
   }
 }
 
-function openSignInWindow(){
+/* ── a running browser takes the tab over CDP, NOT over a second spawn ──
+
+   Launching chrome.exe again against a profile that is already open does not
+   open the URL. The singleton forwards the command line to the running
+   instance, prints "Opening in existing browser session." to the console, and
+   drops the navigation on the floor — the tab list is unchanged afterwards.
+
+   That is invisible from here: the spawn succeeds, the debug port is live, and
+   the poll below then waits the full three minutes for a tab that was never
+   going to appear. It fails exactly when the machine is set up correctly,
+   which is why it read as "the sign-in is broken" rather than as a missing
+   browser. Measured 2026-08-20 against Chrome 151.
+
+   Target.createTarget has no such problem, and the debug port is by definition
+   available whenever this case applies. */
+async function openTabViaCdp(){
+  const sess = await cdpSession();
+  try{
+    const { targetId } = await sess.send("Target.createTarget", { url: SIGNIN_URL });
+    /* Bring it forward: if Entra does want a click, a tab behind the board is
+       a tab nobody knows to look at. Best-effort — a browser that will not
+       raise the window still signs in fine. */
+    await sess.send("Target.activateTarget", { targetId }).catch(() => {});
+    return targetId;
+  }finally{ sess.close(); }
+}
+
+function spawnSignInWindow(){
   const browser = findBrowser();
   if(!browser){
     const err = new Error("No Chrome or Edge found to open a sign-in window with");
@@ -234,7 +261,23 @@ function openSignInWindow(){
   ], { detached: true, stdio: "ignore" });
   child.unref();
 
-  return { browser: browser.label, profileDir: dir, url: SIGNIN_URL };
+  return { browser: browser.label, profileDir: dir, url: SIGNIN_URL, reused: false };
+}
+
+async function openSignInWindow(){
+  if(await portIsLive()){
+    try{
+      await openTabViaCdp();
+      const b = findBrowser();
+      return { browser: b ? b.label : "the debug browser",
+               profileDir: null, url: SIGNIN_URL, reused: true };
+    }catch{
+      /* The port answered /json/version and then would not open a tab. Falling
+         through to the spawn is not expected to help, but it is the honest
+         next thing to try rather than reporting success. */
+    }
+  }
+  return spawnSignInWindow();
 }
 
 async function browserStatus(){
@@ -293,20 +336,30 @@ function beginSignIn(commit){
         return setPhase("connected", `Signed in as ${first.user}.`);
       }
 
+      /* A live debug port is enough on its own — the tab is opened over CDP
+         and no executable is needed. Only the cold-start path has to find one,
+         so this no longer refuses when the browser is already running. */
+      const alreadyUp = await portIsLive();
       const b = findBrowser();
-      if(!b){
+      if(!b && !alreadyUp){
         return setPhase("failed", null,
           { error: "No Chrome or Edge found to open a sign-in window with." });
       }
 
-      const alreadyUp = await portIsLive();
-      openSignInWindow();
+      let opened;
+      try{ opened = await openSignInWindow(); }
+      catch(err){
+        return setPhase("failed", null,
+          { error: err.message || "Could not open a sign-in window." });
+      }
+
       setPhase("waiting",
-        alreadyUp ? "A Tesla OS tab just opened — sign in there."
-                  : `${b.label} is opening — sign in to Tesla OS there.`,
-        { browser: b.label });
+        opened.reused ? "A Tesla OS tab just opened — sign in there if it asks."
+                      : `${opened.browser} is opening — sign in to Tesla OS there.`,
+        { browser: opened.browser });
 
       const deadline = Date.now() + DEADLINE_MS;
+      let last = null;
       while(Date.now() < deadline){
         if(cancelled) return;
         await sleep(POLL_MS);
@@ -317,11 +370,21 @@ function beginSignIn(commit){
           commit(got);
           return setPhase("connected", `Signed in as ${got.user}.`);
         }
-        if(got.reason === "expired") setPhase("waiting", got.detail, { browser: b.label });
+        last = got.reason;
+        /* `opened.browser`, not `b.label` — b is null whenever the tab was
+           taken over CDP without an executable being found. */
+        if(got.reason === "expired") setPhase("waiting", got.detail, { browser: opened.browser });
       }
 
-      setPhase("failed", null,
-        { error: "Gave up waiting after three minutes. Press Connect to try again." });
+      /* Say which of the two silences this was. "Press Connect to try again"
+         on its own sent Ed round a loop that could not terminate, because the
+         thing that needed doing was never in the message. */
+      setPhase("failed", null, { error: last === "not-signed-in"
+        ? "A Tesla OS tab was opened but no sign-in completed in three minutes. "
+          + "Check that tab — Entra may be asking for something."
+        : last === "expired"
+        ? "Tesla OS kept refusing the token in that tab. Reload it and press Connect again."
+        : "Gave up waiting after three minutes. Press Connect to try again." });
     }catch(err){
       setPhase("failed", null, { error: err.message || "Sign-in failed." });
     }

@@ -279,11 +279,39 @@ async function grabToken(){
   }
 }
 
+/* ── a running browser takes the tab over CDP, NOT over a second spawn ──
+
+   This used to say that a second launch against the same --user-data-dir
+   "becomes a tab in the existing window rather than a second browser, which is
+   what makes one profile cover every source". **That is not true**, and it is
+   the reason Connect sat on "A Service App tab just opened — sign in there"
+   forever. Chrome's singleton forwards the command line to the running
+   instance, prints "Opening in existing browser session.", and then drops the
+   navigation: the tab list is unchanged afterwards.
+
+   Nothing here could see that. The spawn exits 0 and the debug port stays
+   live, so the poll below waited the full deadline for a tab that was never
+   coming — and grabToken() reads SecureToken out of a PAGE on
+   serviceapp.tesla.com, so with no tab it cannot ever succeed. It failed
+   exactly on a machine whose browser was already up, which is every machine
+   this runs on in practice.
+
+   Target.createTarget does open it. Measured on Chrome 151; os.js hit the same
+   thing on the same day and carries the same note. */
+async function openTabViaCdp(){
+  const sess = await cdpSession();
+  try{
+    const { targetId } = await sess.send("Target.createTarget", { url: SIGNIN_URL });
+    /* Forward, so an Entra prompt is not sitting behind the board. Best-effort:
+       a browser that will not raise its window still signs in fine. */
+    await sess.send("Target.activateTarget", { targetId }).catch(() => {});
+    return targetId;
+  }finally{ sess.close(); }
+}
+
 /* Opens the isolated window at SCA's home. Detached, so closing the board does
-   not kill a browser somebody is mid-sign-in on. A second launch against the
-   same --user-data-dir becomes a tab in the existing window rather than a
-   second browser, which is what makes one profile cover every source. */
-function openSignInWindow(){
+   not kill a browser somebody is mid-sign-in on. Cold start only — see above. */
+function spawnSignInWindow(){
   const browser = findBrowser();
   if(!browser){
     const err = new Error("No Chrome or Edge found to open a sign-in window with");
@@ -303,7 +331,23 @@ function openSignInWindow(){
   ], { detached: true, stdio: "ignore" });
   child.unref();
 
-  return { browser: browser.label, profileDir: dir, url: SIGNIN_URL };
+  return { browser: browser.label, profileDir: dir, url: SIGNIN_URL, reused: false };
+}
+
+async function openSignInWindow(){
+  if(await portIsLive()){
+    try{
+      await openTabViaCdp();
+      const b = findBrowser();
+      return { browser: b ? b.label : "the debug browser",
+               profileDir: null, url: SIGNIN_URL, reused: true };
+    }catch{
+      /* The port answered /json/version and then would not open a tab. The
+         spawn is not expected to help, but it is the honest next thing to try
+         rather than reporting a window that does not exist. */
+    }
+  }
+  return spawnSignInWindow();
 }
 
 async function browserStatus(){
@@ -376,20 +420,30 @@ function beginSignIn(commit){
         return setPhase("connected", `Signed in as ${first.user}.`);
       }
 
+      /* A live debug port is enough on its own — the tab is opened over CDP and
+         no executable is needed. Only the cold-start path has to find one, so
+         this no longer refuses when the browser is already running. */
+      const alreadyUp = await portIsLive();
       const b = findBrowser();
-      if(!b){
+      if(!b && !alreadyUp){
         return setPhase("failed", null,
           { error: "No Chrome or Edge found to open a sign-in window with." });
       }
 
-      const alreadyUp = await portIsLive();
-      openSignInWindow();
+      let opened;
+      try{ opened = await openSignInWindow(); }
+      catch(err){
+        return setPhase("failed", null,
+          { error: err.message || "Could not open a sign-in window." });
+      }
+
       setPhase("waiting",
-        alreadyUp ? "A Service App tab just opened — sign in there."
-                  : `${b.label} is opening — sign in to the Service App there.`,
-        { browser: b.label });
+        opened.reused ? "A Service App tab just opened — sign in there if it asks."
+                      : `${opened.browser} is opening — sign in to the Service App there.`,
+        { browser: opened.browser });
 
       const deadline = Date.now() + DEADLINE_MS;
+      let last = null;
       while(Date.now() < deadline){
         if(cancelled) return;
         await sleep(POLL_MS);
@@ -400,13 +454,24 @@ function beginSignIn(commit){
           commit(got);
           return setPhase("connected", `Signed in as ${got.user}.`);
         }
+        last = got.reason;
         // "expired" is the one reason worth surfacing while waiting: the user
         // is staring at a tab that looks signed in and nothing is happening.
-        if(got.reason === "expired") setPhase("waiting", got.detail, { browser: b.label });
+        // `opened.browser`, not `b.label` — b is null whenever the tab was
+        // taken over CDP without an executable being found.
+        if(got.reason === "expired") setPhase("waiting", got.detail, { browser: opened.browser });
       }
 
-      setPhase("failed", null,
-        { error: "Gave up waiting after three minutes. Press Connect to try again." });
+      /* Name the silence. "Press Connect to try again" alone is the message
+         that kept this failure invisible for as long as it lasted. */
+      setPhase("failed", null, { error: last === "not-signed-in"
+        ? "A Service App tab was opened but no sign-in completed in three minutes. "
+          + "Check that tab — Entra may be asking for something."
+        : last === "expired"
+        ? "The token in that tab is still expired. Reload it and press Connect again."
+        : last === "bad-token"
+        ? "Found a SecureToken in that tab that does not decode as a JWT."
+        : "Gave up waiting after three minutes. Press Connect to try again." });
     }catch(err){
       setPhase("failed", null, { error: err.message || "Sign-in failed." });
     }

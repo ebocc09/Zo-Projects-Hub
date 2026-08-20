@@ -2516,15 +2516,21 @@ const isVin = v => /^[A-HJ-NPR-Z0-9]{17}$/.test(String(v || "").toUpperCase());
    `label` is what the panel shows; `q` is what Lucene is given. Values with
    spaces or hyphens are quoted at query time, not here.                    */
 
+/* ── there is no delivery facet, and that is deliberate ──
+
+   Every scan is undelivered-only. It used to be a two-option facet defaulting
+   to Undelivered, which meant the board's whole write surface — switch the
+   contact, move the visit, cancel the booking — was one click away from a
+   list of customer-owned cars. Ed's call, 2026-08-19: "all we're doing is for
+   undelivered cars, so as an extra safeguard remove the option to do any
+   delivered cars."
+
+   The rule now lives in buildQuery() where it cannot be unticked. The
+   per-write gates in scaSwitchContactToTesla and friends stay exactly as they
+   were — this is a second lock on the same door, not a replacement for the
+   first one, and the one-VIN lookup still answers about any car because
+   looking at a car is not doing anything to it. */
 const FACETS = {
-  delivery: {
-    label: "Delivery state",
-    field: null,                       // special-cased: maps to `delivered`
-    options: [
-      { v: "undelivered", label: "Undelivered" },
-      { v: "delivered",   label: "Delivered" }
-    ]
-  },
   vehicle_type: {
     label: "Vehicle tag",
     field: "vehicle_type",
@@ -2706,15 +2712,16 @@ function buildQuery({ trtId, offsiteTrtId, sites = "onsite", filters = {} }){
     parts.push(VRL(main));
   }
 
-  const dl = filters.delivery || [];
-  // Both, or neither, is the same statement — say nothing rather than
-  // `(delivered:true OR delivered:false)`, which is noise in the audit line.
-  if(dl.length === 1) parts.push(`delivered:${dl[0] === "delivered"}`);
+  /* Always, and not from `filters` — see the note above FACETS. A page that
+     still remembers a saved `delivery` selection cannot reintroduce delivered
+     cars, because nothing here reads that key any more and the server drops
+     facet keys it does not publish. */
+  parts.push("delivered:false");
 
   for(const [key, facet] of Object.entries(FACETS)){
-    // `delivery` is special-cased above; a fetched facet has no index field
-    // to filter on and is applied to the rows afterwards instead.
-    if(key === "delivery" || facet.fetched || !facet.field) continue;
+    // A fetched facet has no index field to filter on and is applied to the
+    // rows afterwards instead.
+    if(facet.fetched || !facet.field) continue;
     const vals = filters[key] || [];
     if(!vals.length) continue;
 

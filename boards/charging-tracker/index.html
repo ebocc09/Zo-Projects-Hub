@@ -3299,7 +3299,7 @@ setInterval(() => { if(SERVED) loadLiveStatus(); }, 90_000);
 
 /* ───────────────────────────── Monitoring engine ───────────────────────────── */
 let busy = false;
-const sweep = { done: 0, total: 0, sleeping: 0, active: null };  // live progress for the stat strip
+const sweep = { done: 0, total: 0, active: null };  // live progress for the stat strip
 let overrunWarned = false;             // so the overrun notice fires only once
 
 /* Active Mode: the list mirrors the main-TRT geofence, so cars are added and
@@ -3438,41 +3438,86 @@ async function scanActiveMode(){
 }
 
 
-/* ── Sleeping cars (production Active Mode only) ────────────────────────────
-   A charging vehicle is awake and in touch with Hermes the whole time — the
-   measured snapshot cadence while charging is 8-12 minutes. A car parked and
-   asleep may go hours without saying anything. So the last-contact stamp the
-   scan already carries separates the two for free, and a car we can show is
-   asleep is a car there is no point reading: it cannot have started charging
-   without waking up first.
+/* ── What each car costs to read (production Active Mode) ───────────────────
+   There used to be a sleep skip here: a car whose `hermes_last_seen` was more
+   than 45 minutes old was assumed asleep, and since "a charging car is always
+   awake", it was not read at all.
 
-   This matters most with live read on, where a read does not merely cost
-   ~140 KB but actively WAKES the vehicle. Skipping sleepers is the difference
-   between waking a handful of cars a sweep and waking the entire lot.
+   The premise was false, and it cost us a charging car.
 
-   Reusing HIST_MAX_AGE_MS (45 min) rather than picking a new number: it is
-   already defined as how stale a vehicle's own snapshot may be before it stops
-   counting as evidence about right now, which is the identical question. At
-   ~4x the charging cadence it leaves a wide margin — a charging car checks in
-   several times over before it could ever be mistaken for asleep.
+   `hermes_last_seen` freezes at the last wakeup-class event and does NOT
+   advance on subsequent telemetry. Measured on 7SAYGDEE8TA757020
+   (2026-08-20, UTC): the stamp sat at its 15:30:23 wakeup while the car went
+   on to report drive_ended at 15:58, was_charging at 16:19 AND 16:57, and a
+   vital_pull at 17:27 — 44% to 80% USOE, ~30 kWh of DC delivered, none of it
+   moving the stamp. Garage's own device_info carries the identical stale
+   value, so this was not Tesladex indexing lag. A control car showed the same
+   shape: frozen at its 12:42 wakeup through eight later snapshots.
 
-   Deliberately fails toward polling. No stamp at all reads as awake, because
-   the cost of a needless read is one request and the cost of skipping a
-   charging car is the bug this dashboard exists to avoid. */
-const ASLEEP_AFTER_MS = HIST_MAX_AGE_MS;
+   It was not marginal, either. Measured against the live geofence the same
+   afternoon: 99 of 158 undelivered cars scanned as "asleep" and would not
+   have been read at all. 27 of them shared a hermes_last_seen inside a single
+   91-second window ~5 hours old — dozens of cars stamped in the same second
+   is a fleet-level bulk write, not 27 cars independently falling asleep
+   together. The field tracks something fleet-wide, not per-car activity.
 
-function isAsleep(v){
-  if(v.lastSeen == null) return false;              // unknown -> treat as awake
-  return (Date.now() - v.lastSeen * 1000) > ASLEEP_AFTER_MS;
-}
+   Worst of all it was self-sealing. Only a read can set status to charging,
+   and the read was gated on the stamp, so a car that plugged in while
+   "asleep" stayed `pending` — and therefore hidden by the charging-only
+   filter — for its entire session. The old "never drop a live session"
+   escape could not help: it only rescued a car ALREADY known to be charging,
+   which is precisely what a skipped car can never become.
 
-/* Whether this car earns a per-VIN read this sweep. Engineering and hand-built
-   lists read everything, exactly as before — the sleep skip is production
-   Active Mode only, which is where the lot is big enough to matter. */
-function needsRead(v){
+   So nothing is skipped any more. Every in-play car is read every sweep. The
+   two reads have very different costs and are now gated separately:
+
+     · CACHED — a few hundred bytes, does not touch the vehicle. Affordable
+       for the whole lot: 158 cars at concurrency 4 / spacing 150ms is a ~24s
+       sweep against a 300s interval. This is what removes the blind spot, and
+       it detects charging on its own — the payload carries the vehicle's own
+       previous snapshot, so a first reading settles charging/idle with no
+       baseline of ours (see the histDelta stand-in in the sweep).
+
+     · LIVE — ~140 KB, and it wakes the vehicle. Spent only on cars in or near
+       a session, which is what server.js's /api/usoe comment always intended
+       ("only where it is worth 140 KB"). The page had drifted into asking for
+       it on every car, and the sleep skip was the wrong fix for the resulting
+       load: it cut reads by hiding cars instead of by cutting cost per car.
+
+   A car that starts charging is therefore visible from its next cached read,
+   and picks up live proximity on the sweep after. Detection never waits on a
+   live read. */
+
+/* Whether this car earns the expensive live read on top of the cached one.
+
+   Charging and latched are exactly the cars that need it: proximity is the
+   whole question for both — is it still drawing, is it still occupying the
+   stall — and CP_proximity exists only in the live dump. Nothing else does.
+
+   Note what is deliberately NOT here: a "near the charge limit" clause. It
+   sounds right and measures terribly at this site. Houston's standing
+   population charges to 80 and then waits days for delivery, so 85 of 158
+   cars sit within ten points of the limit while parked and finished — they
+   would each be woken every sweep to be told nothing. A parked car never
+   crosses the limit; only a charging one does, and a charging one is already
+   covered by the first clause.
+
+   This costs nothing in detection, because detection does not run on live
+   data. A cached reading carries the vehicle's own previous snapshot, so the
+   inference path in the sweep (`else if(rising)`) resolves a car to charging
+   on its FIRST cached read — measured on 7SAYGDEE8TA757020, whose cached
+   payload returned prevUsoe 79.121 against 79.095 over a 25 s span, plus a
+   counter-inferred FAST_CHARGE pilot. So a car that plugs in goes visible on
+   the next cached read and picks up live proximity the sweep after. Live
+   reads therefore scale with the number of occupied stalls, not with the size
+   of the lot.
+
+   Engineering and hand-added rows stay live throughout: those lists are small
+   and deliberately chosen, and the load this guards against is a 158-car
+   geofence nobody picked by hand. */
+function needsLiveRead(v){
   if(!activeMode || isEng() || !v.viaActive) return true;
-  if(v.status === "charging" || isLatched(v)) return true;   // never drop a live session
-  return !isAsleep(v);
+  return v.status === "charging" || isLatched(v);
 }
 
 /* Show/hide the "Active Mode" pill by the environment chip. */
@@ -3530,8 +3575,8 @@ function renderActiveSection(){
     note.innerHTML = isEng()
       ? `<b>Engineering</b> — the whole geofence, unfiltered.`
       : `<b>Production</b> — undelivered ${typeListHtml(settings.activeTypes)} ` +
-        `cars only. Cars that are <b>asleep</b> are tracked but not read: a charging ` +
-        `car is always awake, so a sleeping one cannot have started.`;
+        `cars only. <b>Every one of them is read every sweep</b>; the expensive ` +
+        `live read is spent on cars charging, latched or near the limit.`;
   }
 
   renderActiveTypes();
@@ -3905,29 +3950,30 @@ async function tick(){
 
   // 2. Poll everything still charging — plus anything finished but latched,
   //    because the only way to learn it has been unplugged is to keep asking.
-  /* Cars still in play. An earlier attempt also gated on whether the indexed
-     USOE had RISEN, and that was removed: the index moves one value per sweep,
-     so a rise could not be seen until it appeared across two of them, and the
-     car stayed `pending` and hidden throughout. The sleep test below has no
-     such lag — waking is instantaneous and visible on the very next scan. */
+  /* Cars still in play. Two gates have been tried here and both were removed
+     for the same reason: each could hide a car that was actually charging.
+     The first keyed on whether the indexed USOE had RISEN, which needed two
+     sweeps to see anything and left the car `pending` and hidden in between.
+     The second was the hermes_last_seen sleep skip, which was worse — it
+     could hide a charging car for its whole session. Nothing is gated here
+     now; the read-cost section above explains what replaced it. */
   const inPlay = vehicles.filter(v => v.status !== "complete" || isLatched(v));
 
-  const active   = inPlay.filter(needsRead);
-  const sleeping = inPlay.length - active.length;
+  const active   = inPlay;
 
   sweep.total    = active.length;
-  sweep.sleeping = sleeping;                // surfaced in the progress line
   sweep.done     = 0;
   sweep.active   = active;                  // referenced by the shown-progress count
   for(const v of active) v.swept = false;   // flips true as each car is polled
 
   await runPooled(active, async v => {
     try{
-      // With live read on, every monitored vehicle gets a real-time read.
-      // A live response is ~140 KB, so a large list is genuinely heavy —
-      // deliberately accepted, because these lists are normally small and
-      // partial freshness was more confusing than it was worth.
-      const reading = await fetchUsoe(v.vin, liveState.ready);
+      // Every car is read; needsLiveRead decides whether this one is worth
+      // the ~140 KB live dump or takes the cached path. Live read being off
+      // makes the whole list cached, exactly as before. Either way the server
+      // falls back to cached on any live failure, so this can only ever
+      // change which reading we get — never whether we get one.
+      const reading = await fetchUsoe(v.vin, liveState.ready && needsLiveRead(v));
       const usoe    = reading.usoe;
 
       /* Read BEFORE lastUpdate is stamped below, and the only trustworthy
@@ -4123,7 +4169,6 @@ async function tick(){
   save(KEY.veh, vehicles);
   busy = false;
   sweep.total    = 0;
-  sweep.sleeping = 0;
   sweep.active   = null;
   render();
 
@@ -4150,19 +4195,18 @@ function renderNextStat(){
     const act = sweep.active || [];
     // With the charging-only filter on, the X/X tracks only the cars actually
     // on screen; the full sweep size trails as a grey total.
-    // Skipped sleepers are stated, never silent — otherwise "2/2" looks like a
-    // list of two cars rather than 118 with 116 of them asleep.
-    const zzz = sweep.sleeping ? ` <small class="stat-sub">${sweep.sleeping} asleep</small>` : "";
-
+    // There is no longer a skipped count to disclose here: every in-play car
+    // is read, so sweep.total IS the list. The "N asleep" suffix went with the
+    // sleep skip — it was reporting a blind spot as though it were a saving.
     if(activeMode && activeChargingOnly && act.length){
       const shown     = act.filter(v => !hiddenByActiveFilter(v));
       const shownDone = shown.filter(v => v.swept).length;
       $("sNext").innerHTML =
         `<span style="font-size:17px">${shownDone}/${shown.length}</span>` +
-        ` <small class="stat-sub">of ${sweep.total}</small>${zzz}`;
+        ` <small class="stat-sub">of ${sweep.total}</small>`;
     }else{
       $("sNext").innerHTML =
-        `<span style="font-size:17px">${sweep.done}/${sweep.total}</span>${zzz}`;
+        `<span style="font-size:17px">${sweep.done}/${sweep.total}</span>`;
     }
   }else{
     $("sNextK").textContent = "Next refresh";
