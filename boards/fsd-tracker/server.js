@@ -17,6 +17,7 @@ const path = require("path");
 const L    = require("./lib");
 const xlsx = require("./xlsx");
 const A    = require("./alerts");
+const credstore = require("./credstore");
 
 const PORT = Number(process.env.PORT || L.CONFIG.port || 3120);
 const INDEX = path.join(__dirname, "index.html");
@@ -320,6 +321,14 @@ const server = http.createServer(async (req, res) => {
           String(body.msg || "").slice(0, 500));
       res.writeHead(204).end();
       return;
+    }
+
+    /* ── the language, set on the Hub ──
+       Read off the shared file on every call rather than cached at startup,
+       so flipping it on the Hub reaches this board while it is open. The Hub
+       does not need to be running for this to answer: the file outlives it. */
+    if(p === "/api/lang" && req.method === "GET"){
+      return sendJson(res, 200, { lang: credstore.language() });
     }
 
     /* ── current state, for first paint ── */

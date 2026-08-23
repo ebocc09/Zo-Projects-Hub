@@ -207,8 +207,62 @@ function clearStore(){
   catch { return { cleared: false }; }
 }
 
+/* ── settings, which are not credentials ────────────────────────────────
+
+   One preference so far — the language every board renders in — and a
+   separate file from the credentials, deliberately. A preference gets written
+   from an admin panel by whoever happens to be looking at it. The credential
+   file holds a refresh token that rotates and cannot survive a torn write.
+   Keeping them apart means flipping the language can never be the thing that
+   strands an MCP session.
+
+   Same arrangement as everything else here: the Hub writes it, every board
+   reads it, and a board started with no Hub running still comes up in
+   whatever was last chosen. Read on every call rather than cached, because
+   the whole point is that changing it on the Hub reaches a board that is
+   already open.                                                          */
+
+const SETTINGS_FILE = path.join(STORE_DIR, "settings.json");
+
+const LANGUAGES = ["en", "es"];
+const SETTINGS_EMPTY = { version: 1, updated: null, language: "en" };
+
+function readSettings(){
+  try{
+    return { ...SETTINGS_EMPTY, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8")) };
+  }catch{
+    // Missing or malformed reads as the default, for the same reason the
+    // credential store does it: a board must not fail to start because a
+    // shared file it does not own got mangled.
+    return { ...SETTINGS_EMPTY };
+  }
+}
+
+/* Anything unrecognised answers "en". A board should render in a language it
+   actually has strings for rather than trust a hand-edited file. */
+function language(){
+  const v = String(readSettings().language || "").toLowerCase();
+  return LANGUAGES.includes(v) ? v : "en";
+}
+
+/* Temp-then-rename like writeStore, so a board reading mid-write sees the old
+   file rather than half of the new one. No 0600 here — there is nothing
+   secret in it, and a mode that says otherwise would misrepresent the file. */
+function setLanguage(v){
+  const want = String(v || "").toLowerCase();
+  const lang = LANGUAGES.includes(want) ? want : "en";
+  const next = { ...readSettings(), language: lang,
+                 version: 1, updated: new Date().toISOString() };
+  fs.mkdirSync(STORE_DIR, { recursive: true });
+  const tmp = SETTINGS_FILE + "." + process.pid + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(next, null, 2));
+  fs.renameSync(tmp, SETTINGS_FILE);
+  return next;
+}
+
 module.exports = { STORE_FILE, readStore, writeStore,
                    garageCookie, intrepidCookie, summary, clearStore,
                    mcpClient, mcpTokens, setMcpClient, setMcpTokens, clearMcp,
                    githubToken, setGithubToken,
-                   publishToken, setPublishToken };
+                   publishToken, setPublishToken,
+                   SETTINGS_FILE, LANGUAGES, readSettings, language, setLanguage };

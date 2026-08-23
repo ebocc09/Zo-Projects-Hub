@@ -531,74 +531,47 @@ Request volume was never the binding constraint anyway: 192 cars at the default 
 > so a full production lot would be woken every sweep — and widening the type selection widens that
 > too. See the warning under [Running 100+ VINs](#running-100-vins).
 
-### Every car is read — cached triage, live escalation
+### Skipping sleeping cars — production only
 
-**Nothing is skipped.** Every car still in play gets a read on every sweep. What varies is *which*
-read, because the two cost wildly different amounts:
+A charging vehicle is awake and talking to Hermes the whole time; the measured snapshot cadence
+while charging is 8–12 minutes. A car parked and asleep can go hours without saying anything. So
+**a car that is demonstrably asleep cannot have started charging**, and reading it is wasted — it
+cannot have begun without waking up first.
 
-| | Size | Touches the car? | Carries |
-|---|---|---|---|
-| **Cached** | a few hundred bytes | no | USOE, kWh counters, the vehicle's own previous snapshot |
-| **Live** | ~140 KB | **wakes it** | all of the above plus `CP_proximity` and pack current |
+The scan already carries `hermes_last_seen`, the vehicle's last Hermes contact. It is the same value
+`device_info` reports as `last_seen` — confirmed identical on two cars — and its freshness tracks
+`state: online`:
 
-The cached path is affordable for the whole lot — 158 cars at concurrency 4 / spacing 150 ms is a
-~24 s sweep against a 300 s interval — and it is enough to *detect* charging on its own. The payload
-carries the vehicle's own previous snapshot, so the sweep's inference path (`else if(rising)`)
-resolves a car to `charging` on its **first** cached read, with no baseline of ours. Measured on
-`7SAYGDEE8TA757020`: cached `prevUsoe` 79.121 vs `usoe` 79.095 over a 25 s span, plus a
-counter-inferred `FAST_CHARGE` pilot.
+| Contact age | `device_info.state` |
+|---|---|
+| 3.3 min | **online** |
+| 80 min | offline |
+| 1042 min | offline |
 
-`needsLiveRead()` spends the live read only on cars that are **charging or still latched** —
-proximity is the whole question for both, and `CP_proximity` exists only in the live dump.
-Engineering and hand-added rows always read live; those lists are small and deliberately chosen.
+Measured over the whole Houston lot at 1am: **118 tracked, 2 awake, 116 skipped.** The separation is
+wide rather than marginal — the two awake cars had been seen 6.7 and 7.8 minutes ago, while the
+median car had not been heard from in **4.5 hours**.
 
-There is deliberately **no "near the charge limit" clause**. It sounds right and measures terribly
-here: Houston's standing population charges to 80 and then waits days for delivery, so 85 of 158
-cars sit within ten points of the limit while parked and finished, and each would be woken every
-sweep to be told nothing. A parked car never crosses the limit; a charging one does, and it is
-already covered.
+This matters most with **live read on**, where a read does not merely cost ~140 KB but actively
+*wakes the vehicle*. Skipping sleepers is the difference between waking a handful of cars a sweep
+and waking the entire facility.
 
-So a car that plugs in is **visible from its next cached read**, and picks up live proximity the
-sweep after. Detection never waits on a live read, and live reads scale with occupied stalls rather
-than with the size of the lot.
+**It is a stamp, not a heartbeat.** A vehicle contacts Hermes when it has something to say, so
+`state: online` can sit on top of a `last_seen` that is several minutes old — the value did not
+advance between two queries minutes apart on a car that was online both times. The threshold is
+therefore not "is it online" but "has it checked in recently enough that we would have heard it
+charging". `ASLEEP_AFTER_MS` reuses `HIST_MAX_AGE_MS` (45 min) rather than inventing a number: that
+constant already means "how stale a vehicle's own snapshot may be before it stops counting as
+evidence about right now", which is the identical question, and at ~4× the charging cadence it
+leaves a charging car several check-ins of margin.
 
-#### Why the sleep skip was removed (2026-08-20)
+**It fails toward reading, never toward skipping.** A car is read anyway if it is already charging,
+still latched, hand-added, or has no contact stamp at all. Missing a charging car is the bug this
+dashboard exists to prevent; a needless read costs one request. Engineering is excluded entirely.
 
-This section previously documented the opposite rule: a car whose `hermes_last_seen` was over 45
-minutes old was assumed asleep, and since "a charging car is always awake", it was not read at all.
-
-**The premise was false.** `hermes_last_seen` freezes at the last wakeup-class event and does not
-advance on subsequent telemetry. On `7SAYGDEE8TA757020` (times UTC):
-
-| Time | `source` | USOE | DC kWh total |
-|---|---|---|---|
-| 15:30:23 | wakeup | 45.2 | 48.923 | ← stamp stuck here |
-| 15:58:40 | drive_ended | 44.4 | 48.923 |
-| 16:19:33 | **was_charging** | 79.8 | 78.111 |
-| 16:57:30 | **was_charging** | 80.0 | 79.118 |
-| 17:27:32 | vital_pull | 79.3 | 79.204 |
-
-44% → 80%, ~30 kWh of DC delivered, two explicit `was_charging` snapshots, and the stamp never
-moved. `device_info` reported the identical stale value, so this was not Tesladex indexing lag. A
-control car showed the same shape: frozen at its 12:42 wakeup through eight later snapshots.
-
-It was not marginal. Measured against the live Houston geofence the same afternoon: **99 of 158**
-undelivered cars scanned as "asleep" and would not have been read at all. 27 of them shared a
-`hermes_last_seen` inside a single **91-second window** about five hours old — dozens of cars
-stamped in the same second is a fleet-level bulk write, not 27 cars independently falling asleep
-together. The field tracks something fleet-wide, not per-car activity.
-
-And it was **self-sealing**: only a read can set status to `charging`, and the read was gated on the
-stamp, so a car that plugged in while "asleep" stayed `pending` — and therefore hidden by the
-charging-only filter — for its entire session. The "never drop a live session" escape could not
-help, because it only rescues a car already known to be charging.
-
-The old 1am measurement that justified the skip (*118 tracked, 2 awake, 116 skipped*) is exactly the
-same reading, interpreted backwards: at 1am the lot really was idle, so the blind spot cost nothing
-and looked like a 98% saving. It only shows up during the day, on the cars that matter.
-
-The load the skip was aimed at was real, but it cut reads by hiding cars rather than by cutting cost
-per car. Gating the *live* read does the same job honestly.
+Unlike the removed USOE-delta gate, this has **no latency**: waking is instantaneous and visible on
+the very next scan, so a car that plugs in is read on the next sweep. The skipped count is shown in
+the progress line rather than left silent.
 
 ### What else the bulk scan is for
 

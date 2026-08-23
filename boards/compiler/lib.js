@@ -21,6 +21,10 @@ const sca       = require("./sca");
 /* `osx`, not `os`, purely to keep the name free: `os` is node's own module and
    this file would be one `require("os")` away from a silent shadow. */
 const osx       = require("./os");
+/* `invx` for the same reason as `osx` — and because `inv` reads like a local
+   in half the functions below. Nothing to sign in to, so unlike sca/osx it is
+   only ever called, never connected. */
+const invx      = require("./inventory");
 
 const HERE = __dirname;
 
@@ -3121,6 +3125,161 @@ async function expScan({ trtId, onProgress } = {}){
   return { trtId: trt, location, bucket, total, rows, notes };
 }
 
+/* ────────────────────────── open inventory scan ─────────────────────────
+
+   Pending Inventory's other half, and the mirror of the question above:
+   expScan asks who is waiting for a car, this asks what there is to give
+   them. Tesla's internal inventory search, described in inventory.js.
+
+   Two things make it unlike every other scan on this board.
+
+   **It needs no credential.** No token, no cookie, no session to be dead. So
+   there is no needsOs-shaped error here and nothing to send the reader to the
+   Admin panel about; a failure is a failure of the host, not of a sign-in.
+
+   **It is not locked to the centre.** Everything else here resolves scope
+   server-side and refuses to be told otherwise, because a Service Visits scan
+   that quietly widened would report another centre's problems as this one's.
+   Availability is the opposite question — "is there one of these anywhere I
+   can get it from" is a normal thing to ask — so Location is an ordinary
+   filter. The page seeds it with the picker's TRT; it is not injected here,
+   because a filter the server adds is a filter the panel cannot show and the
+   reader cannot see.                                                        */
+
+/* Which groups in `OptionCodeData` are worth a line in the spec panel, in the
+   order they are read. The row also carries the raw code arrays (PAINT:
+   ["WHITE"]), but those are codes; this is where the site keeps the words. */
+const INV_SPEC_GROUPS = [
+  ["PAINT",           "Paint"],
+  ["WHEELS",          "Wheels"],
+  ["INTERIOR",        "Interior"],
+  ["REAR_SEATS",      "Seats"],
+  ["DRIVE_MODE",      "Drive"],
+  ["AUTOPILOT",       "Autopilot"],
+  ["PREMIUM_PACKAGE", "Package"],
+  ["AI_HARDWARE",     "Hardware"]
+];
+
+function invSpec(row){
+  const by = new Map();
+  for(const o of row.OptionCodeData || []){
+    const name = o.long_name || o.name || "";
+    if(!name || by.has(o.group)) continue;      // first wins; the list repeats groups
+    by.set(o.group, name);
+  }
+  const out = [];
+  for(const [group, label] of INV_SPEC_GROUPS){
+    if(by.has(group)) out.push({ k: label, v: by.get(group) });
+  }
+  return out;
+}
+
+/* ── a new car has no VIN you can use, and the card must say so ──
+
+   New inventory returns the VIN masked — "7SAY" followed by a hash — and no
+   UrlToken. Used inventory returns the real 17-character VIN on every row
+   sampled (24 of 24) plus a token, and `tesla.com/<model>/order/<VIN>`
+   resolves straight to the listing.
+
+   So a used car can be linked to and joined to Garage, and a new one can be
+   neither. The row carries `masked` rather than a prettied-up VIN, because a
+   masked VIN rendered as if it were real is the sort of thing that gets typed
+   into Garage and comes back "no such car". */
+const REAL_VIN = /^[A-HJ-NPR-Z0-9]{17}$/;
+
+function invRow(r){
+  const model  = String(r.Model || "").toLowerCase();
+  const vin    = String(r.VIN || "");
+  const masked = !REAL_VIN.test(vin);
+  const used   = String(r.TitleStatus || "").toUpperCase() === "USED";
+
+  return {
+    vin        : masked ? "" : vin,
+    /* Kept separately so the card can show something stable per car without
+       implying it is a VIN. */
+    ref        : vin,
+    masked,
+    model,
+    modelName  : MODEL_NAME[model] || (model ? model.toUpperCase() : ""),
+    year       : r.Year || null,
+    trim       : r.TrimName || "",
+    trimCode   : r.TrimCode || "",
+    condition  : used ? "used" : "new",
+    price      : Number(r.Price || r.InventoryPrice || 0) || null,
+    monroney   : Number(r.MonroneyPrice || 0) || null,
+    discount   : Number(r.Discount || 0) || null,
+    odometer   : Number.isFinite(r.Odometer) ? r.Odometer : null,
+    odoUnit    : r.OdometerTypeShort || "mi",
+    demo       : Boolean(r.IsDemo),
+    damage     : Boolean(r.DamageDisclosure),
+    inTransit  : Boolean(r.InTransit || r.IsInTransit),
+    factoryGated: Boolean(r.IsFactoryGated),
+    /* Straight to the compositor, and already the right list: OptionCodeList
+       is the `$`-prefixed MARKETING codes. Garage's manufacturing option_codes
+       render the car with black voids where the wheels should be — see the
+       same note in expScan. */
+    options    : String(r.OptionCodeList || ""),
+    spec       : invSpec(r),
+    trt        : r.Trt || null,
+    vrl        : (r.VrlName || "").trim(),
+    city       : r.City || r.VehicleCity || "",
+    state      : r.StateProvince || "",
+    metro      : r.MetroName || r.SalesMetro || "",
+    /* Only used cars have a listing to open. A new car's masked VIN redirects
+       back to the search page, so there is nothing to point at and the card
+       says that rather than offering a link that goes nowhere. */
+    listing    : used && !masked ? `https://www.tesla.com/${model}/order/${vin}` : ""
+  };
+}
+
+async function invScan({ model = "my", condition = "new", options = {},
+                         sort = "Relevance", onProgress } = {}){
+  const schema = await invx.filterSchema();
+
+  /* Unknown filter keys are refused rather than forwarded. The inventory API
+     ignores what it does not recognise and answers 200 with a WIDER list, so a
+     typo would return more cars than asked for and read as a real answer —
+     the same reason DWELL_WINDOWS is validated instead of trusted. */
+  const known = new Set(Object.keys(schema.filters || {}));
+  const bad   = Object.keys(options || {}).filter(k => !known.has(k));
+  if(bad.length){
+    throw new Error(`Tesla inventory has no filter called ${bad.join(", ")}.`);
+  }
+
+  /* Refused rather than passed through, because the API does not check it: an
+     unknown `arrangeby` comes back 200 in the Relevance order, so a typo would
+     silently answer in an order nobody chose. See SORTS in inventory.js. */
+  if(!invx.SORTS.includes(sort)){
+    throw new Error(`Tesla inventory cannot order by "${sort}". ` +
+                    `It offers: ${invx.SORTS.join(", ")}.`);
+  }
+
+  /* Empty groups are dropped on the way out: `{PAINT: []}` is not "no paint",
+     and sending it has been seen to narrow to nothing on APIs of this shape. */
+  const opts = {};
+  for(const [k, v] of Object.entries(options || {})){
+    const list = (Array.isArray(v) ? v : [v]).filter(x => x !== "" && x != null).map(String);
+    if(list.length) opts[k] = list;
+  }
+
+  const { total, rows, notes, truncated } =
+    await invx.search({ model, condition, options: opts, sort,
+                        market: schema.market, language: schema.language, onProgress });
+
+  if(schema.stale){
+    notes.push("The filter list could not be refreshed, so it may be out of date. " +
+               "The cars themselves are live.");
+  }
+
+  return {
+    model, condition, sort,
+    options : opts,
+    total, truncated,
+    rows    : rows.map(invRow),
+    notes
+  };
+}
+
 /* ─────────────────────────── service visits scan ───────────────────────────
 
    Two systems, in order. Garage's index says which cars exist and what they
@@ -4069,6 +4228,9 @@ module.exports = {
   osToken, osConnected, osStatus, osSignIn, osDisconnect, expScan,
   osSignInStatus: osx.signInStatus, osCancelSignIn: osx.cancelSignIn,
   osBrowserStatus: osx.browserStatus,
+  /* Open Inventory — Pending Inventory's other half. No credential, so no
+     connect/status/disconnect trio to go with it. */
+  invScan, invFilters: opts => invx.filterSchema(opts),
   scaSites, scaSymptoms, scaRemoveActivity, scaSetSymptom,
   scaMoveVisit, scaCancelAppointment, scaSwitchContactToTesla, scaContacts,
   scaSetContact, scaSetAddress,

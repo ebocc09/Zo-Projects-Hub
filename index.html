@@ -370,6 +370,18 @@ a.mini.dark{color:#fff}
    going to change on its own and the only honest way to say so is motion. */
 .sec-title{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
   color:var(--ink-mute);margin:18px 0 10px}
+
+/* Two states, both worth showing at once — a dropdown would hide the option
+   you are not on. Same control ZO-001 uses for its environment switch. */
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden}
+.seg button{
+  appearance:none;border:0;background:var(--paper);cursor:pointer;
+  padding:9px 18px;font:inherit;font-size:11px;font-weight:600;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute)}
+.seg button + button{border-left:1px solid var(--line)}
+.seg button:hover{background:var(--paper-alt);color:var(--ink)}
+.seg button.on{background:var(--ink);color:#fff}
+.seg button:disabled{cursor:default;opacity:.55}
 .conn{display:flex;align-items:center;gap:9px;padding:11px 13px;
   border:1px solid var(--line-soft);border-radius:var(--r-md);
   margin-bottom:10px;font-size:12.5px;transition:border-color .2s}
@@ -634,6 +646,13 @@ a.mini.dark{color:#fff}
         </svg>
         Publish
       </button>
+      <button class="rail-item" data-sec="language">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/><path d="M3 12h18"/>
+          <path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18"/>
+        </svg>
+        Language
+      </button>
       <div class="rail-foot">
         Credentials live outside every project, in
         <b>%LOCALAPPDATA%\ZoProjects</b>, and never leave this machine.
@@ -779,12 +798,323 @@ a.mini.dark{color:#fff}
       <div class="row"><div class="k">Updated</div><div class="v" id="storeUpdated">—</div></div>
     </section>
 
+    <section class="sec" id="secLanguage">
+      <h4 class="sec-h">Language</h4>
+      <p class="sec-p">Set here, read by every board. It is written to the shared
+         settings file the same way sign-ins are, so a board picks it up whether or
+         not this hub is running — and a board already open follows within a few
+         seconds without a reload.</p>
+
+      <div class="seg" id="langSeg" role="group" aria-label="Language">
+        <button data-lang="en">English</button>
+        <button data-lang="es">Español</button>
+      </div>
+
+      <div class="hint" style="margin-top:12px">Labels, buttons and panels change.
+        Anything that came from Garage or Intrepid — a VIN, a centre name, an alert —
+        is shown exactly as it arrived and is never translated.</div>
+
+      <div class="row" style="margin-top:12px">
+        <div class="k">File</div><div class="v" id="langPath">—</div>
+      </div>
+      <div class="hint">ZO-006 Task Tracker is hosted on GitHub Pages and cannot read
+        this file, so it stays in English.</div>
+    </section>
+
     </div>
   </div>
 </div>
 
 <script>
 "use strict";
+
+/* ── ZoI18n ────────────────────────────────────────────────────────────
+
+   The estate speaks English or Spanish, chosen once on the Hub and read by
+   every board from the shared settings file. This is the client half: it
+   swaps the chrome, and nothing else.
+
+   ── keyed by the English source text, not by invented keys ──
+
+   `ES["Sign-ins"]` rather than `t("admin.signins")`. Two reasons. A string
+   with no entry renders in English, which is a worse-but-fine outcome — with
+   invented keys the same miss renders as `admin.signins`, which is a bug on
+   screen. And the markup stays readable: nobody has to hold a key table in
+   their head to know what a section says.
+
+   ── swept, not annotated ──
+
+   Most of what a board draws comes out of a template literal in JS, not out
+   of the markup. Annotating every one of those would mean editing tens of
+   thousands of lines across five boards to add a language nobody had asked
+   for a week ago. Instead a MutationObserver watches for added nodes and
+   translates them on the way in, so a render written years ago picks up
+   Spanish without being touched.
+
+   The observer watches childList only, deliberately. Everything this file
+   writes is a text node's value or an attribute — never a child — so it can
+   never see its own work and loop. Setting `.textContent` replaces children
+   and therefore *is* caught; a bare `node.nodeValue = x` on an existing text
+   node is not, and wants an explicit `ZoI18n.apply(el)` after it. Nothing in
+   this estate does that yet.
+
+   ── what it must never touch ──
+
+   Data. A VIN, a centre name, an alert string out of Garage, a customer's
+   reference number: those render exactly as they arrived. The dictionary
+   only holds chrome, and anything that renders values sits inside a
+   `data-i18n-skip` subtree so a chrome entry cannot catch a value that
+   happens to read the same.                                              */
+
+const ES = {
+  /* chrome — the shell */
+  "Zo Projects"          : "Zo Projects",
+  "Zo Projects Hub"      : "Zo Projects Hub",
+  "Dashboards"           : "Tableros",
+  "Boards"               : "Tableros",
+  "Board"                : "Tablero",
+  "Admin"                : "Administración",
+  "Refresh"              : "Actualizar",
+  "Close"                : "Cerrar",
+  "Cancel"               : "Cancelar",
+  "Open"                 : "Abrir",
+  "Stop"                 : "Detener",
+  "Start and open"       : "Iniciar y abrir",
+  "Try again"            : "Reintentar",
+  "Working"              : "Procesando",
+  "Every board in one place. Sign in" : "Todos los tableros en un solo lugar. Inicia sesión",
+  "once"                 : "una vez",
+  "here and all of them have it." : "aquí y todos la tendrán.",
+
+  /* the gate */
+  "Restricted area. Enter the 6-digit admin code."
+    : "Área restringida. Introduce el código de 6 dígitos.",
+  "Unlock"               : "Desbloquear",
+  "Enter all six digits." : "Introduce los seis dígitos.",
+  "Incorrect code."      : "Código incorrecto.",
+  "Wrong password"       : "Contraseña incorrecta",
+
+  /* the rail */
+  "Sign-ins"             : "Inicios de sesión",
+  "Store"                : "Almacén",
+  "Publish"              : "Publicar",
+  "Language"             : "Idioma",
+  "Settings sections"    : "Secciones de ajustes",
+
+  /* sign-ins */
+  "Cookies"              : "Cookies",
+  "Token"                : "Token",
+  "Pasted by hand"       : "Pegado a mano",
+  "Connect"              : "Conectar",
+  "Forget"               : "Olvidar",
+  "Sessions"             : "Sesiones",
+  "Check now"            : "Comprobar ahora",
+  "Connections"          : "Conexiones",
+  "Sources connected"    : "Fuentes conectadas",
+  "Garage · prod"        : "Garage · prod",
+  "Garage · eng"         : "Garage · eng",
+  "Garage · MCP"         : "Garage · MCP",
+  "Intrepid"             : "Intrepid",
+  "Signing in…"          : "Iniciando sesión…",
+  "Opening a sign-in window…" : "Abriendo la ventana de inicio de sesión…",
+  "A sign-in window is opening." : "Se está abriendo una ventana de inicio de sesión.",
+  "Sign-in cancelled"    : "Inicio de sesión cancelado",
+  "Sign-in failed"       : "Falló el inicio de sesión",
+  "Sign in again"        : "Iniciar sesión de nuevo",
+  "Expired"              : "Caducada",
+  "Checking…"            : "Comprobando…",
+  "Every session checked out." : "Todas las sesiones están al día.",
+  "Press Connect on those rows." : "Pulsa Conectar en esas filas.",
+  "A session found expired opens its own sign-in window, once per expiry."
+    : "Una sesión caducada abre su propia ventana de inicio de sesión, una vez por caducidad.",
+  "Auto-reconnect is off: an expired session goes red and waits for you."
+    : "La reconexión automática está desactivada: una sesión caducada se pone en rojo y espera.",
+  "not checked yet"      : "sin comprobar todavía",
+  "not connected"        : "sin conectar",
+  "not set"              : "sin definir",
+  "no credentials stored" : "sin credenciales guardadas",
+  "Off"                  : "Desactivado",
+
+  /* store */
+  "File"                 : "Archivo",
+  "Updated"              : "Actualizado",
+  "Serial"               : "Serie",
+  "Port"                 : "Puerto",
+  "Folder"               : "Carpeta",
+  "Folder missing"       : "Falta la carpeta",
+  "Hosted"               : "Alojado",
+  "Running"              : "En marcha",
+  "Stopped"              : "Detenido",
+  "Restarted"            : "Reiniciado",
+  "GitHub"               : "GitHub",
+  "Personal access token" : "Token de acceso personal",
+  "Contents: Read and write" : "Contenido: lectura y escritura",
+  "Save token"           : "Guardar token",
+  "No token"             : "Sin token",
+  "Team code"            : "Código de equipo",
+  "Scan QR"              : "Escanear QR",
+  "QR"                   : "QR",
+  "Copied"               : "Copiado",
+  "Copy failed"          : "No se pudo copiar",
+  "Paste a token first." : "Pega primero un token.",
+  "Paste a token"        : "Pega un token",
+  "Token saved. The Token button on that board's tile now copies it."
+    : "Token guardado. El botón Token de ese tablero ya lo copia.",
+
+  /* publish and updates */
+  "Message"              : "Mensaje",
+  "Review"               : "Revisar",
+  "Changes"              : "Cambios",
+  "Push to GitHub"       : "Enviar a GitHub",
+  "Check for Updates"    : "Buscar actualizaciones",
+  "Update found"         : "Actualización disponible",
+  "Update installed"     : "Actualización instalada",
+  "Up to date"           : "Al día",
+  "Already up to date"   : "Ya está al día",
+  "Downloading…"         : "Descargando…",
+  "Download now"         : "Descargar ahora",
+  "Restart the Hub to finish." : "Reinicia el Hub para terminar.",
+  "Nothing to do."       : "Nada que hacer.",
+  "Nothing has changed since the last publish."
+    : "No ha cambiado nada desde la última publicación.",
+  "Nothing had changed — nothing was sent."
+    : "No había cambios — no se envió nada.",
+  "Did not come back up:" : "No volvió a arrancar:",
+  "if it fails again."   : "si vuelve a fallar.",
+  "and"                  : "y",
+
+  /* composed — the number is substituted, so the sentence can be reordered */
+  "{n} min ago"          : "hace {n} min",
+  "{n}h ago"             : "hace {n} h",
+  "{n}d ago"             : "hace {n} d",
+  "just now"             : "ahora mismo",
+  "never"                : "nunca",
+  "checked just now"     : "comprobado ahora mismo",
+  "checked {at}"         : "comprobado a las {at}",
+  "credentials updated {at}" : "credenciales actualizadas {at}",
+  "{up} of {all} running"    : "{up} de {all} en marcha"
+};
+
+const ZoI18n = (() => {
+  const ATTRS = ["placeholder", "title", "aria-label"];
+  const textWas = new WeakMap();   // text node  -> its English value
+  const attrWas = new WeakMap();   // element    -> Map(attr -> English value)
+  const listeners = [];
+  let lang = "en";
+  let obs = null;
+  let titleEn = null;   // the tab title, which lives outside body
+
+  /* Keys are single-spaced, because markup wraps and a key that had to match
+     the indentation of the line it was written on would break the first time
+     someone reformatted the file. Surrounding whitespace is put back exactly
+     as it was found. */
+  const key = s => s.replace(/\s+/g, " ").trim();
+
+  function swapText(node){
+    const en = textWas.has(node) ? textWas.get(node) : node.nodeValue;
+    const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(en);
+    const core = m[2];
+    if(!core) return;
+    const hit = lang === "es" ? ES[key(core)] : null;
+    const next = m[1] + (hit || core) + m[3];
+    if(hit && !textWas.has(node)) textWas.set(node, en);
+    if(node.nodeValue !== next) node.nodeValue = next;
+  }
+
+  function swapAttrs(el){
+    for(const a of ATTRS){
+      if(!el.hasAttribute(a)) continue;
+      let was = attrWas.get(el);
+      const en = was && was.has(a) ? was.get(a) : el.getAttribute(a);
+      const hit = lang === "es" ? ES[key(en)] : null;
+      const next = hit || en;
+      if(hit){
+        if(!was){ was = new Map(); attrWas.set(el, was); }
+        if(!was.has(a)) was.set(a, en);
+      }
+      if(el.getAttribute(a) !== next) el.setAttribute(a, next);
+    }
+  }
+
+  const SKIP = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1, SVG: 1 };
+
+  function walk(node){
+    if(node.nodeType === 3) return swapText(node);
+    if(node.nodeType !== 1) return;
+    if(SKIP[node.tagName] || node.hasAttribute("data-i18n-skip")) return;
+    swapAttrs(node);
+    for(let n = node.firstChild; n; n = n.nextSibling) walk(n);
+  }
+
+  const apply = root => walk(root || document.body);
+
+  /* Added nodes only. Nothing here writes a child, so the observer cannot see
+     its own work — no re-entry flag, no takeRecords, no loop. */
+  function watch(){
+    if(obs) return;
+    obs = new MutationObserver(muts => {
+      for(const m of muts) for(const n of m.addedNodes) walk(n);
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+  }
+  function unwatch(){ if(obs){ obs.disconnect(); obs = null; } }
+
+  function set(next){
+    const want = next === "es" ? "es" : "en";
+    if(want === lang) return false;
+    lang = want;
+    // Sweep before watching: the sweep restores English from the WeakMaps
+    // when going back, and the observer only ever needs to handle what
+    // arrives after this point.
+    apply(document.body);
+    // <title> is in <head>, so the sweep cannot see it. Same rule as the
+    // rest: the English original is kept so switching back is exact.
+    if(titleEn === null) titleEn = document.title;
+    document.title = (lang === "es" && ES[titleEn]) || titleEn;
+    lang === "es" ? watch() : unwatch();
+    listeners.forEach(fn => { try { fn(lang); } catch {} });
+    return true;
+  }
+
+  /* For strings a board composes rather than writes whole — "{n} min ago".
+     The placeholder travels with the string, so Spanish can put the number
+     somewhere English does not. */
+  function t(s, vars){
+    const out = (lang === "es" && ES[s]) || s;
+    return vars ? out.replace(/\{(\w+)\}/g, (_, k) => (k in vars ? vars[k] : "{" + k + "}")) : out;
+  }
+
+  return {
+    apply, set, t,
+    get     : () => lang,
+    locale  : () => (lang === "es" ? "es-ES" : "en-US"),
+    onChange: fn => listeners.push(fn)
+  };
+})();
+
+/* Read at boot and then on a timer, because the language is set somewhere
+   else — on this Hub's Admin panel, or from a board's point of view on the
+   Hub entirely. Ten seconds is a local file read; the alternative is a board
+   sitting in the wrong language until somebody reloads it. */
+async function pollLang(){
+  try{
+    const r = await fetch("/api/lang", { cache: "no-store" });
+    if(r.ok) ZoI18n.set((await r.json()).lang);
+  }catch{ /* the language is not worth a visible error */ }
+}
+pollLang();
+setInterval(pollLang, 10000);
+
+/* Boards carry a read-only row saying which language they are in and where it
+   is set. The Hub is where it is set, so it has no such row and this does
+   nothing there — which is why it can live in the shared block. */
+function paintLangRow(){
+  const el = document.getElementById("langNow");
+  if(el) el.textContent = ZoI18n.get() === "es" ? "Español" : "English";
+}
+ZoI18n.onChange(paintLangRow);
+paintLangRow();
+
 const $ = id => document.getElementById(id);
 const S = { password: "", boards: [], creds: null, health: null, signin: {}, busy: false };
 const unlocked = () => !$("adminBody").hidden;
@@ -1289,6 +1619,7 @@ function setHTML(el, html){
 function paint(d){
   S.boards = d.boards;
   S.creds  = d.creds;
+  S.langFile = d.langFile || S.langFile;
   if(d.health) S.health = d.health;
 
   /* The phases come down the ungated route now, which is what lets the panel
@@ -1310,9 +1641,15 @@ function paint(d){
   paintCredCol();
 
   $("fStore").textContent = d.creds.updated
-    ? "credentials updated " + new Date(d.creds.updated).toLocaleString()
-    : "no credentials stored";
-  $("secSub").textContent = `${up} of ${others.length} running`;
+    ? ZoI18n.t("credentials updated {at}",
+               { at: new Date(d.creds.updated).toLocaleString(ZoI18n.locale()) })
+    : ZoI18n.t("no credentials stored");
+  $("secSub").textContent = ZoI18n.t("{up} of {all} running", { up, all: others.length });
+
+  /* Here rather than only in paintAdmin: the language poll and the state poll
+     land in whichever order they land, and the picker should not need an
+     admin unlock to know where the file is. */
+  paintLang();
 
   setHTML($("grid"), others.map(b => {
     /* An external board is never "stopped" and has no port, so it gets its own
@@ -1468,9 +1805,9 @@ function paintHealth(){
 
   const secs = last ? Math.round((Date.now() - last) / 1000) : null;
   $("healthWhen").textContent =
-    last == null ? "not checked yet"
-    : secs < 60  ? "checked just now"
-    : `checked ${new Date(last).toLocaleTimeString()}`;
+    last == null ? ZoI18n.t("not checked yet")
+    : secs < 60  ? ZoI18n.t("checked just now")
+    : ZoI18n.t("checked {at}", { at: new Date(last).toLocaleTimeString(ZoI18n.locale()) });
 
   const mins = Math.round((h.intervalMs || 0) / 60000);
   $("healthHow").textContent =
@@ -1485,8 +1822,10 @@ function paintAdmin(){
   const c = S.creds; if(!c) return;
   paintConns();
   paintHealth();
+  paintLang();
   $("storePath").textContent   = c.file;
-  $("storeUpdated").textContent= c.updated ? new Date(c.updated).toLocaleString() : "never";
+  $("storeUpdated").textContent= c.updated
+    ? new Date(c.updated).toLocaleString(ZoI18n.locale()) : ZoI18n.t("never");
   setHTML($("serialRows"), S.boards.map(b =>
     `<tr><td class="s">${esc(b.serial)}</td><td>${esc(b.name)}</td>
       <td class="p">${b.external ? "—" : b.port}</td>
@@ -1620,10 +1959,12 @@ function when(iso){
   const t = new Date(iso);
   if(isNaN(t)) return "—";
   const mins = Math.round((Date.now() - t) / 60000);
-  if(mins < 1)    return "just now";
-  if(mins < 60)   return mins + " min ago";
-  if(mins < 1440) return Math.round(mins / 60) + "h ago";
-  return Math.round(mins / 1440) + "d ago";
+  /* Composed rather than swept, because the number moves: Spanish puts
+     "hace" in front where English puts "ago" behind. */
+  if(mins < 1)    return ZoI18n.t("just now");
+  if(mins < 60)   return ZoI18n.t("{n} min ago", { n: mins });
+  if(mins < 1440) return ZoI18n.t("{n}h ago", { n: Math.round(mins / 60) });
+  return ZoI18n.t("{n}d ago", { n: Math.round(mins / 1440) });
 }
 
 $("updCheck").addEventListener("click", () => checkUpdates());
@@ -1919,7 +2260,7 @@ $("unlock").addEventListener("click", tryUnlock);
 
 async function admin(path, extra, btn){
   const restore = btn ? btn.textContent : null;
-  if(btn){ btn.disabled = true; btn.textContent = "Working"; }
+  if(btn){ btn.disabled = true; btn.textContent = ZoI18n.t("Working"); }
   try{ return await api(path, { password: S.password, ...(extra || {}) }); }
   finally{ if(btn){ btn.disabled = false; btn.textContent = restore; } }
 }
@@ -1933,6 +2274,46 @@ document.querySelectorAll(".rail-item[data-sec]").forEach(item => {
     document.querySelectorAll(".admin-pane .sec").forEach(sec =>
       sec.classList.toggle("on", sec.id.toLowerCase() === "sec" + key));
   });
+});
+
+/* ── language ──────────────────────────────────────────────────────────
+   The picker writes to the shared settings file and nothing else. It does not
+   tell the boards: they read the file on their own poll, which is what makes
+   this work for a board that is closed right now and for one running on a
+   machine where the Hub was never started. */
+function paintLang(){
+  const cur = ZoI18n.get();
+  document.querySelectorAll("#langSeg button")
+    .forEach(b => b.classList.toggle("on", b.dataset.lang === cur));
+  if(S.langFile) $("langPath").textContent = S.langFile;
+}
+
+$("langSeg").addEventListener("click", async e => {
+  const btn = e.target.closest("button[data-lang]");
+  if(!btn || btn.classList.contains("on")) return;
+
+  const want = btn.dataset.lang;
+  document.querySelectorAll("#langSeg button").forEach(b => b.disabled = true);
+  try{
+    const d = await admin("/api/admin/lang", { lang: want });
+    // Apply straight away rather than waiting for the ten-second poll to come
+    // round: the person who pressed it is looking at the screen.
+    ZoI18n.set(d.lang);
+  }catch(err){
+    note("Could not set the language: " + err.message, true);
+  }finally{
+    document.querySelectorAll("#langSeg button").forEach(b => b.disabled = false);
+    paintLang();
+  }
+});
+
+/* Repaint the parts that are drawn from state rather than sitting in the
+   markup — the sweep handles the markup, but a value formatted for a locale
+   has to be formatted again. */
+ZoI18n.onChange(() => {
+  paintLang();
+  if(unlocked()) paintAdmin();
+  refresh();
 });
 
 /* ── signing in ────────────────────────────────────────────────────────

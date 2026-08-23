@@ -526,6 +526,14 @@ small.rate{font-size:11px;font-weight:500;color:var(--ink-mute);letter-spacing:0
       board, including this one.
       <a href="http://localhost:3100" target="_blank" rel="noopener">Open the Hub</a>
     </div>
+    <!-- Read-only on purpose. One board offering its own language switch is how
+         the estate ends up in two languages at once; the Hub is the one place
+         it is set, and this says so rather than staying silent. -->
+    <div class="conn" style="margin-top:12px">
+      <i class="dot ok"></i><b>Language</b>
+      <span id="langNow" data-i18n-skip>—</span>
+      <span style="margin-left:auto;font-size:11.5px;color:var(--ink-mute)">Set on the Hub</span>
+    </div>
     <div class="connect-note" id="connectNote" hidden></div>
   </div>
 </div>
@@ -557,6 +565,300 @@ small.rate{font-size:11px;font-weight:500;color:var(--ink-mute);letter-spacing:0
 
 <script>
 "use strict";
+
+/* ── ZoI18n ────────────────────────────────────────────────────────────
+
+   The estate speaks English or Spanish, chosen once on the Hub and read by
+   every board from the shared settings file. This is the client half: it
+   swaps the chrome, and nothing else.
+
+   ── keyed by the English source text, not by invented keys ──
+
+   `ES["Sign-ins"]` rather than `t("admin.signins")`. Two reasons. A string
+   with no entry renders in English, which is a worse-but-fine outcome — with
+   invented keys the same miss renders as `admin.signins`, which is a bug on
+   screen. And the markup stays readable: nobody has to hold a key table in
+   their head to know what a section says.
+
+   ── swept, not annotated ──
+
+   Most of what a board draws comes out of a template literal in JS, not out
+   of the markup. Annotating every one of those would mean editing tens of
+   thousands of lines across five boards to add a language nobody had asked
+   for a week ago. Instead a MutationObserver watches for added nodes and
+   translates them on the way in, so a render written years ago picks up
+   Spanish without being touched.
+
+   The observer watches childList only, deliberately. Everything this file
+   writes is a text node's value or an attribute — never a child — so it can
+   never see its own work and loop. Setting `.textContent` replaces children
+   and therefore *is* caught; a bare `node.nodeValue = x` on an existing text
+   node is not, and wants an explicit `ZoI18n.apply(el)` after it. Nothing in
+   this estate does that yet.
+
+   ── what it must never touch ──
+
+   Data. A VIN, a centre name, an alert string out of Garage, a customer's
+   reference number: those render exactly as they arrived. The dictionary
+   only holds chrome, and anything that renders values sits inside a
+   `data-i18n-skip` subtree so a chrome entry cannot catch a value that
+   happens to read the same.                                              */
+
+const ES = {
+  /* shell */
+  /* The board's name, not a label. It stays put in both languages: the Hub
+     lists it from registry.js, which has no dictionary, and a header that
+     disagreed with the tile you clicked to get here would be worse than an
+     English name. Same reason Garage, Intrepid and Tesladex do not move. */
+  "DVP Scorecard"        : "DVP Scorecard",
+  "Zo Projects Hub"      : "Zo Projects Hub",
+  "Admin"                : "Administración",
+  "Apply"                : "Aplicar",
+  "Cancel"               : "Cancelar",
+  "Export"               : "Exportar",
+  "Working"              : "Procesando",
+  "Starting"             : "Iniciando",
+  "Testing…"             : "Probando…",
+  "Looking up"           : "Buscando",
+  "Unlock"               : "Desbloquear",
+  "Enter the 6-digit admin code." : "Introduce el código de 6 dígitos.",
+  "Incorrect code."      : "Código incorrecto.",
+  "Wrong password"       : "Contraseña incorrecta",
+  "Choose file"          : "Elegir archivo",
+  "Drop the xlsx here"   : "Suelta aquí el xlsx",
+  "Open the Hub"         : "Abrir el Hub",
+  "Test connection"      : "Probar conexión",
+  "Intrepid"             : "Intrepid",
+  "Language"             : "Idioma",
+  "Set on the Hub"       : "Se define en el Hub",
+
+  /* centre picker */
+  "Enter TRT"            : "Introducir TRT",
+  "Use this TRT"         : "Usar este TRT",
+  "Site name or TRT ID"  : "Nombre del centro o ID de TRT",
+  "Change the delivery centre this dashboard reads"
+    : "Cambiar el centro de entrega que lee este panel",
+  "Choose the delivery centre this dashboard reads"
+    : "Elegir el centro de entrega que lee este panel",
+  "Choose the delivery centre first — the button beside the title."
+    : "Elige primero el centro de entrega — el botón junto al título.",
+  "Type a site name and pick from the list, or enter a numeric TRT."
+    : "Escribe el nombre de un centro y elígelo de la lista, o introduce un TRT numérico.",
+  "Start typing — Houston, Fremont, 17589…"
+    : "Empieza a escribir — Houston, Fremont, 17589…",
+  "No site matches that." : "Ningún centro coincide.",
+  "Centre set to TRT"    : "Centro fijado en el TRT",
+
+  /* dates */
+  "Dates"                : "Fechas",
+  "From date"            : "Desde",
+  "To date"              : "Hasta",
+  "Show all dates"       : "Mostrar todas las fechas",
+
+  /* the board */
+  "Person"               : "Persona",
+  "Staff Name"           : "Nombre",
+  "Team"                 : "Equipo",
+  "Cars"                 : "Coches",
+  "Total"                : "Total",
+  "Deliveries"           : "Entregas",
+  "Combined"             : "Combinadas",
+  "Survey"               : "Encuesta",
+  "Cleanliness"          : "Limpieza",
+  "CSAT"                 : "CSAT",
+  "Faults"               : "Fallos",
+  "VRI"                  : "VRI",
+  "Indicators"           : "Indicadores",
+  "Qualifiers"           : "Requisitos",
+  "Ranked Metric"        : "Métrica clasificada",
+  "Rank by"              : "Ordenar por",
+  "Productivity"         : "Productividad",
+  "Contribution"         : "Contribución",
+  "Score"                : "Puntuación",
+  "Contribution score"   : "Puntuación de contribución",
+  "Contribution score working" : "Cálculo de la puntuación de contribución",
+  "Show the working"     : "Ver el cálculo",
+  "Person detail"        : "Detalle de la persona",
+  "Copy VINs"            : "Copiar VIN",
+  "Centre Average"       : "Media del centro",
+  "Centre total"         : "Total del centro",
+  "Market Average"       : "Media del mercado",
+  "Mean cleanliness"     : "Limpieza media",
+  "Cars surveyed"        : "Coches encuestados",
+  "Cars washed"          : "Coches lavados",
+  "Cars finished and surveyed" : "Coches terminados y encuestados",
+  "Deliveries in window" : "Entregas en el periodo",
+  "Completed"            : "Completadas",
+  "Inspections (VRI)"    : "Inspecciones (VRI)",
+  "VRIs completed"       : "VRI completadas",
+  "Faults caught"        : "Fallos detectados",
+  "Faults caught at VRI" : "Fallos detectados en la VRI",
+  "at VRI"               : "en la VRI",
+  "Tickets post-VRI"     : "Incidencias tras la VRI",
+  "post-VRI"             : "tras la VRI",
+  "Tickets after a passing VRI" : "Incidencias tras una VRI superada",
+  "Efficient mover"      : "Movimiento eficiente",
+  "Efficient Mover"      : "Movimiento eficiente",
+  "cars washed"          : "coches lavados",
+  "Finished Goods"       : "Producto terminado",
+  "Cleanest → dirtiest"  : "Del más limpio al más sucio",
+  "Worst at the top"     : "Lo peor arriba",
+  "Came back spotless (100%)" : "Volvió impecable (100%)",
+  "Came back marked (below 100%)" : "Volvió con marcas (menos del 100%)",
+  "Show every car that failed its inspection"
+    : "Mostrar cada coche que no superó la inspección",
+  "Show every car that passed, then went to service before delivery"
+    : "Mostrar cada coche que la superó y pasó por servicio antes de la entrega",
+
+  /* states and errors */
+  "Nothing loaded yet"   : "Todavía no hay nada cargado",
+  "Nothing to export."   : "No hay nada que exportar.",
+  "No VINs to copy."     : "No hay VIN que copiar.",
+  "No post-VRI tickets in this window"
+    : "No hay incidencias tras la VRI en este periodo",
+  "No failed inspections in this window"
+    : "No hay inspecciones fallidas en este periodo",
+  "No deliveries in that date range — the board is showing it empty."
+    : "No hay entregas en ese rango de fechas — el panel se muestra vacío.",
+  "Upload a survey export above to build the scorecard."
+    : "Sube arriba una exportación de encuestas para construir el cuadro de mando.",
+  "That isn't an .xlsx file." : "Ese archivo no es un .xlsx.",
+  "Export failed:"       : "Falló la exportación:",
+  "Could not reach the server:" : "No se pudo contactar con el servidor:",
+  "Could not reach the clipboard." : "No se pudo acceder al portapapeles.",
+  "Reading appointments" : "Leyendo citas",
+  "Reading vehicle status logs" : "Leyendo registros de estado del vehículo",
+  "Pulling every RN and VIN for the delivery dates in your file."
+    : "Obteniendo cada RN y VIN de las fechas de entrega de tu archivo.",
+
+  /* composed */
+  "{n} min ago"          : "hace {n} min",
+  "{n}h ago"             : "hace {n} h",
+  "{n}d ago"             : "hace {n} d",
+  "just now"             : "ahora mismo",
+  "never"                : "nunca"
+};
+
+const ZoI18n = (() => {
+  const ATTRS = ["placeholder", "title", "aria-label"];
+  const textWas = new WeakMap();   // text node  -> its English value
+  const attrWas = new WeakMap();   // element    -> Map(attr -> English value)
+  const listeners = [];
+  let lang = "en";
+  let obs = null;
+  let titleEn = null;   // the tab title, which lives outside body
+
+  /* Keys are single-spaced, because markup wraps and a key that had to match
+     the indentation of the line it was written on would break the first time
+     someone reformatted the file. Surrounding whitespace is put back exactly
+     as it was found. */
+  const key = s => s.replace(/\s+/g, " ").trim();
+
+  function swapText(node){
+    const en = textWas.has(node) ? textWas.get(node) : node.nodeValue;
+    const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(en);
+    const core = m[2];
+    if(!core) return;
+    const hit = lang === "es" ? ES[key(core)] : null;
+    const next = m[1] + (hit || core) + m[3];
+    if(hit && !textWas.has(node)) textWas.set(node, en);
+    if(node.nodeValue !== next) node.nodeValue = next;
+  }
+
+  function swapAttrs(el){
+    for(const a of ATTRS){
+      if(!el.hasAttribute(a)) continue;
+      let was = attrWas.get(el);
+      const en = was && was.has(a) ? was.get(a) : el.getAttribute(a);
+      const hit = lang === "es" ? ES[key(en)] : null;
+      const next = hit || en;
+      if(hit){
+        if(!was){ was = new Map(); attrWas.set(el, was); }
+        if(!was.has(a)) was.set(a, en);
+      }
+      if(el.getAttribute(a) !== next) el.setAttribute(a, next);
+    }
+  }
+
+  const SKIP = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1, SVG: 1 };
+
+  function walk(node){
+    if(node.nodeType === 3) return swapText(node);
+    if(node.nodeType !== 1) return;
+    if(SKIP[node.tagName] || node.hasAttribute("data-i18n-skip")) return;
+    swapAttrs(node);
+    for(let n = node.firstChild; n; n = n.nextSibling) walk(n);
+  }
+
+  const apply = root => walk(root || document.body);
+
+  /* Added nodes only. Nothing here writes a child, so the observer cannot see
+     its own work — no re-entry flag, no takeRecords, no loop. */
+  function watch(){
+    if(obs) return;
+    obs = new MutationObserver(muts => {
+      for(const m of muts) for(const n of m.addedNodes) walk(n);
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+  }
+  function unwatch(){ if(obs){ obs.disconnect(); obs = null; } }
+
+  function set(next){
+    const want = next === "es" ? "es" : "en";
+    if(want === lang) return false;
+    lang = want;
+    // Sweep before watching: the sweep restores English from the WeakMaps
+    // when going back, and the observer only ever needs to handle what
+    // arrives after this point.
+    apply(document.body);
+    // <title> is in <head>, so the sweep cannot see it. Same rule as the
+    // rest: the English original is kept so switching back is exact.
+    if(titleEn === null) titleEn = document.title;
+    document.title = (lang === "es" && ES[titleEn]) || titleEn;
+    lang === "es" ? watch() : unwatch();
+    listeners.forEach(fn => { try { fn(lang); } catch {} });
+    return true;
+  }
+
+  /* For strings a board composes rather than writes whole — "{n} min ago".
+     The placeholder travels with the string, so Spanish can put the number
+     somewhere English does not. */
+  function t(s, vars){
+    const out = (lang === "es" && ES[s]) || s;
+    return vars ? out.replace(/\{(\w+)\}/g, (_, k) => (k in vars ? vars[k] : "{" + k + "}")) : out;
+  }
+
+  return {
+    apply, set, t,
+    get     : () => lang,
+    locale  : () => (lang === "es" ? "es-ES" : "en-US"),
+    onChange: fn => listeners.push(fn)
+  };
+})();
+
+/* Read at boot and then on a timer, because the language is set somewhere
+   else — on this Hub's Admin panel, or from a board's point of view on the
+   Hub entirely. Ten seconds is a local file read; the alternative is a board
+   sitting in the wrong language until somebody reloads it. */
+async function pollLang(){
+  try{
+    const r = await fetch("/api/lang", { cache: "no-store" });
+    if(r.ok) ZoI18n.set((await r.json()).lang);
+  }catch{ /* the language is not worth a visible error */ }
+}
+pollLang();
+setInterval(pollLang, 10000);
+
+/* Boards carry a read-only row saying which language they are in and where it
+   is set. The Hub is where it is set, so it has no such row and this does
+   nothing there — which is why it can live in the shared block. */
+function paintLangRow(){
+  const el = document.getElementById("langNow");
+  if(el) el.textContent = ZoI18n.get() === "es" ? "Español" : "English";
+}
+ZoI18n.onChange(paintLangRow);
+paintLangRow();
+
 const S = { trtId:null, password:"", people:[], rows:[], sub:"", busy:false,
             rank:null, sort:"contribution", trtInfo:null,
             // Full span of the uploaded file, so "Show all dates" has something
@@ -794,19 +1096,19 @@ function render(data){
   S.from = data.from || null; S.to = data.to || null;
   paintRange();
   const meanAll = S.rows.length ? Math.round(S.rows.reduce((a,r)=>a+(r.score||0),0)/S.rows.filter(r=>r.score!=null).length*10)/10 : 0;
-  $("sAll").textContent=(st.cars||0).toLocaleString();
+  $("sAll").textContent=(st.cars||0).toLocaleString(ZoI18n.locale());
   $("sCars").textContent=st.attributed||0;
   $("sPeople").textContent=S.people.length;
   $("sMean").innerHTML=(isFinite(meanAll)?meanAll:0)+'<small>%</small>';
-  $("sWash").textContent=(st.washed||0).toLocaleString();
-  $("sVri").textContent=(st.vri||0).toLocaleString();
-  $("sCaught").textContent=(st.vriFailed||0).toLocaleString();
+  $("sWash").textContent=(st.washed||0).toLocaleString(ZoI18n.locale());
+  $("sVri").textContent=(st.vri||0).toLocaleString(ZoI18n.locale());
+  $("sCaught").textContent=(st.vriFailed||0).toLocaleString(ZoI18n.locale());
   /* Count then rate, the same way round as the column and as the faults-caught
      tile beside it. Denominator is inspected cars, matching the per-person
      rate exactly, so the tile and the column can be reconciled by hand. */
   const insp=S.rows.filter(r=>r.vriBy).length;
   const pvPct=insp?((st.postVri||0)/insp*100).toFixed(1):"0";
-  $("sPostVri").innerHTML=(st.postVri||0).toLocaleString()+`<small> · ${pvPct}%</small>`;
+  $("sPostVri").innerHTML=(st.postVri||0).toLocaleString(ZoI18n.locale())+`<small> · ${pvPct}%</small>`;
   $("stats").hidden=false;
 
   S.sub = `TRT ${data.trtId} · ${st.dates} date(s) · ${st.attributed} of ${st.scored} scored cars credited`;
@@ -832,7 +1134,7 @@ function paintRange(){
   $("rangeBar").classList.toggle("on", narrowed);
   $("resetRange").hidden = !narrowed;
   $("rangeHint").innerHTML = narrowed
-    ? `Showing <b>${S.from || first}</b> to <b>${S.to || last}</b> — ${S.rows.length.toLocaleString()} cars`
+    ? `Showing <b>${S.from || first}</b> to <b>${S.to || last}</b> — ${S.rows.length.toLocaleString(ZoI18n.locale())} cars`
     : `Whole file: <b>${first}</b> to <b>${last}</b>`;
 }
 

@@ -4,6 +4,8 @@
 
 # Caches, rebuildable from the source systems.
 .trt-cache.json
+# Open Inventory's filter vocabulary, refetched from inventory.tesla.com daily.
+.inv-filters.json
 
 node_modules/
 *.log

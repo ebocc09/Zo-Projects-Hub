@@ -187,8 +187,18 @@ const server = http.createServer(async (req, res) => {
         boards: await boardStates(),
         creds : credstore.summary(),
         health: health.summary(),
-        signin: signin.allStatuses()
+        signin: signin.allStatuses(),
+        lang  : credstore.language(),
+        langFile: credstore.SETTINGS_FILE
       });
+    }
+
+    /* Ungated, like the credential chips above and for a milder version of
+       the same reason: which language to draw in is not a secret, and the
+       page needs it before anyone has typed the admin code. Every board
+       serves this same route off the same shared file. */
+    if(p === "/api/lang" && req.method === "GET"){
+      return sendJson(res, 200, { lang: credstore.language() });
     }
 
     if(p === "/api/launch" && req.method === "POST"){
@@ -370,6 +380,21 @@ const server = http.createServer(async (req, res) => {
         log("publish failed: " + (err && err.message));
         return sendJson(res, 400, { error: err.message });
       }
+    }
+
+    /* The one setting the Hub sets on behalf of the whole estate. Written to
+       the shared file rather than pushed at anybody: a board that is running
+       picks it up on its next poll, and a board that is not picks it up when
+       it starts. Nothing here needs to know which boards are up. */
+    if(p === "/api/admin/lang" && req.method === "POST"){
+      const body = await readBody(req);
+      if(!authed(body)) return sendJson(res, 401, { error: "Wrong password" });
+      const want = String(body.lang || "").toLowerCase();
+      if(!credstore.LANGUAGES.includes(want))
+        return sendJson(res, 400, { error: "Unknown language" });
+      credstore.setLanguage(want);
+      log("language set to " + want);
+      return sendJson(res, 200, { ok: true, lang: credstore.language() });
     }
 
     if(p === "/api/admin/github/save" && req.method === "POST"){

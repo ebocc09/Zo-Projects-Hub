@@ -1148,6 +1148,15 @@ a.vin-link:hover{border-bottom-color:var(--blue);color:var(--blue)}
         board, including this one.
         <a href="http://localhost:3100" target="_blank" rel="noopener">Open the Hub</a>
       </div>
+
+      <!-- Read-only on purpose. One board offering its own language switch is how
+           the estate ends up in two languages at once; the Hub is the one place
+           it is set, and this says so rather than staying silent. -->
+      <div class="conn" style="margin-top:12px">
+        <i class="dot ok"></i><b>Language</b>
+        <span id="langNow" data-i18n-skip>—</span>
+        <span style="margin-left:auto;font-size:11.5px;color:var(--ink-mute)">Set on the Hub</span>
+      </div>
     </section>
 
     <section class="sec" id="secAbout">
@@ -1373,6 +1382,371 @@ a.vin-link:hover{border-bottom-color:var(--blue);color:var(--blue)}
 <script>
 "use strict";
 
+/* ── ZoI18n ────────────────────────────────────────────────────────────
+
+   The estate speaks English or Spanish, chosen once on the Hub and read by
+   every board from the shared settings file. This is the client half: it
+   swaps the chrome, and nothing else.
+
+   ── keyed by the English source text, not by invented keys ──
+
+   `ES["Sign-ins"]` rather than `t("admin.signins")`. Two reasons. A string
+   with no entry renders in English, which is a worse-but-fine outcome — with
+   invented keys the same miss renders as `admin.signins`, which is a bug on
+   screen. And the markup stays readable: nobody has to hold a key table in
+   their head to know what a section says.
+
+   ── swept, not annotated ──
+
+   Most of what a board draws comes out of a template literal in JS, not out
+   of the markup. Annotating every one of those would mean editing tens of
+   thousands of lines across five boards to add a language nobody had asked
+   for a week ago. Instead a MutationObserver watches for added nodes and
+   translates them on the way in, so a render written years ago picks up
+   Spanish without being touched.
+
+   The observer watches childList only, deliberately. Everything this file
+   writes is a text node's value or an attribute — never a child — so it can
+   never see its own work and loop. Setting `.textContent` replaces children
+   and therefore *is* caught; a bare `node.nodeValue = x` on an existing text
+   node is not, and wants an explicit `ZoI18n.apply(el)` after it. Nothing in
+   this estate does that yet.
+
+   ── what it must never touch ──
+
+   Data. A VIN, a centre name, an alert string out of Garage, a customer's
+   reference number: those render exactly as they arrived. The dictionary
+   only holds chrome, and anything that renders values sits inside a
+   `data-i18n-skip` subtree so a chrome entry cannot catch a value that
+   happens to read the same.                                              */
+
+const ES = {
+  /* shell */
+  /* The board's name, not a label. It stays put in both languages: the Hub
+     lists it from registry.js, which has no dictionary, and a header that
+     disagreed with the tile you clicked to get here would be worse than an
+     English name. Same reason Garage, Intrepid and Tesladex do not move. */
+  "FSD Tracker"          : "FSD Tracker",
+  "Zo Projects Hub"      : "Zo Projects Hub",
+  "Post-delivery FSD miles" : "Millas de FSD tras la entrega",
+  "Miles customers drove on Full Self-Driving"
+    : "Millas que los clientes condujeron con Full Self-Driving",
+  "Admin"                : "Administración",
+  "Options"              : "Opciones",
+  "Search"               : "Buscar",
+  "Submit"               : "Enviar",
+  "Save"                 : "Guardar",
+  "Cancel"               : "Cancelar",
+  "Reset"                : "Restablecer",
+  "Test"                 : "Probar",
+  "Show"                 : "Mostrar",
+  "Show all"             : "Mostrar todo",
+  "Share"                : "Cuota",
+  "Preview"              : "Vista previa",
+  "Default"              : "Por defecto",
+  "Working"              : "Procesando",
+  "Starting"             : "Iniciando",
+  "Testing"              : "Probando",
+  "Clearing"             : "Borrando",
+  "Refreshing"           : "Actualizando",
+  "Exporting"            : "Exportando",
+  "Resetting"            : "Restableciendo",
+  "Counting"             : "Contando",
+  "Reading"              : "Leyendo",
+  "Looking up"           : "Buscando",
+  "Running…"             : "Ejecutando…",
+  "Sending…"             : "Enviando…",
+  "Done"                 : "Listo",
+  "On"                   : "Activado",
+  "Off"                  : "Desactivado",
+  "Language"             : "Idioma",
+  "Set on the Hub"       : "Se define en el Hub",
+  "Open the Hub"         : "Abrir el Hub",
+  "Unlock"               : "Desbloquear",
+  "Lock admin"           : "Bloquear administración",
+  "Restricted area. Enter the 6-digit admin code."
+    : "Área restringida. Introduce el código de 6 dígitos.",
+  "Incorrect code."      : "Código incorrecto.",
+  "Wrong password"       : "Contraseña incorrecta",
+  "Settings sections"    : "Secciones de ajustes",
+
+  /* loading and searching */
+  "Load today"           : "Cargar hoy",
+  "Load statistics"      : "Cargar estadísticas",
+  "Search VIN or RN"     : "Buscar VIN o RN",
+  "VIN or reference number" : "VIN o número de referencia",
+  "Today"                : "Hoy",
+  "Yesterday"            : "Ayer",
+  "Delivery date"        : "Fecha de entrega",
+  "Through (optional)"   : "Hasta (opcional)",
+  "Leave blank for a single day. Ranges are capped at 31 days."
+    : "Déjalo en blanco para un solo día. Los rangos se limitan a 31 días.",
+  "Choose Load today, Search VIN or RN for one car, or Options for another date."
+    : "Elige Cargar hoy, Buscar VIN o RN para un coche, u Opciones para otra fecha.",
+  "Listing deliveries"   : "Listando entregas",
+  "Measuring FSD miles"  : "Midiendo las millas de FSD",
+  "Placing stray cars"   : "Ubicando coches sueltos",
+  "Asking tesladex which cars this centre handed over."
+    : "Preguntando a tesladex qué coches entregó este centro.",
+  "Reading each car's mileage curve since handoff."
+    : "Leyendo la curva de millas de cada coche desde la entrega.",
+  "A few cars have no routing location; checking their telemetry instead."
+    : "Algunos coches no tienen ubicación asignada; se revisa su telemetría.",
+  "Reloading from Garage alone…" : "Recargando solo desde Garage…",
+  "Reloading with reference numbers and advisors…"
+    : "Recargando con números de referencia y asesores…",
+
+  /* centre picker */
+  "Enter TRT"            : "Introducir TRT",
+  "Use this TRT"         : "Usar este TRT",
+  "Site name or TRT ID"  : "Nombre del centro o ID de TRT",
+  "TRT not set"          : "TRT sin definir",
+  "Change the delivery centre this dashboard reads"
+    : "Cambiar el centro de entrega que lee este panel",
+  "Type a site name and pick from the list, or enter a numeric TRT."
+    : "Escribe el nombre de un centro y elígelo de la lista, o introduce un TRT numérico.",
+  "Start typing — Houston, Fremont, 17589…"
+    : "Empieza a escribir — Houston, Fremont, 17589…",
+  "No site matches that." : "Ningún centro coincide.",
+  "Refresh site directory" : "Actualizar el directorio de centros",
+
+  /* the table and leaderboard */
+  "Cars"                 : "Coches",
+  "Vehicle"              : "Vehículo",
+  "Status"               : "Estado",
+  "Delivered"            : "Entregado",
+  "Deliveries"           : "Entregas",
+  "Host"                 : "Anfitrión",
+  "Hosts"                : "Anfitriones",
+  "All hosts"            : "Todos los anfitriones",
+  "Search hosts"         : "Buscar anfitriones",
+  "Delivery host"        : "Anfitrión de la entrega",
+  "Delivery advisor"     : "Asesor de entrega",
+  "Advisor"              : "Asesor",
+  "Advisors"             : "Asesores",
+  "Leaderboard"          : "Clasificación",
+  "Rank by"              : "Ordenar por",
+  "Top performing host"  : "Mejor anfitrión",
+  "FSD rate"             : "Tasa de FSD",
+  "FSD engaged"          : "FSD activado",
+  "Drove FSD"            : "Condujo con FSD",
+  "No FSD use"           : "Sin uso de FSD",
+  "Total miles"          : "Millas totales",
+  "Total FSD miles"      : "Millas totales con FSD",
+  "Total mi"             : "Millas tot.",
+  "Share of day"         : "Cuota del día",
+  "Minimum FSD miles"    : "Millas mínimas de FSD",
+  "What counts as using FSD" : "Qué cuenta como uso de FSD",
+  "Which cars"           : "Qué coches",
+  "Measurement"          : "Medición",
+  "Rank delivery hosts by FSD adoption for this day"
+    : "Clasificar a los anfitriones por adopción de FSD en este día",
+  "Show only one delivery host's cars"
+    : "Mostrar solo los coches de un anfitrión",
+  "Export current"       : "Exportar lo actual",
+  "What is on screen"    : "Lo que hay en pantalla",
+  "Download exactly what is on screen as an Excel workbook"
+    : "Descargar exactamente lo que hay en pantalla como libro de Excel",
+
+  /* admin */
+  "Connections"          : "Conexiones",
+  "Sources"              : "Fuentes",
+  "Garage"               : "Garage",
+  "Intrepid"             : "Intrepid",
+  "Tesladex"             : "Tesladex",
+  "Basic"                : "Básico",
+  "Advanced"             : "Avanzado",
+  "Garage + Intrepid"    : "Garage + Intrepid",
+  "Test connections"     : "Probar conexiones",
+  "Maintenance"          : "Mantenimiento",
+  "Alerts"               : "Avisos",
+  "Timing"               : "Horario",
+  "Hours of operation"   : "Horas de funcionamiento",
+  "Start and end"        : "Inicio y fin",
+  "Days to post on"      : "Días en que se publica",
+  "Where it posts"       : "Dónde se publica",
+  "Teams webhook"        : "Webhook de Teams",
+  "Send now"             : "Enviar ahora",
+  "Send one now"         : "Enviar uno ahora",
+  "Backup counter"       : "Contador de respaldo",
+  "Reset dashboard"      : "Restablecer el panel",
+  "Press again to reset" : "Pulsa de nuevo para restablecer",
+  "Clear loaded statistics" : "Borrar las estadísticas cargadas",
+  "Clear settled measurements" : "Borrar las mediciones consolidadas",
+  "Clear delivering-centre cache" : "Borrar la caché de centros de entrega",
+  "Sign-ins live on the" : "Los inicios de sesión están en el",
+  "Alerts on."           : "Avisos activados.",
+  "Alerts off. The webhook and hours are kept."
+    : "Avisos desactivados. Se conservan el webhook y las horas.",
+  "Days saved."          : "Días guardados.",
+  "Hours saved."         : "Horas guardadas.",
+  "Webhook saved. Turn alerts on to start posting."
+    : "Webhook guardado. Activa los avisos para empezar a publicar.",
+  "Webhook cleared. Nothing will be posted."
+    : "Webhook borrado. No se publicará nada.",
+  "No webhook set, so nothing can be posted."
+    : "No hay webhook configurado, así que no se puede publicar nada.",
+  "No days selected — nothing will post."
+    : "No hay días seleccionados — no se publicará nada.",
+  "Waiting for the hourly FSD check"
+    : "Esperando la comprobación horaria de FSD",
+  "Running today's report…" : "Ejecutando el informe de hoy…",
+  "Running today's report, then posting…"
+    : "Ejecutando el informe de hoy y publicándolo…",
+  "Preview only — nothing was posted."
+    : "Solo vista previa — no se publicó nada.",
+
+  /* days */
+  "Mon" : "Lun", "Tue" : "Mar", "Wed" : "Mié",
+  "Thu" : "Jue", "Fri" : "Vie", "Sat" : "Sáb", "Sun" : "Dom",
+
+  /* empty and error states */
+  "No data"              : "Sin datos",
+  "No statistics loaded" : "No hay estadísticas cargadas",
+  "Nothing loaded to export." : "No hay nada cargado que exportar.",
+  "No cars delivered yet today — nothing to check."
+    : "Todavía no se ha entregado ningún coche hoy — nada que comprobar.",
+  "No advisor names came back for this day."
+    : "No llegó ningún nombre de asesor para este día.",
+  "Export failed:"       : "Falló la exportación:",
+  "Could not reach the FSD Tracker server:"
+    : "No se pudo contactar con el servidor de FSD Tracker:",
+  "Nothing can be loaded until then." : "Hasta entonces no se puede cargar nada.",
+  "A VIN never contains I, O or Q — they would be misread as 1 and 0."
+    : "Un VIN nunca lleva I, O ni Q — se confundirían con 1 y 0.",
+  "A reference number is RN followed by the order's digits, nothing else."
+    : "Un número de referencia es RN seguido de los dígitos del pedido, nada más.",
+  "Opening a Garage session." : "Abriendo una sesión de Garage.",
+
+  /* composed */
+  "{n} min ago"          : "hace {n} min",
+  "{n}h ago"             : "hace {n} h",
+  "{n}d ago"             : "hace {n} d",
+  "just now"             : "ahora mismo",
+  "never"                : "nunca"
+};
+
+const ZoI18n = (() => {
+  const ATTRS = ["placeholder", "title", "aria-label"];
+  const textWas = new WeakMap();   // text node  -> its English value
+  const attrWas = new WeakMap();   // element    -> Map(attr -> English value)
+  const listeners = [];
+  let lang = "en";
+  let obs = null;
+  let titleEn = null;   // the tab title, which lives outside body
+
+  /* Keys are single-spaced, because markup wraps and a key that had to match
+     the indentation of the line it was written on would break the first time
+     someone reformatted the file. Surrounding whitespace is put back exactly
+     as it was found. */
+  const key = s => s.replace(/\s+/g, " ").trim();
+
+  function swapText(node){
+    const en = textWas.has(node) ? textWas.get(node) : node.nodeValue;
+    const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(en);
+    const core = m[2];
+    if(!core) return;
+    const hit = lang === "es" ? ES[key(core)] : null;
+    const next = m[1] + (hit || core) + m[3];
+    if(hit && !textWas.has(node)) textWas.set(node, en);
+    if(node.nodeValue !== next) node.nodeValue = next;
+  }
+
+  function swapAttrs(el){
+    for(const a of ATTRS){
+      if(!el.hasAttribute(a)) continue;
+      let was = attrWas.get(el);
+      const en = was && was.has(a) ? was.get(a) : el.getAttribute(a);
+      const hit = lang === "es" ? ES[key(en)] : null;
+      const next = hit || en;
+      if(hit){
+        if(!was){ was = new Map(); attrWas.set(el, was); }
+        if(!was.has(a)) was.set(a, en);
+      }
+      if(el.getAttribute(a) !== next) el.setAttribute(a, next);
+    }
+  }
+
+  const SKIP = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1, SVG: 1 };
+
+  function walk(node){
+    if(node.nodeType === 3) return swapText(node);
+    if(node.nodeType !== 1) return;
+    if(SKIP[node.tagName] || node.hasAttribute("data-i18n-skip")) return;
+    swapAttrs(node);
+    for(let n = node.firstChild; n; n = n.nextSibling) walk(n);
+  }
+
+  const apply = root => walk(root || document.body);
+
+  /* Added nodes only. Nothing here writes a child, so the observer cannot see
+     its own work — no re-entry flag, no takeRecords, no loop. */
+  function watch(){
+    if(obs) return;
+    obs = new MutationObserver(muts => {
+      for(const m of muts) for(const n of m.addedNodes) walk(n);
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+  }
+  function unwatch(){ if(obs){ obs.disconnect(); obs = null; } }
+
+  function set(next){
+    const want = next === "es" ? "es" : "en";
+    if(want === lang) return false;
+    lang = want;
+    // Sweep before watching: the sweep restores English from the WeakMaps
+    // when going back, and the observer only ever needs to handle what
+    // arrives after this point.
+    apply(document.body);
+    // <title> is in <head>, so the sweep cannot see it. Same rule as the
+    // rest: the English original is kept so switching back is exact.
+    if(titleEn === null) titleEn = document.title;
+    document.title = (lang === "es" && ES[titleEn]) || titleEn;
+    lang === "es" ? watch() : unwatch();
+    listeners.forEach(fn => { try { fn(lang); } catch {} });
+    return true;
+  }
+
+  /* For strings a board composes rather than writes whole — "{n} min ago".
+     The placeholder travels with the string, so Spanish can put the number
+     somewhere English does not. */
+  function t(s, vars){
+    const out = (lang === "es" && ES[s]) || s;
+    return vars ? out.replace(/\{(\w+)\}/g, (_, k) => (k in vars ? vars[k] : "{" + k + "}")) : out;
+  }
+
+  return {
+    apply, set, t,
+    get     : () => lang,
+    locale  : () => (lang === "es" ? "es-ES" : "en-US"),
+    onChange: fn => listeners.push(fn)
+  };
+})();
+
+/* Read at boot and then on a timer, because the language is set somewhere
+   else — on this Hub's Admin panel, or from a board's point of view on the
+   Hub entirely. Ten seconds is a local file read; the alternative is a board
+   sitting in the wrong language until somebody reloads it. */
+async function pollLang(){
+  try{
+    const r = await fetch("/api/lang", { cache: "no-store" });
+    if(r.ok) ZoI18n.set((await r.json()).lang);
+  }catch{ /* the language is not worth a visible error */ }
+}
+pollLang();
+setInterval(pollLang, 10000);
+
+/* Boards carry a read-only row saying which language they are in and where it
+   is set. The Hub is where it is set, so it has no such row and this does
+   nothing there — which is why it can live in the shared block. */
+function paintLangRow(){
+  const el = document.getElementById("langNow");
+  if(el) el.textContent = ZoI18n.get() === "es" ? "Español" : "English";
+}
+ZoI18n.onChange(paintLangRow);
+paintLangRow();
+
+
 /* ───────────────────────────── state ─────────────────────────────
    `mode` mirrors the server's saved setting. It is held here too so the
    toggle can re-run the current view immediately instead of waiting for a
@@ -1584,8 +1958,8 @@ function progPaint(p){
   }
 
   const count = p.phase === "enumerate"
-    ? (p.got ? p.got.toLocaleString() + " found" : "")
-    : (known ? `${p.done.toLocaleString()} / ${p.total.toLocaleString()}` : "");
+    ? (p.got ? p.got.toLocaleString(ZoI18n.locale()) + " found" : "")
+    : (known ? `${p.done.toLocaleString(ZoI18n.locale())} / ${p.total.toLocaleString(ZoI18n.locale())}` : "");
 
   $("prog").innerHTML = `
     <div class="prog">
@@ -1673,11 +2047,11 @@ function handoffLabel(r){
   if(!r.deliveredAt) return r.date;
   const d = new Date(r.deliveredAt);
   if(isNaN(d)) return r.date;
-  return `${r.date} · ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  return `${r.date} · ${d.toLocaleTimeString(ZoI18n.locale(), { hour: "2-digit", minute: "2-digit" })}`;
 }
 function handoffTitle(r){
   return r.deliveredAt
-    ? "Marked delivered " + new Date(r.deliveredAt).toLocaleString()
+    ? "Marked delivered " + new Date(r.deliveredAt).toLocaleString(ZoI18n.locale())
     : "Delivery date " + r.date;
 }
 
@@ -1688,7 +2062,7 @@ function windowTitle(r){
   const base = `Miles are counted for the first ${S.windowHours} h after handoff`;
   const d = r.windowEndsAt ? new Date(r.windowEndsAt) : null;
   return d && !isNaN(d)
-    ? `${base} — this window closes at ${d.toLocaleString()}, so the figure will keep climbing until then`
+    ? `${base} — this window closes at ${d.toLocaleString(ZoI18n.locale())}, so the figure will keep climbing until then`
     : `${base}, and this one has not closed yet`;
 }
 
@@ -1703,7 +2077,7 @@ function toDateLine(r){
   if(r.milesToDate - r.miles < 0.05) return "";
 
   const at = r.toDateAt ? new Date(r.toDateAt) : null;
-  const asOf = at && !isNaN(at) ? `, as of ${at.toLocaleString()}` : "";
+  const asOf = at && !isNaN(at) ? `, as of ${at.toLocaleString(ZoI18n.locale())}` : "";
   const title = `${r.milesToDate.toFixed(2)} mi on FSD since handoff with no cutoff${asOf
     } — ${(r.milesToDate - r.miles).toFixed(2)} mi of it fell outside the ${S.windowHours
     } h window and is not counted in the figure above`;
@@ -1855,7 +2229,7 @@ function paintLeaderboard(){
         <div class="lb-top-k">Top performing host</div>
         <div class="lb-top-n">${esc(lead.host || "(unknown)")}</div>
         <div class="lb-top-s">${lead.drove} of ${lead.resolved} cars driven on FSD
-          · ${lead.cars} deliveries · ${lead.totalMi.toLocaleString()} mi</div>
+          · ${lead.cars} deliveries · ${lead.totalMi.toLocaleString(ZoI18n.locale())} mi</div>
       </div>
       <div class="lb-top-v">
         <div class="lb-top-fig">${lead.fsdRate}<small>%</small></div>
@@ -1887,7 +2261,7 @@ function paintLeaderboard(){
           <span class="lb-meter-t"><span class="lb-meter-f" style="width:${h.fsdRate}%"></span></span>
           <span class="lb-meter-v">${h.fsdRate}%</span>
         </span>
-        <span class="lb-num lb-hide">${h.totalMi.toLocaleString()}</span>
+        <span class="lb-num lb-hide">${h.totalMi.toLocaleString(ZoI18n.locale())}</span>
       </div>`).join("")}`;
 
   $("lbBody").querySelectorAll(".lb-row").forEach(el =>
@@ -1959,7 +2333,7 @@ function paintHostBar(){
       <span><b>${esc(h.host || "(unknown)")}</b></span>
       <span>handled <b>${h.cars}</b> of ${S.rows.length} deliveries — <b>${h.share}%</b> of the day</span>
       <span><b>${h.drove}</b> of their ${h.resolved} drove FSD — <b>${h.fsdRate}%</b></span>
-      <span>${h.totalMi.toLocaleString()} mi total, ${h.avgMi} avg</span>
+      <span>${h.totalMi.toLocaleString(ZoI18n.locale())} mi total, ${h.avgMi} avg</span>
       <button class="clear" id="hostClear">Show all</button>
     </div>`;
   $("hostClear").addEventListener("click", () => {
@@ -1982,7 +2356,7 @@ function paintList(){
   $("sDelivered").textContent = rows.length;
   $("sDrove").textContent     = drove.length;
   $("statDrove").title        = `Cars that reached ${barLabel()} mi on FSD after handoff`;
-  $("sTotal").innerHTML       = Number(mi.toFixed(1)).toLocaleString() + '<small>mi</small>';
+  $("sTotal").innerHTML       = Number(mi.toFixed(1)).toLocaleString(ZoI18n.locale()) + '<small>mi</small>';
 
   if(S.listSub){
     $("listSub").textContent = S.host == null
@@ -2138,7 +2512,7 @@ function render(data){
         ((data.trt && data.trt.name) ? ` · ${data.trt.name}` : "") : ""]
         .filter(Boolean).join(" · ")
     : `${span} · TRT ${data.trtId} · ${s.resolved} of ${s.vehicles} resolved` +
-      (scanned ? ` · ${scanned.toLocaleString()} scanned` : "");
+      (scanned ? ` · ${scanned.toLocaleString(ZoI18n.locale())} scanned` : "");
 
   paintHosts();
   paintList();
@@ -3029,19 +3403,19 @@ async function blockAction(btn, label, run){
 $("refreshTrtBtn").addEventListener("click", () =>
   blockAction($("refreshTrtBtn"), "Refreshing", async () => {
     const d = await api("/api/admin/refresh-trt", { password: S.password });
-    return `${d.sites.toLocaleString()} sites cached`;
+    return `${d.sites.toLocaleString(ZoI18n.locale())} sites cached`;
   }));
 
 $("clearVinBtn").addEventListener("click", () =>
   blockAction($("clearVinBtn"), "Clearing", async () => {
     const d = await api("/api/admin/clear-vin-cache", { password: S.password });
-    return `${d.cleared.toLocaleString()} entries cleared`;
+    return `${d.cleared.toLocaleString(ZoI18n.locale())} entries cleared`;
   }));
 
 $("clearMeasureBtn").addEventListener("click", () =>
   blockAction($("clearMeasureBtn"), "Clearing", async () => {
     const d = await api("/api/admin/clear-measure-cache", { password: S.password });
-    return `${d.cleared.toLocaleString()} measurements cleared`;
+    return `${d.cleared.toLocaleString(ZoI18n.locale())} measurements cleared`;
   }));
 
 /* Two-step, because it is the one button here with a cost — the second press

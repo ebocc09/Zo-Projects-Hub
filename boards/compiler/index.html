@@ -308,6 +308,14 @@ a.rnl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 .deck-when{margin-top:18px;font-size:12px;color:var(--ink-mute)}
 
 /* ── moving the wheel ── */
+/* Open Inventory's last line: the listing to open, or the sentence explaining
+   why there is not one. Sits above the nav, so it reads as part of the car
+   rather than part of the controls. */
+.deck-foot{margin-top:14px;font-size:12.5px}
+.deck-foot a{color:var(--blue);font-weight:600;text-decoration:none}
+.deck-foot a:hover{text-decoration:underline}
+.deck-foot.none{color:var(--ink-mute);line-height:1.5}
+
 .deck-nav{display:flex;align-items:center;gap:10px;margin-top:16px}
 .deck-nav button{
   width:30px;height:30px;display:grid;place-items:center;
@@ -803,6 +811,70 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 .opt.dead:hover{border-color:var(--line)}
 .opt small{font-weight:500;letter-spacing:0;opacity:.7;text-transform:none}
 
+/* Two questions, stacked and full width, each with room to say what it means.
+   A chip row would put "Matched not Scheduled" and "Open Inventory" side by
+   side as two words and leave the reader to guess which system each reads. */
+.opts.pick{flex-direction:column;gap:9px}
+.pick-opt{
+  display:block;height:auto;width:100%;padding:13px 15px;text-align:left;
+  letter-spacing:0;text-transform:none;
+}
+.pick-opt b{display:block;font-size:13px;font-weight:600;color:var(--ink);letter-spacing:.01em}
+.pick-opt span{
+  display:block;margin-top:4px;font-size:11.5px;font-weight:400;line-height:1.5;
+  color:var(--ink-soft);letter-spacing:0;
+}
+.pick-opt:hover{border-color:var(--ink);background:var(--paper)}
+
+/* Open Inventory's filter groups. The site publishes 536 locations, so the
+   long ones get a search box and a capped, scrolling list of chips rather
+   than 536 buttons laid into the modal. */
+.inv-search{
+  width:100%;height:30px;padding:0 10px;margin-bottom:8px;
+  border:1px solid var(--line);border-radius:var(--r-sm);background:var(--paper);
+  font:inherit;font-size:11.5px;color:var(--ink);
+}
+.inv-search:focus{outline:none;border-color:var(--ink)}
+.opts.scroll{max-height:190px;overflow:auto;align-content:flex-start}
+/* Said once per long group, so a list showing 40 of 536 does not read as the
+   whole vocabulary. */
+.inv-more{width:100%;font-size:10.5px;color:var(--ink-soft);opacity:.8;margin-top:2px}
+
+/* ── Location and Regions: type to add, tags to show ──
+   The tags are the answer to "what is this scan scoped to", so they sit above
+   the box and read as a sentence rather than as forty buttons with two of them
+   darkened. */
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.tag{
+  display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 6px 0 11px;
+  border-radius:var(--r-sm);background:var(--ink);color:#fff;
+  font-size:11px;font-weight:600;letter-spacing:.04em;
+}
+.tag button{
+  display:flex;align-items:center;justify-content:center;width:18px;height:18px;
+  border-radius:4px;color:#fff;opacity:.65;font-size:14px;line-height:1;
+}
+.tag button:hover{opacity:1;background:rgba(255,255,255,.18)}
+
+/* The box and its suggestions are one unit, so the list can hang off the
+   bottom of the field without pushing the groups below it down the modal
+   every time a letter is typed. */
+.tagbox{position:relative}
+.tagbox .inv-search{margin-bottom:0}
+.suggest{
+  position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:5;
+  padding:4px;border:1px solid var(--line);border-radius:var(--r-sm);
+  background:var(--paper);box-shadow:0 12px 28px rgba(0,0,0,.13);
+  max-height:232px;overflow:auto;
+}
+.sug{
+  display:block;width:100%;padding:7px 9px;border-radius:5px;text-align:left;
+  font-size:12.5px;color:var(--ink);
+}
+.sug:hover,.sug.first{background:var(--paper-alt)}
+.sug:hover{color:var(--ink)}
+.suggest .inv-more{padding:5px 9px;margin:0}
+
 .kinds{display:flex;flex-direction:column;gap:8px}
 .kind{display:flex;align-items:center;gap:11px;padding:11px 13px;
   border:1px solid var(--line-soft);border-radius:var(--r-md);cursor:pointer;
@@ -1257,6 +1329,64 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
   </div>
 </div>
 
+<!-- Which question is being asked of the inventory.
+
+     Pending Inventory used to run the moment it was pressed, because there
+     was only one thing it could mean. There are two now and they are near
+     opposites — who is waiting for a car, and what there is to give them —
+     so the button asks first. Two choices rather than a facet: they are
+     different scans against different systems, not two settings of one. -->
+<div class="modal" id="piModal" role="dialog" aria-label="Pending Inventory">
+  <div class="modal-head"><h3>Pending Inventory</h3>
+    <span class="modal-sub" id="piCtx"></span>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body">
+    <div class="facet">
+      <div class="opts pick">
+        <button class="opt pick-opt" id="piMatched">
+          <b>Matched not Scheduled</b>
+          <span>Cars this centre has been given a customer for, with no delivery
+                appointment booked. Tesla OS's own bucket, described by Garage.</span>
+        </button>
+        <button class="opt pick-opt" id="piOpen">
+          <b>Open Inventory</b>
+          <span>What is available to sell right now, from Tesla's internal
+                inventory search. Opens on this centre; the Location filter can
+                be widened to anywhere.</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Open Inventory — the scan, and every filter the site itself publishes.
+
+     Unlike the Pending Inventory filter panel below, these are NOT applied to
+     rows already fetched: they go into the query. That is not a different
+     taste, it is the same rule read the other way — the OS bucket cannot be
+     asked for a narrower list so filtering it locally costs nothing, and the
+     inventory search CAN, so filtering it locally would mean paging thousands
+     of cars to throw most of them away. Picking a filter therefore re-runs
+     the scan.
+
+     The groups are built at runtime from the site's own schema, not written
+     out here: it publishes 536 locations and 74 trims and both move. -->
+<div class="modal wide" id="invModal" role="dialog" aria-label="Open Inventory">
+  <div class="modal-head"><h3>Open Inventory</h3>
+    <span class="modal-sub" id="invCtx"></span>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body" id="invBody">
+    <span class="hint">Reading the filter list from Tesla inventory…</span>
+  </div>
+  <div class="modal-foot">
+    <span class="modal-sub" id="invCount" style="margin-right:auto"></span>
+    <button class="btn btn-ghost" id="invClear">Clear filters</button>
+    <button class="btn btn-dark" id="runInv">Run scan</button>
+  </div>
+</div>
+
 <!-- Pending Inventory filters — every facet the cards carry, in one surface.
 
      A modal rather than a strip of chips because there are eleven of them:
@@ -1444,6 +1574,15 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
            connect here instead: both are tokens rather than session cookies,
            and this is the only board that speaks to either.</div>
       </div>
+
+      <!-- Read-only on purpose. One board offering its own language switch is how
+           the estate ends up in two languages at once; the Hub is the one place
+           it is set, and this says so rather than staying silent. -->
+      <div class="conn" style="margin-top:12px">
+        <i class="dot ok"></i><b>Language</b>
+        <span id="langNow" data-i18n-skip>—</span>
+        <span style="margin-left:auto;font-size:11.5px;color:var(--ink-mute)">Set on the Hub</span>
+      </div>
     </section>
 
     <!-- ── my location ──
@@ -1619,6 +1758,453 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 
 <script>
 "use strict";
+
+/* ── ZoI18n ────────────────────────────────────────────────────────────
+
+   The estate speaks English or Spanish, chosen once on the Hub and read by
+   every board from the shared settings file. This is the client half: it
+   swaps the chrome, and nothing else.
+
+   ── keyed by the English source text, not by invented keys ──
+
+   `ES["Sign-ins"]` rather than `t("admin.signins")`. Two reasons. A string
+   with no entry renders in English, which is a worse-but-fine outcome — with
+   invented keys the same miss renders as `admin.signins`, which is a bug on
+   screen. And the markup stays readable: nobody has to hold a key table in
+   their head to know what a section says.
+
+   ── swept, not annotated ──
+
+   Most of what a board draws comes out of a template literal in JS, not out
+   of the markup. Annotating every one of those would mean editing tens of
+   thousands of lines across five boards to add a language nobody had asked
+   for a week ago. Instead a MutationObserver watches for added nodes and
+   translates them on the way in, so a render written years ago picks up
+   Spanish without being touched.
+
+   The observer watches childList only, deliberately. Everything this file
+   writes is a text node's value or an attribute — never a child — so it can
+   never see its own work and loop. Setting `.textContent` replaces children
+   and therefore *is* caught; a bare `node.nodeValue = x` on an existing text
+   node is not, and wants an explicit `ZoI18n.apply(el)` after it. Nothing in
+   this estate does that yet.
+
+   ── what it must never touch ──
+
+   Data. A VIN, a centre name, an alert string out of Garage, a customer's
+   reference number: those render exactly as they arrived. The dictionary
+   only holds chrome, and anything that renders values sits inside a
+   `data-i18n-skip` subtree so a chrome entry cannot catch a value that
+   happens to read the same.                                              */
+
+/* Chrome only, and deliberately less than it could be.
+
+   Pipeline rung names ("Matched not Scheduled", "Cars on Ground", "VRI
+   Pending"), COG statuses, concern types and symptom names are NOT in here.
+   They are read off Intrepid, Tesla OS and the Service App, and they are what
+   somebody cross-checks against those screens in English. A board that
+   renamed them in Spanish would be disagreeing with the source screen, which
+   is the one thing this estate does not do. */
+const ES = {
+  /* shell */
+  "The Compiler"         : "The Compiler",
+  "Zo Projects Hub"      : "Zo Projects Hub",
+  "Admin"                : "Administración",
+  "Cancel"               : "Cancelar",
+  "Save"                 : "Guardar",
+  "Saved"                : "Guardado",
+  "Saving"               : "Guardando",
+  "Clear"                : "Limpiar",
+  "Clear all"            : "Limpiar todo",
+  "Clear filters"        : "Limpiar filtros",
+  "Done"                 : "Listo",
+  "Edit"                 : "Editar",
+  "Cancel edit"          : "Cancelar edición",
+  "Remove"               : "Quitar",
+  "Removing…"            : "Quitando…",
+  "Update"               : "Actualizar",
+  "Choose"               : "Elegir",
+  "Download"             : "Descargar",
+  "Export"               : "Exportar",
+  "Exporting"            : "Exportando",
+  "Working"              : "Procesando",
+  "Starting"             : "Iniciando",
+  "Scanning the centre…" : "Escaneando el centro…",
+  "Sending"              : "Enviando",
+  "Moving…"              : "Moviendo…",
+  "Switching"            : "Cambiando",
+  "Changing…"            : "Cambiando…",
+  "Cancelling"           : "Cancelando",
+  "Push"                 : "Enviar",
+  "Language"             : "Idioma",
+  "Set on the Hub"       : "Se define en el Hub",
+  "Open the Hub"         : "Abrir el Hub",
+  "Unlock"               : "Desbloquear",
+  "Restricted area. Enter the 6-digit admin code."
+    : "Área restringida. Introduce el código de 6 dígitos.",
+  "Incorrect code."      : "Código incorrecto.",
+  "Wrong password"       : "Contraseña incorrecta",
+  "Settings sections"    : "Secciones de ajustes",
+
+  /* the three tools */
+  "Service Visits"       : "Visitas de servicio",
+  "Service visits"       : "Visitas de servicio",
+  "Containment"          : "Contención",
+  "Logistics"            : "Logística",
+  "VRI List"             : "Lista de VRI",
+  "Vehicles"             : "Vehículos",
+  "Run Scan"             : "Ejecutar escaneo",
+  "Run scan"             : "Ejecutar escaneo",
+  "Run checks"           : "Ejecutar comprobaciones",
+  "Checks"               : "Comprobaciones",
+  "Saved Scans"          : "Escaneos guardados",
+  "Re-run the scan to refresh the list."
+    : "Vuelve a ejecutar el escaneo para actualizar la lista.",
+
+  /* filters and ordering */
+  "Filters"              : "Filtros",
+  "Save Filters"         : "Guardar filtros",
+  "No filters"           : "Sin filtros",
+  "All"                  : "Todos",
+  "Any"                  : "Cualquiera",
+  "Columns"              : "Columnas",
+  "Order by"             : "Ordenar por",
+  "Newest first"         : "Más recientes primero",
+  "Longest first"        : "Más antiguos primero",
+  "Longest waiting"      : "Los que más esperan",
+  "Relevance"            : "Relevancia",
+  "Flagged only"         : "Solo marcados",
+  "Narrow the list"      : "Acotar la lista",
+  "Look for"             : "Buscar",
+  "Look up"              : "Consultar",
+  "One VIN"              : "Un VIN",
+  "Paste a VIN to look at just that car"
+    : "Pega un VIN para ver solo ese coche",
+  "Change the order the cards are in"
+    : "Cambiar el orden de las tarjetas",
+  "Name these filters — e.g. Morning holds"
+    : "Pon nombre a estos filtros — p. ej. Retenciones de la mañana",
+  "Show only the cars whose tickets name these concerns"
+    : "Mostrar solo los coches cuyos tickets citan estas incidencias",
+  "Show only the cars whose service visit still has a non-Tesla contact on it"
+    : "Mostrar solo los coches cuya visita sigue con un contacto que no es de Tesla",
+  "Pick at least one thing to look for"
+    : "Elige al menos una cosa que buscar",
+
+  /* car and ticket panels */
+  "Ticket"               : "Ticket",
+  "Edit ticket"          : "Editar ticket",
+  "Move Ticket"          : "Mover ticket",
+  "Contact"              : "Contacto",
+  "Main contact"         : "Contacto principal",
+  "Billing contact"      : "Contacto de facturación",
+  "Main and billing"     : "Principal y facturación",
+  "Tesla contact"        : "Contacto de Tesla",
+  "Non-Tesla contact"    : "Contacto que no es de Tesla",
+  "Switch all to Tesla contact" : "Cambiar todos al contacto de Tesla",
+  "Photos"               : "Fotos",
+  "Images"               : "Imágenes",
+  "Concern photos"       : "Fotos de la incidencia",
+  "Next car"             : "Coche siguiente",
+  "Previous car"         : "Coche anterior",
+  "Mileage"              : "Kilometraje",
+  "Odometer"             : "Cuentakilómetros",
+  "Time on ground"       : "Tiempo en el patio",
+  "Days"                 : "Días",
+  "Hours"                : "Horas",
+  "Waiting"              : "En espera",
+  "Offsite"              : "Fuera del centro",
+  "Onsite"               : "En el centro",
+  "Onsite & Offsite"     : "En el centro y fuera",
+  "At the offsite lot"   : "En el patio externo",
+  "offsite lot"          : "patio externo",
+  "Both sites"           : "Ambos centros",
+  "Main site"            : "Centro principal",
+  "Open all trunks"      : "Abrir todos los maleteros",
+  "Opening trunks"       : "Abriendo maleteros",
+  "Trunks opened"        : "Maleteros abiertos",
+  "Waking them up"       : "Despertándolos",
+  "Giving the sleepers a moment" : "Dando un momento a los dormidos",
+  "Checking which ones are here" : "Comprobando cuáles están aquí",
+  "Wake every car listed and pop its trunk, so they can be picked out of the lot"
+    : "Despertar cada coche de la lista y abrir su maletero, para localizarlos en el patio",
+  "Grab and pull down to switch every listed car"
+    : "Arrastra hacia abajo para cambiar todos los coches de la lista",
+  "Release to switch"    : "Suelta para cambiar",
+  "Release to move"      : "Suelta para mover",
+  "Release to confirm"   : "Suelta para confirmar",
+  "Release to cancel"    : "Suelta para cancelar",
+  "Slide to move"        : "Desliza para mover",
+  "Slide to save"        : "Desliza para guardar",
+  "Slide to remove"      : "Desliza para quitar",
+  "Slide to confirm the move" : "Desliza para confirmar el movimiento",
+  "Slide to switch to Tesla"  : "Desliza para cambiar a Tesla",
+  "Slide to cancel booking"   : "Desliza para cancelar la reserva",
+  "Keep going…"          : "Sigue…",
+  "Keep pulling…"        : "Sigue tirando…",
+  "Scroll, or use ↑ ↓"   : "Desplázate, o usa ↑ ↓",
+
+  /* progress */
+  "Reading the index"    : "Leyendo el índice",
+  "Reading the ladder"   : "Leyendo la escalera",
+  "Reading the tickets"  : "Leyendo los tickets",
+  "Reading the delivery pipeline" : "Leyendo la cadena de entregas",
+  "Reading the ladder from Intrepid…" : "Leyendo la escalera desde Intrepid…",
+  "Reading the filter list…" : "Leyendo la lista de filtros…",
+  "Reading the filter list from Tesla inventory…"
+    : "Leyendo la lista de filtros del inventario de Tesla…",
+  "Finding these cars in Garage" : "Buscando estos coches en Garage",
+  "Looking the cars up in Garage" : "Consultando los coches en Garage",
+
+  /* admin */
+  "Connections"          : "Conexiones",
+  "Sources"              : "Fuentes",
+  "Connect"              : "Conectar",
+  "Connect again"        : "Conectar de nuevo",
+  "Connecting…"          : "Conectando…",
+  "Reconnect"            : "Reconectar",
+  "Forget"               : "Olvidar",
+  "Not connected"        : "Sin conectar",
+  "No sources connected" : "No hay fuentes conectadas",
+  "Expired"              : "Caducada",
+  "Garage"               : "Garage",
+  "Intrepid"             : "Intrepid",
+  "Tesladex"             : "Tesladex",
+  "Tesla OS"             : "Tesla OS",
+  "Service App"          : "Service App",
+  "Teams"                : "Teams",
+  "Workflows"            : "Workflows",
+  "Maintenance"          : "Mantenimiento",
+  "My location"          : "Mi ubicación",
+  "Use my location"      : "Usar mi ubicación",
+  "Enter manually"       : "Introducir manualmente",
+  "Billing address"      : "Dirección de facturación",
+  "Save address"         : "Guardar dirección",
+  "Save billing address" : "Guardar dirección de facturación",
+  "Save billing contact" : "Guardar contacto de facturación",
+  "Save main contact"    : "Guardar contacto principal",
+  "First name"           : "Nombre",
+  "Last name"            : "Apellidos",
+  "Email"                : "Correo electrónico",
+  "Phone"                : "Teléfono",
+  "Street"               : "Calle",
+  "Line 2"               : "Línea 2",
+  "City"                 : "Ciudad",
+  "State"                : "Provincia",
+  "Country"              : "País",
+  "ZIP"                  : "Código postal",
+  "Sites"                : "Centros",
+  "Site directory"       : "Directorio de centros",
+  "Refresh the site directory" : "Actualizar el directorio de centros",
+  "Set TRT"              : "Definir TRT",
+  "Start typing a centre" : "Empieza a escribir un centro",
+  "Start typing a symptom" : "Empieza a escribir un síntoma",
+  "Start typing — Cypress, Fremont, 17589…"
+    : "Empieza a escribir — Cypress, Fremont, 17589…",
+  "choose a centre"      : "elige un centro",
+  "Operating hours"      : "Horario de funcionamiento",
+  "Only during hours"    : "Solo dentro del horario",
+  "Around the clock"     : "A todas horas",
+  "Opens"                : "Abre",
+  "Closes"               : "Cierra",
+  "Webhook"              : "Webhook",
+  "Incoming webhook"     : "Webhook entrante",
+  "Push URL"             : "URL de envío",
+  "Save webhook"         : "Guardar webhook",
+  "Save push URL and interval" : "Guardar URL de envío e intervalo",
+  "Save SV Call webhook" : "Guardar webhook de SV Call",
+  "Push the row now"     : "Enviar la fila ahora",
+  "Post the list now"    : "Publicar la lista ahora",
+  "Post the VRI card"    : "Publicar la tarjeta de VRI",
+  "Next push"            : "Próximo envío",
+  "Push every (minutes, 0 = off)"
+    : "Enviar cada (minutos, 0 = desactivado)",
+  "Forget centre, cookies and tokens"
+    : "Olvidar centro, cookies y tokens",
+  "Sign-ins live on the" : "Los inicios de sesión están en el",
+  "Credentials are stored in" : "Las credenciales se guardan en",
+
+  /* empty and error states */
+  "Nothing compiled yet" : "Todavía no se ha compilado nada",
+  "Nothing available"    : "No hay nada disponible",
+  "Nothing flagged"      : "Nada marcado",
+  "Nothing waiting"      : "Nada en espera",
+  "Nothing saved yet."   : "Todavía no hay nada guardado.",
+  "Nothing matches those filters" : "Nada coincide con esos filtros",
+  "Nothing that recent"  : "Nada tan reciente",
+  "Nothing on that rung" : "Nada en ese escalón",
+  "Nothing on screen to export." : "No hay nada en pantalla que exportar.",
+  "Nothing on screen to open."   : "No hay nada en pantalla que abrir.",
+  "No holds"             : "Sin retenciones",
+  "No cars in that status" : "No hay coches en ese estado",
+  "No centre set"        : "No hay centro definido",
+  "No contact on the visit" : "La visita no tiene contacto",
+  "No images available on this ticket."
+    : "Este ticket no tiene imágenes.",
+  "No concern logged on this visit yet."
+    : "Todavía no hay ninguna incidencia registrada en esta visita.",
+  "No service centre matches that." : "Ningún centro de servicio coincide.",
+  "No symptom in the Service App matches that."
+    : "Ningún síntoma del Service App coincide.",
+  "Every car on the list answered." : "Todos los coches de la lista respondieron.",
+  "This vehicle has not been built yet." : "Este vehículo todavía no se ha fabricado.",
+  "Export failed:"       : "Falló la exportación:",
+  "Could not load"       : "No se pudo cargar",
+  "Could not reach the server:" : "No se pudo contactar con el servidor:",
+  "Could not open the trunks:"  : "No se pudieron abrir los maleteros:",
+  "Could not load this image — the Service App session may have expired."
+    : "No se pudo cargar esta imagen — puede que la sesión del Service App haya caducado.",
+  "The Service App session has expired." : "La sesión del Service App ha caducado.",
+  "Not connected to the Service App." : "Sin conexión con el Service App.",
+  "Garage session expired — sign in again on the Hub, then try again."
+    : "La sesión de Garage ha caducado — vuelve a iniciar sesión en el Hub e inténtalo de nuevo.",
+  "A required source is not connected" : "Una fuente necesaria no está conectada",
+  "A name is required."  : "Hace falta un nombre.",
+  "A street, city, state and ZIP are required."
+    : "Hacen falta calle, ciudad, provincia y código postal.",
+  "Set a TRT first — the scan is scoped to one centre."
+    : "Define primero un TRT — el escaneo se limita a un centro.",
+  "Set a TRT first — the pipeline is read one centre at a time."
+    : "Define primero un TRT — la cadena se lee de centro en centro.",
+  "That is not a 17-character VIN — 17 characters, no I, O or Q."
+    : "Ese VIN no tiene 17 caracteres — 17 caracteres, sin I, O ni Q.",
+  "Interval off — nothing runs on its own."
+    : "Intervalo desactivado — no se ejecuta nada por su cuenta.",
+  "Webhook cleared. Nothing will be posted."
+    : "Webhook borrado. No se publicará nada.",
+
+  /* days */
+  "Mon" : "Lun", "Tue" : "Mar", "Wed" : "Mié",
+  "Thu" : "Jue", "Fri" : "Vie", "Sat" : "Sáb", "Sun" : "Dom",
+
+  /* composed */
+  "{n} min ago"          : "hace {n} min",
+  "{n}h ago"             : "hace {n} h",
+  "{n}d ago"             : "hace {n} d",
+  "just now"             : "ahora mismo",
+  "never"                : "nunca"
+};
+
+const ZoI18n = (() => {
+  const ATTRS = ["placeholder", "title", "aria-label"];
+  const textWas = new WeakMap();   // text node  -> its English value
+  const attrWas = new WeakMap();   // element    -> Map(attr -> English value)
+  const listeners = [];
+  let lang = "en";
+  let obs = null;
+  let titleEn = null;   // the tab title, which lives outside body
+
+  /* Keys are single-spaced, because markup wraps and a key that had to match
+     the indentation of the line it was written on would break the first time
+     someone reformatted the file. Surrounding whitespace is put back exactly
+     as it was found. */
+  const key = s => s.replace(/\s+/g, " ").trim();
+
+  function swapText(node){
+    const en = textWas.has(node) ? textWas.get(node) : node.nodeValue;
+    const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(en);
+    const core = m[2];
+    if(!core) return;
+    const hit = lang === "es" ? ES[key(core)] : null;
+    const next = m[1] + (hit || core) + m[3];
+    if(hit && !textWas.has(node)) textWas.set(node, en);
+    if(node.nodeValue !== next) node.nodeValue = next;
+  }
+
+  function swapAttrs(el){
+    for(const a of ATTRS){
+      if(!el.hasAttribute(a)) continue;
+      let was = attrWas.get(el);
+      const en = was && was.has(a) ? was.get(a) : el.getAttribute(a);
+      const hit = lang === "es" ? ES[key(en)] : null;
+      const next = hit || en;
+      if(hit){
+        if(!was){ was = new Map(); attrWas.set(el, was); }
+        if(!was.has(a)) was.set(a, en);
+      }
+      if(el.getAttribute(a) !== next) el.setAttribute(a, next);
+    }
+  }
+
+  const SKIP = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1, SVG: 1 };
+
+  function walk(node){
+    if(node.nodeType === 3) return swapText(node);
+    if(node.nodeType !== 1) return;
+    if(SKIP[node.tagName] || node.hasAttribute("data-i18n-skip")) return;
+    swapAttrs(node);
+    for(let n = node.firstChild; n; n = n.nextSibling) walk(n);
+  }
+
+  const apply = root => walk(root || document.body);
+
+  /* Added nodes only. Nothing here writes a child, so the observer cannot see
+     its own work — no re-entry flag, no takeRecords, no loop. */
+  function watch(){
+    if(obs) return;
+    obs = new MutationObserver(muts => {
+      for(const m of muts) for(const n of m.addedNodes) walk(n);
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+  }
+  function unwatch(){ if(obs){ obs.disconnect(); obs = null; } }
+
+  function set(next){
+    const want = next === "es" ? "es" : "en";
+    if(want === lang) return false;
+    lang = want;
+    // Sweep before watching: the sweep restores English from the WeakMaps
+    // when going back, and the observer only ever needs to handle what
+    // arrives after this point.
+    apply(document.body);
+    // <title> is in <head>, so the sweep cannot see it. Same rule as the
+    // rest: the English original is kept so switching back is exact.
+    if(titleEn === null) titleEn = document.title;
+    document.title = (lang === "es" && ES[titleEn]) || titleEn;
+    lang === "es" ? watch() : unwatch();
+    listeners.forEach(fn => { try { fn(lang); } catch {} });
+    return true;
+  }
+
+  /* For strings a board composes rather than writes whole — "{n} min ago".
+     The placeholder travels with the string, so Spanish can put the number
+     somewhere English does not. */
+  function t(s, vars){
+    const out = (lang === "es" && ES[s]) || s;
+    return vars ? out.replace(/\{(\w+)\}/g, (_, k) => (k in vars ? vars[k] : "{" + k + "}")) : out;
+  }
+
+  return {
+    apply, set, t,
+    get     : () => lang,
+    locale  : () => (lang === "es" ? "es-ES" : "en-US"),
+    onChange: fn => listeners.push(fn)
+  };
+})();
+
+/* Read at boot and then on a timer, because the language is set somewhere
+   else — on this Hub's Admin panel, or from a board's point of view on the
+   Hub entirely. Ten seconds is a local file read; the alternative is a board
+   sitting in the wrong language until somebody reloads it. */
+async function pollLang(){
+  try{
+    const r = await fetch("/api/lang", { cache: "no-store" });
+    if(r.ok) ZoI18n.set((await r.json()).lang);
+  }catch{ /* the language is not worth a visible error */ }
+}
+pollLang();
+setInterval(pollLang, 10000);
+
+/* Boards carry a read-only row saying which language they are in and where it
+   is set. The Hub is where it is set, so it has no such row and this does
+   nothing there — which is why it can live in the shared block. */
+function paintLangRow(){
+  const el = document.getElementById("langNow");
+  if(el) el.textContent = ZoI18n.get() === "es" ? "Español" : "English";
+}
+ZoI18n.onChange(paintLangRow);
+paintLangRow();
+
 const $ = id => document.getElementById(id);
 
 const S = {
@@ -2104,13 +2690,30 @@ $("runCog").addEventListener("click", async () => {
 });
 
 /* ── Pending Inventory ──
-   The only tool with no modal in front of it. There is nothing to choose: the
-   bucket is whatever Tesla OS calls "Matched But Not Scheduled" at this
-   centre, and the centre is the one already in the picker. A dialog offering a
-   single button would be a click spent on nothing.
+   This used to run the moment it was pressed, and said so here: there was one
+   bucket, at the centre already in the picker, so a dialog offering a single
+   button would have been a click spent on nothing.
 
-   So the hero button IS the run button, spinner and all. */
-$("expBtn").addEventListener("click", async () => {
+   It now covers two opposite questions — who is waiting for a car, and what
+   there is to give them — so the button opens a chooser. Only "Matched not
+   Scheduled" needs a TRT, and the guard moved with it: Open Inventory can be
+   run at a centre the board has never been pointed at.
+
+   The two paths stay entirely separate below. Matched not Scheduled is the
+   same call it has always been, byte for byte. */
+$("expBtn").addEventListener("click", () => {
+  if(S.busy) return;
+  $("piCtx").textContent = (S.trt && S.trt.name) || (S.trtId ? "TRT " + S.trtId : "");
+  showModal($("piModal"));
+});
+
+$("piMatched").addEventListener("click", () => { hideModal(); expRun(); });
+
+/* showModal without `over` clears the stack and swaps, which is the whole
+   transition — the chooser is answered, not stacked on top of. */
+$("piOpen").addEventListener("click", () => openInvModal());
+
+async function expRun(){
   if(S.busy) return;
   if(!S.trtId){
     note("Set a TRT first — the pipeline is read one centre at a time.");
@@ -2138,7 +2741,571 @@ $("expBtn").addEventListener("click", async () => {
     S.busy = false; progHide();
     btn.disabled = false; btn.innerHTML = restore;
   }
+}
+
+/* ══════════════════════════ Open Inventory ══════════════════════════
+
+   Pending Inventory's other half. The scan lives on the server; this is the
+   panel that builds its query, the wheel it lands in, and the one thing Ed
+   asked for by name — that the filters are still there tomorrow.
+
+   ── the filters are the site's, and they are checked, not assumed ──
+
+   Every group below comes from the schema inventory.tesla.com publishes about
+   itself, so a colour Tesla ships next month arrives without anyone editing
+   this file. What is NOT taken on trust is that a filter works: an inventory
+   search that does not recognise a key answers 200 with a WIDER list, which
+   reads as a real answer. So each one was fired at the live API and kept only
+   if the count moved. Two of them answered HTTP 412 instead — they are listed
+   in INV_SKIP with that as the reason, so the next reader does not re-probe
+   them hopefully. */
+
+const INV_KEY = "compiler.inv";
+
+/* Not filters, or not filters this panel can honestly offer. Each one carries
+   why, because "it isn't here" is the question a reader arrives with. */
+const INV_SKIP = {
+  Model              : "the scan's own Model toggle",
+  TitleStatus        : "the scan's own New / Used toggle",
+  georegions         : "a postcode-and-radius search; this board scopes by Location",
+  range              : "the radius that goes with georegions",
+  PaymentType        : "a finance framing, not a description of a car",
+  paymentRange       : "the payment slider that goes with PaymentType",
+  DemoDrive          : "booking a demo drive, not finding a car",
+  VIN                : "a search box rather than a facet",
+  /* Both refused on the wire. Their schema entries are min/max sliders and the
+     query shape they want was not discovered — sending the obvious ones got
+     412 Precondition Failed, which at least means the API validates rather
+     than silently widening. Left out rather than guessed at. */
+  VehicleLocationType: "HTTP 412 — nested-group wire format never proven",
+  Odometer           : "HTTP 412 — min/max wire format never proven"
+};
+
+/* Beyond this many choices a group gets a search box and a scrolling list.
+   Vrl has 536 and TRIM 74; laid out as chips either would bury the modal. */
+const INV_BIG  = 14;
+const INV_SHOW = 40;      // how many of a long list are rendered at once
+
+const INV_SORTS = [
+  { v: "Relevance",  label: "Relevance" },
+  { v: "Price",      label: "Price" },
+  { v: "Year",       label: "Year" },
+  { v: "Odometer",   label: "Mileage" }
+];
+
+/* ── what survives a reload ──
+   localStorage, for the reason written above PRESET_KEY: a personal habit
+   rather than a board setting, and no new state file in a published board
+   folder. Ed's ask was that closing the page does not lose the filters. */
+function loadInv(){
+  try{
+    const raw = JSON.parse(localStorage.getItem(INV_KEY) || "null");
+    if(!raw || typeof raw !== "object") return null;
+    return {
+      model    : String(raw.model || ""),
+      condition: String(raw.condition || ""),
+      sort     : String(raw.sort || "Relevance"),
+      options  : (raw.options && typeof raw.options === "object") ? raw.options : {}
+    };
+  }catch{ return null; }        // a corrupt entry reads as nothing saved
+}
+function storeInv(){
+  try { localStorage.setItem(INV_KEY, JSON.stringify(S.inv)); }
+  catch { /* a browser refusing storage loses the habit, not the scan */ }
+}
+
+/* First run seeds Location from the picker — Ed's centre is the answer he
+   wants most mornings — but only when nothing has been saved. After that the
+   saved selection wins, including a deliberately empty Location. */
+function invDefaults(){
+  return {
+    model: "my", condition: "new", sort: "Relevance",
+    options: S.trtId ? { Vrl: [String(S.trtId)] } : {}
+  };
+}
+
+/* A choice is offered only where the site itself offers it: `availability` is
+   a list like ["my_new","my_used"], and an empty one means everywhere. This is
+   what stops New Model S — which Tesla does not sell — from appearing. */
+function invFits(choice, model, condition){
+  const av = choice && choice.availability;
+  if(!Array.isArray(av) || !av.length) return true;
+  return av.includes(`${model}_${condition}`);
+}
+
+/* Year's schema entry is a slider — {model, condition, min, max, step} — so it
+   has no code list to render. The API takes it as discrete years though
+   (2021 → 3 cars, 2022 → 7, both → 10), so the chips are generated from the
+   site's own bounds for whatever model and condition are selected. */
+function invYearChoices(schema, model, condition){
+  const band = (schema.filters.Year?.choices || [])
+    .find(c => c.model === model && c.condition === condition);
+  if(!band) return [];
+  const out = [];
+  for(let y = Number(band.max); y >= Number(band.min) && out.length < 30; y--){
+    out.push({ code: String(y), name: String(y) });
+  }
+  return out;
+}
+
+function invGroups(schema){
+  const { model, condition } = S.inv;
+  const out = [];
+  for(const [key, f] of Object.entries(schema.filters || {})){
+    if(INV_SKIP[key]) continue;
+    const choices = (key === "Year" ? invYearChoices(schema, model, condition)
+                                    : (f.choices || []))
+      .filter(c => c && c.code != null && invFits(c, model, condition))
+      .map(c => ({ code: String(c.code), name: String(c.name || c.label || c.code).trim() || String(c.code) }));
+    /* A group with nothing in it for this model is not a group. Dropped
+       rather than shown empty — the same call the deck's filter panel makes. */
+    if(!choices.length) continue;
+    out.push({ key, label: f.name || key, choices });
+  }
+  /* Location first: it is the one most likely to be changed, and the one the
+     board seeds. The rest keep the site's own order. */
+  out.sort((a, b) => (a.key === "Vrl" ? -1 : 0) - (b.key === "Vrl" ? -1 : 0));
+  return out;
+}
+
+/* ── the two place groups are typed into, not picked from ──
+
+   Location and Regions are lists of PLACES, and you already know which place
+   you want before you open the panel. Every other group is a vocabulary you
+   browse — you may not know Tesla calls it "Zen Grey" until you see it — so
+   those stay as chips.
+
+   The difference matters most on Location. Rendering it as chips meant forty
+   buttons on screen out of 536, alphabetical, and enough of the list is raw
+   street addresses ("10801 Mastin St", "4603 N Brawley Ave") that the first
+   screenful is all numbers. Floating the picked one to the top helped and did
+   not fix it: it is still a wall to read past. Typed, the wall never appears
+   and the selection is the only thing standing. */
+/* Keyed to the singular, because the placeholder says "Add another —" and the
+   site's own labels are "Location" and "Regions". Derived from the label it
+   read "Add another regions". Two entries is not a pluralisation rule worth
+   writing; when a third group joins, add it here. */
+const INV_TAGGED = new Map([
+  ["Vrl",               "location"],
+  ["FleetSalesRegions", "region"]
+]);
+
+/* How many suggestions to drop under the box. Enough to choose from, short
+   enough that it never becomes the list this was built to avoid. */
+const INV_SUGGEST = 8;
+
+function invTagGroupHtml(g){
+  const picked = S.inv.options[g.key] || [];
+  const has    = new Set(picked);
+  const q      = (S.invSearch[g.key] || "").trim().toLowerCase();
+  const by     = new Map(g.choices.map(c => [c.code, c.name]));
+
+  /* Suggestions only while something is typed. An empty box offering the
+     first eight of 536 would be the same wall, just shorter. */
+  const hits = !q ? [] : g.choices
+    .filter(c => !has.has(c.code) && c.name.toLowerCase().includes(q))
+    /* Names that START with what was typed first: searching "houston" should
+       lead with "Houston", not with "SpringHill Suites by Marriott Houston
+       Northwest", which is what a plain substring order gives. */
+    .sort((a, b) => (b.name.toLowerCase().startsWith(q) ? 1 : 0) -
+                    (a.name.toLowerCase().startsWith(q) ? 1 : 0));
+  const shown = hits.slice(0, INV_SUGGEST);
+
+  return `<div class="facet" data-inv-group="${esc(g.key)}">
+    <div class="facet-head"><span>${esc(g.label)}</span>
+      ${picked.length ? `<button data-inv-clear="${esc(g.key)}">Clear</button>` : ""}</div>
+    ${picked.length ? `<div class="tags">${picked.map(code =>
+      `<span class="tag">${esc(by.get(code) || code)}<button data-inv-untag="${esc(g.key)}"
+         data-inv-code="${esc(code)}" aria-label="Remove ${esc(by.get(code) || code)}">×</button></span>`
+      ).join("")}</div>` : ""}
+    <div class="tagbox">
+      <input class="inv-search" type="search" autocomplete="off"
+        data-inv-search="${esc(g.key)}" data-inv-tagging="1"
+        placeholder="${picked.length
+          ? `Add another ${esc(INV_TAGGED.get(g.key))}`      // singular
+          : `Search ${esc(g.label.toLowerCase())}`           // the site's own plural
+        } — ${g.choices.length} to choose from"
+        value="${esc(S.invSearch[g.key] || "")}">
+      ${!q ? "" : shown.length
+        ? `<div class="suggest">${shown.map((c, i) =>
+            `<button class="sug${i ? "" : " first"}" data-inv-pick="${esc(g.key)}"
+               data-inv-code="${esc(c.code)}">${esc(c.name)}</button>`).join("")}
+           ${hits.length > shown.length
+             ? `<div class="inv-more">${hits.length - shown.length} more — keep typing.</div>` : ""}
+           </div>`
+        : `<div class="suggest"><div class="inv-more">Nothing matches “${esc(q)}”.</div></div>`}
+    </div>
+  </div>`;
+}
+
+function invGroupHtml(g){
+  if(INV_TAGGED.has(g.key)) return invTagGroupHtml(g);
+
+  const picked = new Set(S.inv.options[g.key] || []);
+  const q      = (S.invSearch[g.key] || "").toLowerCase();
+  const big    = g.choices.length > INV_BIG;
+
+  /* Picked options are always rendered, even when a search would hide them —
+     otherwise narrowing the box makes a live filter vanish from the panel
+     while it is still narrowing the scan. */
+  const hits = g.choices.filter(c => picked.has(c.code) ||
+                                     !q || c.name.toLowerCase().includes(q));
+
+  hits.sort((a, b) => (picked.has(b.code) ? 1 : 0) - (picked.has(a.code) ? 1 : 0));
+  const shown = hits.slice(0, big ? INV_SHOW : hits.length);
+
+  return `<div class="facet" data-inv-group="${esc(g.key)}">
+    <div class="facet-head"><span>${esc(g.label)}</span>
+      ${picked.size ? `<button data-inv-clear="${esc(g.key)}">Clear</button>` : ""}</div>
+    ${big ? `<input class="inv-search" type="search" data-inv-search="${esc(g.key)}"
+              placeholder="Search ${esc(g.label.toLowerCase())} — ${g.choices.length} of them"
+              value="${esc(S.invSearch[g.key] || "")}">` : ""}
+    <div class="opts${big ? " scroll" : ""}">
+      ${shown.map(c => `<button class="opt${picked.has(c.code) ? " on" : ""}"
+        data-inv-pick="${esc(g.key)}" data-inv-code="${esc(c.code)}">${esc(c.name)}</button>`).join("")}
+      ${hits.length > shown.length
+        ? `<div class="inv-more">Showing ${shown.length} of ${hits.length} —
+             type above to narrow.</div>` : ""}
+      ${!hits.length ? `<div class="inv-more">Nothing matches “${esc(q)}”.</div>` : ""}
+    </div>
+  </div>`;
+}
+
+function paintInvPanel(){
+  const schema = S.invSchema;
+  if(!schema){ $("invBody").innerHTML = `<span class="hint">Reading the filter list…</span>`; return; }
+
+  const models = (schema.filters.Model?.choices || [])
+    .filter(c => !(c.disabledConditions || []).includes(S.inv.condition));
+  const conds  = (schema.filters.TitleStatus?.choices || [])
+    .filter(c => !(c.disabledModels || []).includes(S.inv.model));
+
+  const chip = (on, attr, code, label, sub) =>
+    `<button class="opt${on ? " on" : ""}" ${attr}="${esc(code)}">${esc(label)}${
+      sub ? ` <small>${esc(sub)}</small>` : ""}</button>`;
+
+  $("invBody").innerHTML = `
+    <div class="facet">
+      <div class="facet-head"><span>Model</span></div>
+      <div class="opts">${models.map(c =>
+        chip(S.inv.model === c.code, "data-inv-model", c.code, c.name, c.sub_name)).join("")}</div>
+    </div>
+    <div class="facet">
+      <div class="facet-head"><span>Inventory type</span></div>
+      <div class="opts">${conds.map(c =>
+        chip(S.inv.condition === c.code, "data-inv-cond", c.code, c.name)).join("")}</div>
+      <div class="hint">Used cars carry a real VIN and a listing to open. New
+        ones are published with the VIN masked, so those cards show the order
+        and the picture and say so.</div>
+    </div>
+    <div class="facet">
+      <div class="facet-head"><span>Order by</span></div>
+      <div class="opts">${INV_SORTS.map(s =>
+        chip(S.inv.sort === s.v, "data-inv-sort", s.v, s.label)).join("")}</div>
+    </div>
+    ${invGroups(schema).map(invGroupHtml).join("")}
+    ${schema.stale ? `<div class="hint">The filter list could not be refreshed just
+      now, so it may be out of date. The cars themselves are live.</div>` : ""}`;
+
+  const n = Object.values(S.inv.options).filter(v => v && v.length).length;
+  $("invCount").textContent = n ? `${n} filter${n === 1 ? "" : "s"} set` : "No filters";
+}
+
+async function openInvModal(){
+  if(!S.inv) S.inv = loadInv() || invDefaults();
+  S.invSearch = S.invSearch || {};
+  $("invCtx").textContent = "Tesla inventory";
+  showModal($("invModal"));
+
+  if(!S.invSchema){
+    try{
+      S.invSchema = await api("/api/inv/filters");   // no body means GET
+    }catch(err){
+      $("invBody").innerHTML = `<div class="note err">${esc(err.message)}</div>`;
+      return;
+    }
+    /* A saved model or condition the site has stopped offering falls back
+       rather than being sent to a scan that would refuse it. */
+    if(!S.invSchema.models.includes(S.inv.model)) S.inv.model = S.invSchema.models[0];
+    if(!S.invSchema.conds.includes(S.inv.condition)) S.inv.condition = S.invSchema.conds[0];
+  }
+  paintInvPanel();
+}
+
+/* One delegated listener for the whole panel: it is rebuilt on every pick, so
+   per-button handlers would have to be rebound each time. */
+$("invBody").addEventListener("click", e => {
+  const t = e.target.closest(
+    "[data-inv-model],[data-inv-cond],[data-inv-sort],[data-inv-pick],[data-inv-clear],[data-inv-untag]");
+  if(!t) return;
+
+  /* Which box to hand the caret back to. Picking a suggestion should leave you
+     typing the next place, not hunting for the box again. */
+  let refocus = null;
+
+  if(t.dataset.invModel){
+    S.inv.model = t.dataset.invModel;
+    /* Trim, paint and the rest are model-specific, and a trim from another
+       model narrows to nothing. Dropped with the model rather than left to
+       produce an empty scan nobody can explain. */
+    S.inv.options = invKeepable(S.inv.options);
+  }
+  else if(t.dataset.invCond){ S.inv.condition = t.dataset.invCond; S.inv.options = invKeepable(S.inv.options); }
+  else if(t.dataset.invSort){ S.inv.sort = t.dataset.invSort; }
+  else if(t.dataset.invClear){
+    delete S.inv.options[t.dataset.invClear];
+    delete S.invSearch[t.dataset.invClear];
+  }
+  else if(t.dataset.invUntag){
+    const k = t.dataset.invUntag;
+    const left = (S.inv.options[k] || []).filter(x => x !== t.dataset.invCode);
+    if(left.length) S.inv.options[k] = left; else delete S.inv.options[k];
+    if(INV_TAGGED.has(k)) refocus = k;
+  }
+  else{
+    const k = t.dataset.invPick, code = t.dataset.invCode;
+    const cur = new Set(S.inv.options[k] || []);
+    /* A tagged group only ever ADDS from its suggestions — the suggestion list
+       already excludes what is picked, so a click there can never be a
+       toggle-off. Removing is the × on the tag, which is the only affordance
+       that looks like removing. */
+    if(INV_TAGGED.has(k)){
+      cur.add(code);
+      S.invSearch[k] = "";      // box empties, so the suggestions close
+      refocus = k;
+    }else{
+      cur.has(code) ? cur.delete(code) : cur.add(code);
+    }
+    if(cur.size) S.inv.options[k] = [...cur]; else delete S.inv.options[k];
+  }
+  storeInv();
+  paintInvPanel();
+  if(refocus) invFocus(refocus);
 });
+
+/* The panel is rebuilt wholesale on every change, so the caret has to be put
+   back by hand afterwards — the element it was in no longer exists. */
+function invFocus(key){
+  const box = $("invBody").querySelector(`[data-inv-search="${CSS.escape(key)}"]`);
+  if(!box) return;
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+}
+
+/* Enter takes the first suggestion, which is what a box that looks like this
+   is expected to do. Escape clears the typing rather than closing the modal,
+   since the modal is not what the caret is in. */
+$("invBody").addEventListener("keydown", e => {
+  const box = e.target.closest("[data-inv-tagging]");
+  if(!box) return;
+  const key = box.dataset.invSearch;
+
+  if(e.key === "Enter"){
+    e.preventDefault();
+    const first = $("invBody").querySelector(
+      `[data-inv-group="${CSS.escape(key)}"] .sug.first`);
+    if(first) first.click();
+    return;
+  }
+  if(e.key === "Escape" && box.value){
+    e.preventDefault();
+    e.stopPropagation();          // or the modal closes out from under it
+    S.invSearch[key] = "";
+    paintInvPanel();
+    invFocus(key);
+    return;
+  }
+  /* Backspace on an empty box takes the last tag off, the way every tag input
+     behaves. Only when empty, or it would eat a tag mid-word. */
+  if(e.key === "Backspace" && !box.value){
+    const cur = S.inv.options[key] || [];
+    if(!cur.length) return;
+    e.preventDefault();
+    const left = cur.slice(0, -1);
+    if(left.length) S.inv.options[key] = left; else delete S.inv.options[key];
+    storeInv();
+    paintInvPanel();
+    invFocus(key);
+  }
+});
+
+$("invBody").addEventListener("input", e => {
+  const box = e.target.closest("[data-inv-search]");
+  if(!box) return;
+  const key = box.dataset.invSearch;
+  S.invSearch[key] = box.value;
+  paintInvPanel();
+  /* Repainting takes the focus with it, and a search box that loses the caret
+     after one keystroke cannot be typed into. */
+  invFocus(key);
+});
+
+/* Anything the new model or condition no longer offers is dropped. Location is
+   never dropped: a Vrl is a place, and places do not stop existing because the
+   model changed. */
+function invKeepable(options){
+  const schema = S.invSchema;
+  if(!schema) return options;
+  const groups = new Map(invGroups(schema).map(g => [g.key, new Set(g.choices.map(c => c.code))]));
+  const out = {};
+  for(const [k, v] of Object.entries(options || {})){
+    if(k === "Vrl"){ out[k] = v; continue; }
+    const ok = groups.get(k);
+    const kept = ok ? (v || []).filter(x => ok.has(x)) : [];
+    if(kept.length) out[k] = kept;
+  }
+  return out;
+}
+
+$("invClear").addEventListener("click", () => {
+  S.inv.options = {}; S.invSearch = {};
+  storeInv(); paintInvPanel();
+});
+
+$("runInv").addEventListener("click", () => { hideModal(); invRun(); });
+
+async function invRun(){
+  if(S.busy) return;
+  S.busy = true;
+  const btn = $("expBtn");
+  const restore = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<i class="spin"></i>Reading';
+  clearNotes(); progWatch();
+
+  try{
+    renderInv(await api("/api/inv/scan", {
+      model: S.inv.model, condition: S.inv.condition,
+      sort : S.inv.sort,  options  : S.inv.options
+    }));
+  }catch(err){
+    /* No credential to be dead, so there is no "go and reconnect" to offer —
+       a failure here is the host or the query, and both are in the message. */
+    note(err.message, true);
+  }finally{
+    S.busy = false; progHide();
+    btn.disabled = false; btn.innerHTML = restore;
+  }
+}
+
+const money = n => n == null ? "" : "$" + Number(n).toLocaleString(ZoI18n.locale());
+
+function icardHtml(r){
+  const shot = carShot(r, 500);
+  const tags = [];
+  if(r.demo)      tags.push(`<span class="pcard-wait" title="Demo vehicle">Demo</span>`);
+  if(r.damage)    tags.push(`<span class="pcard-wait" title="Has a repair disclosure">Repair</span>`);
+  if(r.inTransit) tags.push(`<span class="pcard-wait" title="Not at the location yet">In transit</span>`);
+
+  return `<article class="pcard">
+    <div class="pcard-shot">
+      ${shot ? `<img data-src="${esc(shot)}" alt="${esc([r.year, r.modelName, r.trim]
+          .filter(Boolean).join(" "))}" onerror="this.classList.add('gone')">` : ""}
+      <div class="pcard-tags">${tags.join("")}</div>
+    </div>
+    <div class="pcard-b">
+      <div class="pcard-t">${esc([r.year, r.modelName].filter(Boolean).join(" ")) || "Unknown model"}</div>
+      ${r.trim ? `<div class="pcard-sub">${esc(r.trim)}</div>` : ""}
+      <div class="pcard-vin">${r.vin ? esc(r.vin) : "VIN not published for new inventory"}</div>
+      <div class="pcard-foot">
+        <span>${esc([r.vrl || r.city, r.state].filter(Boolean).join(", ")) || "location unknown"}</span>
+        <span class="rn">${esc(money(r.price))}</span>
+      </div>
+    </div>
+  </article>`;
+}
+
+function ispecHtml(r){
+  /* Every line named even when empty, the same bargain deckSpecHtml makes: in
+     a labelled panel a silently absent row reads as a car with no paint. */
+  const rows = [
+    ...r.spec.map(s => [s.k, s.v]),
+    ["Mileage", r.odometer == null ? "" : r.odometer.toLocaleString(ZoI18n.locale()) + " " + r.odoUnit],
+    ["Location", [r.vrl || r.city, r.state].filter(Boolean).join(", ")]
+  ];
+
+  const price = [
+    r.price    ? `<b>${esc(money(r.price))}</b>` : "",
+    r.discount ? `<span class="none">${esc(money(r.discount))} off</span>` : ""
+  ].filter(Boolean).join(" · ");
+
+  return `
+    <h3>${esc([r.year, r.modelName].filter(Boolean).join(" ")) || "Unknown model"}</h3>
+    <div class="lede">${esc([r.trim, r.condition === "used" ? "Used" : "New"]
+      .filter(Boolean).join(" · "))}${price ? " · " + price : ""}</div>
+    <dl class="spec-grid">${rows.map(([k, v]) => `
+      <div class="spec-row"><dt>${esc(k)}</dt>
+        <dd class="${v ? "" : "none"}">${v ? esc(v) : "not on record"}</dd></div>`).join("")}</dl>
+    ${r.listing
+      ? `<div class="deck-foot"><a href="${esc(r.listing)}" target="_blank" rel="noopener">
+           Open the listing ↗</a></div>`
+      /* Not a missing link — there is nothing to link to. New inventory is
+         published with the VIN masked and no listing token, and the masked
+         form redirects straight back to the search page. Said plainly rather
+         than offered as a link that goes nowhere. */
+      : `<div class="deck-foot none">Tesla does not publish a VIN or a listing
+           for new inventory until it is matched to an order.</div>`}`;
+}
+
+function renderInv(data){
+  S.tool = "inv";
+  S.rows = data.rows || [];
+  S.expIndex = 0;
+  /* Filters and orderings belonging to the other tools say nothing about
+     these rows, and a leftover would put a stale word in the subtitle. */
+  S.concern = []; S.contact = []; S.expFilters = {}; S.expWait = 0;
+
+  const prices = S.rows.map(r => r.price).filter(n => n != null).sort((a, b) => a - b);
+  const here   = S.rows.filter(r => !r.inTransit).length;
+
+  paintStats([
+    { k: "Available", v: (data.total || S.rows.length).toLocaleString(ZoI18n.locale()) },
+    ...(prices.length ? [
+      { k: "From", v: money(prices[0]) },
+      { k: "To",   v: money(prices[prices.length - 1]) }] : []),
+    { k: "At location", v: here.toLocaleString(ZoI18n.locale()),
+      small: S.rows.length ? Math.round(here / S.rows.length * 100) + "%" : "" }
+  ]);
+
+  const where = (S.inv.options.Vrl || []).length
+    ? invNameFor("Vrl", S.inv.options.Vrl)
+    : (S.inv.options.FleetSalesRegions || []).length
+      ? invNameFor("FleetSalesRegions", S.inv.options.FleetSalesRegions)
+      : "everywhere";
+  const mdl = (S.invSchema?.filters.Model?.choices || [])
+    .find(c => c.code === data.model);
+
+  S.listSub = `${(mdl && mdl.name) || data.model} · ${data.condition === "used" ? "used" : "new"} · ${where}`;
+  $("listTitle").textContent = "Open Inventory";
+  $("listHead").hidden = false;
+  paintList();
+
+  if(S.rows.length) requestAnimationFrame(() => {
+    const b = $("listHead").getBoundingClientRect();
+    if(b.top > (window.innerHeight || 800) * 0.42){
+      $("listHead").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+
+  if(!S.rows.length){
+    $("empty").hidden = true;
+    $("list").innerHTML = `<div class="empty"><h3>Nothing available</h3>
+      <p>No ${esc(data.condition)} ${esc((mdl && mdl.name) || data.model)} matches those
+         filters ${esc(where === "everywhere" ? "anywhere" : "at " + where)}.
+         Open <b>Pending Inventory</b> again to widen them.</p></div>`;
+  }
+
+  const msgs = [...(data.notes || [])];
+  if(msgs.length) note(msgs.join("  ")); else clearNotes();
+}
+
+/* Codes back into the site's own words for the subtitle, so a scan reads
+   "Houston" rather than "17589". */
+function invNameFor(key, codes){
+  const f = S.invSchema && S.invSchema.filters[key];
+  const by = new Map(((f && f.choices) || []).map(c => [String(c.code), String(c.name || c.code).trim()]));
+  const names = codes.map(c => by.get(String(c)) || String(c));
+  return names.length <= 2 ? names.join(" + ") : `${names.length} locations`;
+}
 
 /* ── progress ── */
 let progTimer = null;
@@ -4151,11 +5318,19 @@ function deckTo(v, snap){
 /* The spec panel and the counter, repainted alone. The wheel is not touched:
    its cards are already where they should be, and rebuilding them here would
    throw away the frame that is mid-flight. */
+/* Two tools ride this wheel now and their rows are not the same shape: a
+   matched car has a wait, an order and a Garage record, an available one has a
+   price, a mileage and a location. The MOTION is what they share, so the
+   dispatch is here at the two places markup is produced rather than in the
+   twelve places the wheel is driven from. */
+const deckCard = r => S.tool === "inv" ? icardHtml(r) : pcardHtml(r);
+const deckSpec = r => S.tool === "inv" ? ispecHtml(r) : deckSpecHtml(r);
+
 function deckPaintSpec(){
   const r = deckRows[S.expIndex];
   if(!r || !$("deckSpec")) return;
-  $("deckSpecBody").innerHTML = deckSpecHtml(r);
-  $("deckCount").textContent = `${S.expIndex + 1} of ${deckRows.length.toLocaleString()}`;
+  $("deckSpecBody").innerHTML = deckSpec(r);
+  $("deckCount").textContent = `${S.expIndex + 1} of ${deckRows.length.toLocaleString(ZoI18n.locale())}`;
   $("deckUp").disabled   = S.expIndex <= 0;
   $("deckDown").disabled = S.expIndex >= deckRows.length - 1;
 }
@@ -4165,7 +5340,7 @@ function deckHtml(rows){
      until the wheel brings them near, and everything outside the window is
      display:none from the first layout pass. */
   const items = rows.map((r, j) =>
-    `<div class="wheel-item" data-di="${j}" style="display:none">${pcardHtml(r)}</div>`).join("");
+    `<div class="wheel-item" data-di="${j}" style="display:none">${deckCard(r)}</div>`).join("");
 
   const arrow = up => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
     stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="${
@@ -4207,7 +5382,7 @@ const deckGo = delta => deckTo(Math.round(deckPos) + delta, true);
 /* One handler on the list, because the deck is rebuilt whenever the rows
    change and anything bound to a card would outlive its card. */
 $("list").addEventListener("click", e => {
-  if(S.tool !== "exp") return;
+  if(S.tool !== "exp" && S.tool !== "inv") return;
   if(e.target.closest("#deckUp"))   return deckGo(-1);
   if(e.target.closest("#deckDown")) return deckGo(1);
 
@@ -4258,7 +5433,7 @@ function deckInView(){
 }
 
 $("list").addEventListener("wheel", e => {
-  if(S.tool !== "exp" || !$("wheel") || !deckRows.length) return;
+  if((S.tool !== "exp" && S.tool !== "inv") || !$("wheel") || !deckRows.length) return;
   if(!deckInView()) return;
 
   const px = wheelPixels(e);
@@ -4285,7 +5460,7 @@ $("list").addEventListener("wheel", e => {
 }, { passive: false });
 
 document.addEventListener("keydown", e => {
-  if(S.tool !== "exp" || !$("wheel")) return;
+  if((S.tool !== "exp" && S.tool !== "inv") || !$("wheel")) return;
   // Not while a modal is up: the filter panel scrolls, and Escape and the
   // arrows belong to whatever is in front.
   if(document.querySelector(".modal.on")) return;
@@ -4436,7 +5611,7 @@ function paintExpFilters(){
       return (!w.v || (d != null && d >= w.v)) && expMatches(r, "wait");
     }).length;
     return `<button class="opt exp-wait${S.expWait === w.v ? " on" : ""}" data-wait="${w.v}"
-      >${esc(w.label)} <small>${n.toLocaleString()}</small></button>`;
+      >${esc(w.label)} <small>${n.toLocaleString(ZoI18n.locale())}</small></button>`;
   }).join("");
 
   const groups = EXP_FACETS.map(f => {
@@ -4470,7 +5645,7 @@ function paintExpFilters(){
       <div class="opts">${opts.map(([v, n]) =>
         `<button class="opt exp-opt${picked.includes(v) ? " on" : ""}"
           data-fk="${esc(f.k)}" data-fv="${esc(v)}"
-          >${esc(v)} <small>${n.toLocaleString()}</small></button>`).join("")}</div>
+          >${esc(v)} <small>${n.toLocaleString(ZoI18n.locale())}</small></button>`).join("")}</div>
     </div>`;
   }).join("");
 
@@ -4491,8 +5666,8 @@ function paintExpFilters(){
     </div>
     ${groups}`;
 
-  $("expFilterCount").textContent = `${shown.toLocaleString()} of ${
-    S.rows.length.toLocaleString()} card${S.rows.length === 1 ? "" : "s"}`;
+  $("expFilterCount").textContent = `${shown.toLocaleString(ZoI18n.locale())} of ${
+    S.rows.length.toLocaleString(ZoI18n.locale())} card${S.rows.length === 1 ? "" : "s"}`;
   $("expFilterCtx").textContent = expActive()
     ? `${expActive()} filter${expActive() === 1 ? "" : "s"}` : "everything on screen";
   $("expFilterClear").hidden = !expActive();
@@ -4639,6 +5814,11 @@ function visibleRows(){
      longest one. Both the narrowing and the order live in one place — see
      the long note above EXP_FACETS for why neither is part of the scan. */
   if(S.tool === "exp") return expSorted(S.rows.filter(r => expMatches(r)));
+  /* Nothing to do: Open Inventory's narrowing and its order both went into the
+     query, so what came back IS the list. Sorting again here would be a second
+     opinion about an order the search already applied, and filtering again
+     would make the count disagree with `total`. */
+  if(S.tool === "inv") return S.rows;
   if(S.tool === "cog"){
     /* Sorted here rather than re-scanned: the server hands back longest-first
        and the other order is the same rows read the other way up. */
@@ -4700,12 +5880,12 @@ function paintConcerns(){
   $("concernMenu").innerHTML =
     `<button class="qrow crow${S.concern.length ? "" : " on"}" data-ci="-1">
        ${tick}<span class="qt">All concerns</span>
-       <span class="qn">${scannedRows().length.toLocaleString()}</span></button>
+       <span class="qn">${scannedRows().length.toLocaleString(ZoI18n.locale())}</span></button>
      <div class="qsep"></div>` +
     tally.map((t, i) => `
       <button class="qrow crow${S.concern.includes(t.v) ? " on" : ""}" data-ci="${i}">
         ${tick}<span class="qt">${esc(t.label)}</span>
-        <span class="qn">${t.count.toLocaleString()}</span>
+        <span class="qn">${t.count.toLocaleString(ZoI18n.locale())}</span>
       </button>`).join("");
   concernMenuTally = tally;
 }
@@ -4826,12 +6006,12 @@ function paintContactChip(){
   $("ctMenu").innerHTML =
     `<button class="qrow crow${S.contact.length ? "" : " on"}" data-cs="">
        ${tick}<span class="qt">All contacts</span>
-       <span class="qn">${scannedRows().length.toLocaleString()}</span></button>
+       <span class="qn">${scannedRows().length.toLocaleString(ZoI18n.locale())}</span></button>
      <div class="qsep"></div>` +
     tally.map(t => `
       <button class="qrow crow${S.contact.includes(t.v) ? " on" : ""}" data-cs="${t.v}">
         ${tick}<span class="qt">${esc(t.label)}</span>
-        <span class="qn">${t.count.toLocaleString()}</span>
+        <span class="qn">${t.count.toLocaleString(ZoI18n.locale())}</span>
       </button>`).join("");
 }
 
@@ -4929,11 +6109,11 @@ function paintCtSwitch(){
     /* The count is in the words, for the reason the trunk button's is: "switch
        all to Tesla contact" and "switch all 41 to Tesla contact" are different
        sentences, and only one of them can be pulled by mistake. */
-    setLeverText(`Switch all ${go.length.toLocaleString()} to Tesla contact`);
-    knob.title = `Grab and pull down to put the Tesla contact on ${go.length.toLocaleString()} ` +
+    setLeverText(`Switch all ${go.length.toLocaleString(ZoI18n.locale())} to Tesla contact`);
+    knob.title = `Grab and pull down to put the Tesla contact on ${go.length.toLocaleString(ZoI18n.locale())} ` +
       `service visit${go.length === 1 ? "" : "s"} — the cars listed, read off each car's own record.`;
   }else{
-    setLeverText(`${blocked.length.toLocaleString()} non-Tesla · all delivered`);
+    setLeverText(`${blocked.length.toLocaleString(ZoI18n.locale())} non-Tesla · all delivered`);
     knob.title = "Every non-Tesla contact on screen is on a delivered car, and this board " +
       "will not switch those — a delivered car's contact is the customer's own. " +
       "Only the One VIN lookup reaches a delivered car; scans never do.";
@@ -4957,9 +6137,9 @@ const setLeverText = t => { $("ctSwitch").querySelector(".lv-text").textContent 
     knob.style.transform = `translateY(${dy}px)`;
     fill.style.height = (30 + dy) + "px";
     el.classList.toggle("armed", armed);
-    setLeverText(armed ? `Release to switch ${ctPlan.length.toLocaleString()}`
+    setLeverText(armed ? `Release to switch ${ctPlan.length.toLocaleString(ZoI18n.locale())}`
                : dy > 8 ? "Keep pulling…"
-               : `Switch all ${ctPlan.length.toLocaleString()} to Tesla contact`);
+               : `Switch all ${ctPlan.length.toLocaleString(ZoI18n.locale())} to Tesla contact`);
   };
   /* Always through here, whichever way the pull ends, so the lever can never
      be left half down with the track hanging over the list. */
@@ -5040,7 +6220,7 @@ async function runCtSwitch(){
   let done = 0;
   const ok = [], bad = [];
   const tick = () => {
-    setLeverText(`Switching ${done.toLocaleString()} of ${plan.length.toLocaleString()}`);
+    setLeverText(`Switching ${done.toLocaleString(ZoI18n.locale())} of ${plan.length.toLocaleString(ZoI18n.locale())}`);
     fill.style.height = (30 + LV_THROW * (done / plan.length)) + "px";
   };
   tick();
@@ -5086,9 +6266,9 @@ function paintCtSwitchResult(ok, bad){
                "word-break:break-all;color:var(--ink-mute)";
 
   const head = bad.length
-    ? `${ok.length.toLocaleString()} of ${n.toLocaleString()} switched to the Tesla contact · ` +
-      `${bad.length.toLocaleString()} refused, and nothing was changed on those.`
-    : `${n.toLocaleString()} service visit${n === 1 ? "" : "s"} now ` +
+    ? `${ok.length.toLocaleString(ZoI18n.locale())} of ${n.toLocaleString(ZoI18n.locale())} switched to the Tesla contact · ` +
+      `${bad.length.toLocaleString(ZoI18n.locale())} refused, and nothing was changed on those.`
+    : `${n.toLocaleString(ZoI18n.locale())} service visit${n === 1 ? "" : "s"} now ` +
       `carr${n === 1 ? "ies" : "y"} the Tesla contact on main and billing.`;
 
   /* Grouped on the reason with the car taken out of it. Every refusal from
@@ -5105,7 +6285,7 @@ function paintCtSwitchResult(ok, bad){
   const blocks = [...byReason]
     .sort((a, b) => b[1].length - a[1].length)
     .map(([reason, vins]) => `<div style="margin-top:8px">${
-      esc(`${vins.length.toLocaleString()} refused — ${reason}`)}<br>
+      esc(`${vins.length.toLocaleString(ZoI18n.locale())} refused — ${reason}`)}<br>
       <span style="${mono}">${vins.map(esc).join("  ")}</span></div>`);
 
   /* A changed ticket status is the one outcome that is worse than a refusal,
@@ -5123,6 +6303,12 @@ function paintCtSwitchResult(ok, bad){
 function paintList(){
   const cog  = S.tool === "cog";
   const exp  = S.tool === "exp";
+  /* Open Inventory rides the same wheel, so everything below that is about
+     the DECK asks `deck`, and everything about Pending Inventory's own
+     filters and sort keeps asking `exp`. The two are not the same question:
+     inventory narrows server-side and has no facet panel here. */
+  const inv  = S.tool === "inv";
+  const deck = exp || inv;
   /* Before the rows are taken, not after: this is what prunes a concern the
      view toggle has just retired, and visibleRows() must not be asked for a
      selection that paintConcerns is about to drop. Same for the contact
@@ -5134,7 +6320,7 @@ function paintList(){
   paintCtSwitch();
   const rows = visibleRows();
   $("empty").hidden = rows.length > 0 || S.rows.length > 0;
-  if(exp){
+  if(deck){
     /* The focused card has to survive a filter that shortened the list under
        it — and land somewhere real if it cannot. paintDeck() does the
        clamping and builds the wheel; an empty result leaves the list empty
@@ -5144,12 +6330,12 @@ function paintList(){
   }else{
     $("list").innerHTML = rows.map(cog ? cogRowHtml : rowHtml).join("");
   }
-  // Pending Inventory is a wheel of cards; the other two are a column of rows. Same
-  // element either way, so the head, the empty state and the export are one
-  // implementation rather than three.
-  $("list").classList.toggle("cards", exp);
+  // Both inventory tools are a wheel of cards; the other two are a column of
+  // rows. Same element either way, so the head, the empty state and the export
+  // are one implementation rather than four.
+  $("list").classList.toggle("cards", deck);
 
-  for(const id of ["viewFlagged", "viewAll"]) $(id).hidden = cog || exp;
+  for(const id of ["viewFlagged", "viewAll"]) $(id).hidden = cog || deck;
   for(const id of ["sortDwell", "sortRecent"]) $(id).hidden = !cog;
   /* Both hidden outright off Pending Inventory rather than greyed: a control that
      cannot do anything says less than no control at all, and the board has
@@ -5176,6 +6362,8 @@ function paintList(){
   /* Named in the subtitle for the same reason the time-on-ground window is:
      a screen showing 31 rows when the centre has 443 must say why, or it
      reads as a scan that went wrong. */
+  /* Open Inventory's narrowing is in the query, so it is already named in
+     S.listSub by renderInv — adding a slice here would say it twice. */
   const slice = S.tool === "sv"
     ? (S.concern.length ? " · " + S.concern.map(concernLabel).join(" + ") : "") +
       (S.contact.length ? " · " + S.contact.map(contactLabel).join(" + ") : "")
@@ -5188,7 +6376,7 @@ function paintList(){
        out rather than describing the centre. */
     $("list").innerHTML = exp
       ? `<div class="empty"><h3>Nothing matches those filters</h3>
-          <p>All ${S.rows.length.toLocaleString()} matched cars at this centre are
+          <p>All ${S.rows.length.toLocaleString(ZoI18n.locale())} matched cars at this centre are
              outside ${expActive() === 1 ? "that filter" : "those filters"} —
              ${esc(expSlice().join(", "))}. Open <b>Filters</b> and clear one.</p></div>`
       : `<div class="empty"><h3>Nothing flagged</h3>
@@ -5253,7 +6441,7 @@ $("trunksBtn").addEventListener("click", () => {
   ].filter(Boolean).join(", ");
 
   $("trunkBody").innerHTML = `
-    <p class="lead">This wakes <b>${n.toLocaleString()}</b> car${n === 1 ? "" : "s"} and opens
+    <p class="lead">This wakes <b>${n.toLocaleString(ZoI18n.locale())}</b> car${n === 1 ? "" : "s"} and opens
       ${n === 1 ? "its trunk" : "every one of their trunks"} — the list on screen,
       which is ${esc(which)}.</p>
     <div class="hint">Cars that are asleep get poked first and tried again as they wake, so
@@ -5262,7 +6450,7 @@ $("trunksBtn").addEventListener("click", () => {
   $("trunkCancel").hidden = false;
   $("trunkCancel").textContent = "Cancel";
   $("runTrunks").hidden   = false;
-  $("runTrunks").textContent = `Open ${n.toLocaleString()} trunk${n === 1 ? "" : "s"}`;
+  $("runTrunks").textContent = `Open ${n.toLocaleString(ZoI18n.locale())} trunk${n === 1 ? "" : "s"}`;
   showModal($("trunkModal"));
 });
 
@@ -5303,8 +6491,8 @@ function paintTrunkResult(d){
     byReason.get(key).push(f.vin);
   }
 
-  const parts = [`<p class="lead"><b>${ok.toLocaleString()}</b> of ${
-    d.requested.toLocaleString()} trunk${d.requested === 1 ? "" : "s"} opened.</p>`];
+  const parts = [`<p class="lead"><b>${ok.toLocaleString(ZoI18n.locale())}</b> of ${
+    d.requested.toLocaleString(ZoI18n.locale())} trunk${d.requested === 1 ? "" : "s"} opened.</p>`];
 
   if(!d.failed.length && !d.unknown.length){
     parts.push(`<div class="hint">Every car on the list answered.</div>`);
@@ -5312,7 +6500,7 @@ function paintTrunkResult(d){
 
   for(const [reason, vins] of [...byReason].sort((a, b) => b[1].length - a[1].length)){
     parts.push(`<div class="facet">
-      <div class="facet-head"><span>${vins.length.toLocaleString()} stayed shut — ${
+      <div class="facet-head"><span>${vins.length.toLocaleString(ZoI18n.locale())} stayed shut — ${
         esc(reason)}</span></div>
       <div class="hint" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
            word-break:break-all">${vins.map(esc).join("  ")}</div></div>`);
@@ -5320,7 +6508,7 @@ function paintTrunkResult(d){
 
   if(d.unknown.length){
     parts.push(`<div class="facet">
-      <div class="facet-head"><span>${d.unknown.length.toLocaleString()} not in Garage's index</span></div>
+      <div class="facet-head"><span>${d.unknown.length.toLocaleString(ZoI18n.locale())} not in Garage's index</span></div>
       <div class="hint">Intrepid has these standing at this centre and the index has never
         heard of them, so there was nothing to send a command to.</div>
       <div class="hint" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
@@ -5369,7 +6557,11 @@ const EXPORT_PRESETS = [
      the delivery world is keyed on, for pasting somewhere that is not a
      spreadsheet. Its sheet has no delivery date to offer — the whole bucket
      is cars that have not been given one. */
-  { v: "vin-rn",       label: "VIN + RN",             sub: "two columns", only: ["exp"] }
+  { v: "vin-rn",       label: "VIN + RN",             sub: "two columns", only: ["exp"] },
+  /* Open Inventory's version of the same job. Not "VIN + …" like the others:
+     new inventory has no VIN to lead with, so the pair that always exists is
+     what the car is and what it costs. */
+  { v: "spec-price",   label: "Spec + price",         sub: "what and how much", only: ["inv"] }
 ];
 
 function paintExportPresets(){
@@ -5385,6 +6577,7 @@ function paintExportPresets(){
         >${esc(o.label)} <small>${esc(o.sub)}</small></button>`).join("")}</div>
     <div class="hint">The rows are the same either way — whatever is on screen now.
       ${S.tool === "exp" ? "The spec columns come from Garage; the order and the option codes from Tesla OS."
+        : S.tool === "inv" ? "Everything here is Tesla's inventory search. Price and mileage go out as numbers, and the VIN column is blank on new cars because Tesla does not publish one."
         : S.tool === "cog" ? "Delivery date is Intrepid's scheduled date."
                            : "Delivery date is the scheduled appointment from the Garage index."}
       ${S.tool === "sv" && !S.rowsHaveSca
@@ -5401,7 +6594,7 @@ $("exportPresets").addEventListener("click", e => {
 $("exportBtn").addEventListener("click", () => {
   const rows = visibleRows();
   if(!rows.length){ note("Nothing on screen to export.", true); return; }
-  $("exportCount").textContent = `${rows.length.toLocaleString()} row${
+  $("exportCount").textContent = `${rows.length.toLocaleString(ZoI18n.locale())} row${
     rows.length === 1 ? "" : "s"}`;
   $("exportCtx").textContent = { cog: "Cars on Ground", exp: "Pending Inventory" }[S.tool]
                              || "Service Visits";
@@ -5433,6 +6626,17 @@ $("runExport").addEventListener("click", async () => {
           // Named after the tool, the way the other two sheets are.
           label: `compiler-pending-inventory-${site}${
             expActive() ? "-" + expSlice().join("-").replace(/[^A-Za-z0-9]+/g, "") : ""
+          }-${stamp}`,
+          rows }
+      /* Open Inventory's slice is entirely in the query, so the name carries
+         the query: model, condition and where it looked. The centre is NOT in
+         it — this is the one tool that can be pointed somewhere else, and a
+         file named after Cypress holding Dallas cars is the surprise this
+         whole convention exists to prevent. */
+      : S.tool === "inv"
+      ? { kind : "inv",
+          label: `compiler-open-inventory-${S.inv.condition}-${S.inv.model}-${
+            (S.listSub.split("·").pop() || "").trim().replace(/[^A-Za-z0-9]+/g, "") || "everywhere"
           }-${stamp}`,
           rows }
       : S.tool === "cog"
@@ -5521,16 +6725,16 @@ function render(data){
   const s = data.summary;
 
   paintStats([
-    { k: "Scanned",        v: s.scanned.toLocaleString() },
-    { k: "Flagged",        v: s.flagged.toLocaleString(), small: s.scanned ? s.rate + "%" : "" },
-    { k: "Service visits", v: s.serviceVisits.toLocaleString() },
-    { k: "Containment",    v: s.containment.toLocaleString() },
-    { k: "Clear",          v: s.clear.toLocaleString() }
+    { k: "Scanned",        v: s.scanned.toLocaleString(ZoI18n.locale()) },
+    { k: "Flagged",        v: s.flagged.toLocaleString(ZoI18n.locale()), small: s.scanned ? s.rate + "%" : "" },
+    { k: "Service visits", v: s.serviceVisits.toLocaleString(ZoI18n.locale()) },
+    { k: "Containment",    v: s.containment.toLocaleString(ZoI18n.locale()) },
+    { k: "Clear",          v: s.clear.toLocaleString(ZoI18n.locale()) }
   ]);
 
   const site = (data.trt && data.trt.name) ? data.trt.name : "TRT " + data.trtId;
   const chosen = Object.entries(data.filters || {}).filter(([, v]) => v.length).length;
-  S.listSub = `${site} · ${data.scanned.toLocaleString()} of ${data.total.toLocaleString()} matched` +
+  S.listSub = `${site} · ${data.scanned.toLocaleString(ZoI18n.locale())} of ${data.total.toLocaleString(ZoI18n.locale())} matched` +
     (chosen ? ` · ${chosen} filter${chosen === 1 ? "" : "s"}` : "");
 
   $("listTitle").textContent = "Vehicles";
@@ -5569,7 +6773,7 @@ function renderCog(data){
 
   /* Days, not the pretty label: these tiles are read side by side and a
      column of mixed units does not compare. */
-  const days = sec => sec == null ? "—" : Math.floor(sec / 86400).toLocaleString() + "d";
+  const days = sec => sec == null ? "—" : Math.floor(sec / 86400).toLocaleString(ZoI18n.locale()) + "d";
 
   /* Under a window the last tile would read "Over 30d: 0" by construction,
      which is a tile spending itself to say nothing. What is worth knowing
@@ -5577,12 +6781,12 @@ function renderCog(data){
      the story of the lot even when it is deliberately off the screen. */
   const win = DWELL_OPTS.find(o => o.v === (data.maxDwellHours || 0));
   const lastTile = data.maxDwellHours
-    ? { k: "Older", v: (data.dwellOlder || 0).toLocaleString(), small: "hidden" }
-    : { k: "Over 30d", v: over30.toLocaleString() };
+    ? { k: "Older", v: (data.dwellOlder || 0).toLocaleString(ZoI18n.locale()), small: "hidden" }
+    : { k: "Over 30d", v: over30.toLocaleString(ZoI18n.locale()) };
 
   paintStats([
-    { k: "On ground", v: S.cogTotal.toLocaleString() },
-    { k: "Listed",    v: rows.length.toLocaleString(),
+    { k: "On ground", v: S.cogTotal.toLocaleString(ZoI18n.locale()) },
+    { k: "Listed",    v: rows.length.toLocaleString(ZoI18n.locale()),
       small: S.cogTotal ? Math.round(rows.length / S.cogTotal * 100) + "%" : "" },
     { k: "Longest",   v: days(longest) },
     { k: "Median",    v: days(median) },
@@ -5597,7 +6801,7 @@ function renderCog(data){
      export filename: a screen showing 3 rows when the centre has 400 pending
      must say why, or it reads as a broken scan. */
   S.listSub = `${site} · ${picked}${win && win.v ? " · " + win.label : ""} · ${
-    S.cogTotal.toLocaleString()} on ground`;
+    S.cogTotal.toLocaleString(ZoI18n.locale())} on ground`;
 
   $("listTitle").textContent = "Cars on Ground";
   $("listHead").hidden = false;
@@ -5613,13 +6817,13 @@ function renderCog(data){
        a single message would send half the readers the wrong way. */
     $("list").innerHTML = data.maxDwellHours
       ? `<div class="empty"><h3>Nothing that recent</h3>
-          <p>${(data.dwellOlder || 0).toLocaleString()} car${
+          <p>${(data.dwellOlder || 0).toLocaleString(ZoI18n.locale())} car${
             data.dwellOlder === 1 ? "" : "s"} match the status at ${esc(site)}, and every one
              of them has been standing longer than ${esc(win ? win.label.toLowerCase()
              .replace("under ", "") : "the window")}. Set <b>Time on ground</b> to
              <b>Any</b> to see them.</p></div>`
       : `<div class="empty"><h3>No cars in that status</h3>
-          <p>All ${S.cogTotal.toLocaleString()} cars on ground at ${esc(site)} are elsewhere
+          <p>All ${S.cogTotal.toLocaleString(ZoI18n.locale())} cars on ground at ${esc(site)} are elsewhere
              on the ladder.</p></div>`;
     msgs.unshift("On ground: " + S.cogTally.map(t => `${t.count} ${t.name}`).join(" · ") + ".");
   }
@@ -5649,19 +6853,19 @@ function renderExp(data){
   const waits = S.rows.map(r => daysSince(r.matchedAt)).filter(d => d != null)
                       .sort((a, b) => a - b);
   const median = waits.length ? waits[Math.floor(waits.length / 2)] : null;
-  const days = d => d == null ? "—" : d.toLocaleString() + "d";
+  const days = d => d == null ? "—" : d.toLocaleString(ZoI18n.locale()) + "d";
 
   paintStats([
-    { k: "Matched", v: (data.total || S.rows.length).toLocaleString() },
+    { k: "Matched", v: (data.total || S.rows.length).toLocaleString(ZoI18n.locale()) },
     { k: "Longest", v: days(waits.length ? waits[waits.length - 1] : null) },
     { k: "Median",  v: days(median) },
-    { k: "Over 7d", v: waits.filter(d => d >= WAIT_WARM).length.toLocaleString(),
+    { k: "Over 7d", v: waits.filter(d => d >= WAIT_WARM).length.toLocaleString(ZoI18n.locale()),
       small: waits.length ? Math.round(waits.filter(d => d >= WAIT_WARM).length / waits.length * 100) + "%" : "" },
     /* Named rather than left to the notice, because it is the one number that
        explains why some cards have no colour on them. Tile only when it
        happens — a permanent "Not built: 0" is a tile spent on nothing. */
     ...(S.rows.some(r => !r.inGarage)
-      ? [{ k: "Not built", v: S.rows.filter(r => !r.inGarage).length.toLocaleString(),
+      ? [{ k: "Not built", v: S.rows.filter(r => !r.inGarage).length.toLocaleString(ZoI18n.locale()),
            small: "no spec yet" }]
       : [])
   ]);
@@ -6059,7 +7263,7 @@ $("runTests").addEventListener("click", async e => {
 
 $("refreshTrt").addEventListener("click", async e => {
   const d = await admin("/api/admin/refresh-trt", {}, e.target);
-  $("mTrt").textContent = `${d.sites.toLocaleString()} sites cached`;
+  $("mTrt").textContent = `${d.sites.toLocaleString(ZoI18n.locale())} sites cached`;
   $("mTrtRow").classList.add("ok");
 });
 

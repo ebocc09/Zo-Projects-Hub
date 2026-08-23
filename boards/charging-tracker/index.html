@@ -1468,6 +1468,17 @@ body.no-scroll{overflow:hidden}
       </div>
     </div>
 
+    <!-- Read-only on purpose. One board offering its own language switch is how
+         the estate ends up in two languages at once; the Hub is the one place it
+         is set, and this says so rather than staying silent. -->
+    <div class="field">
+      <label>Language</label>
+      <div class="hub-note">
+        <b id="langNow" data-i18n-skip>—</b> — set on the <b>Zo Projects Hub</b>,
+        like the sign-ins above, and read by every board.
+      </div>
+    </div>
+
     <div class="field">
       <label>Live read</label>
       <label class="switch">
@@ -1748,6 +1759,435 @@ body.no-scroll{overflow:hidden}
 
 <script>
 "use strict";
+
+/* ── ZoI18n ────────────────────────────────────────────────────────────
+
+   The estate speaks English or Spanish, chosen once on the Hub and read by
+   every board from the shared settings file. This is the client half: it
+   swaps the chrome, and nothing else.
+
+   ── keyed by the English source text, not by invented keys ──
+
+   `ES["Sign-ins"]` rather than `t("admin.signins")`. Two reasons. A string
+   with no entry renders in English, which is a worse-but-fine outcome — with
+   invented keys the same miss renders as `admin.signins`, which is a bug on
+   screen. And the markup stays readable: nobody has to hold a key table in
+   their head to know what a section says.
+
+   ── swept, not annotated ──
+
+   Most of what a board draws comes out of a template literal in JS, not out
+   of the markup. Annotating every one of those would mean editing tens of
+   thousands of lines across five boards to add a language nobody had asked
+   for a week ago. Instead a MutationObserver watches for added nodes and
+   translates them on the way in, so a render written years ago picks up
+   Spanish without being touched.
+
+   The observer watches childList only, deliberately. Everything this file
+   writes is a text node's value or an attribute — never a child — so it can
+   never see its own work and loop. Setting `.textContent` replaces children
+   and therefore *is* caught; a bare `node.nodeValue = x` on an existing text
+   node is not, and wants an explicit `ZoI18n.apply(el)` after it. Nothing in
+   this estate does that yet.
+
+   ── what it must never touch ──
+
+   Data. A VIN, a centre name, an alert string out of Garage, a customer's
+   reference number: those render exactly as they arrived. The dictionary
+   only holds chrome, and anything that renders values sits inside a
+   `data-i18n-skip` subtree so a chrome entry cannot catch a value that
+   happens to read the same.                                              */
+
+/* Chrome only.
+
+   Garage's vehicle-type names — Customer, Inventory, Service loaner, Demo,
+   Marketing, Internal, Autonomous, Mobile service, Safety, Energy — are NOT
+   in here. They are Garage's own categories, read off Garage's screens in
+   English, and a board that renamed them would disagree with the source. The
+   charge states below are different: those are this board's own words for
+   what it worked out, so they translate. */
+const ES = {
+  /* shell */
+  /* The board's name, not a label. It stays put in both languages: the Hub
+     lists it from registry.js, which has no dictionary, and a header that
+     disagreed with the tile you clicked to get here would be worse than an
+     English name. Same reason Garage, Intrepid and Tesladex do not move. */
+  "Charging Tracker"     : "Charging Tracker",
+  "Zo Projects Hub"      : "Zo Projects Hub",
+  "USOE"                 : "USOE",
+  "(usable state of energy)" : "(estado de energía utilizable)",
+  "Admin"                : "Administración",
+  "Admin settings"       : "Ajustes de administración",
+  "Options"              : "Opciones",
+  "Options sections"     : "Secciones de opciones",
+  "Settings sections"    : "Secciones de ajustes",
+  "Save"                 : "Guardar",
+  "Saved"                : "Guardado",
+  "Load"                 : "Cargar",
+  "Find"                 : "Buscar",
+  "Submit"               : "Enviar",
+  "Cancel"               : "Cancelar",
+  "Confirm"              : "Confirmar",
+  "Clear all"            : "Limpiar todo",
+  "Remove all"           : "Quitar todo",
+  "Removing"             : "Quitando",
+  "Removing…"            : "Quitando…",
+  "Clearing"             : "Borrando",
+  "Reading"              : "Leyendo",
+  "Sending"              : "Enviando",
+  "Sending…"             : "Enviando…",
+  "Testing…"             : "Probando…",
+  "Enable"               : "Activar",
+  "On"                   : "Activado",
+  "Off"                  : "Desactivado",
+  "Default"              : "Por defecto",
+  "Total"                : "Total",
+  "Unknown"              : "Desconocido",
+  "Language"             : "Idioma",
+  "Set on the Hub"       : "Se define en el Hub",
+  "Open the Hub"         : "Abrir el Hub",
+  "Unlock"               : "Desbloquear",
+  "Lock admin"           : "Bloquear administración",
+  "Restricted area. Enter the 6-digit admin code."
+    : "Área restringida. Introduce el código de 6 dígitos.",
+  "Incorrect code."      : "Código incorrecto.",
+  "Are you sure?"        : "¿Seguro?",
+
+  /* monitoring */
+  "Monitor"              : "Monitorizar",
+  "Monitored"            : "Monitorizados",
+  "Monitored vehicles"   : "Vehículos monitorizados",
+  "Stop monitoring"      : "Dejar de monitorizar",
+  "Vehicles"             : "Vehículos",
+  "Tracking"             : "Siguiendo",
+  "Refresh now"          : "Actualizar ahora",
+  "Refresh now?"         : "¿Actualizar ahora?",
+  "Next refresh"         : "Próxima actualización",
+  "Refresh interval"     : "Intervalo de actualización",
+  "Needs refresh"        : "Necesita actualizarse",
+  "Queued for next refresh" : "En cola para la próxima actualización",
+  "Enter VIN — separate multiple with commas, spaces or new lines"
+    : "Introduce el VIN — sepáralos con comas, espacios o saltos de línea",
+  "Enter a VIN above and select Monitor to begin tracking."
+    : "Introduce arriba un VIN y pulsa Monitorizar para empezar el seguimiento.",
+  "Remove all vehicles"  : "Quitar todos los vehículos",
+  "Remove all vehicles?" : "¿Quitar todos los vehículos?",
+  "All vehicles removed" : "Se han quitado todos los vehículos",
+  "No vehicles to remove" : "No hay vehículos que quitar",
+  "No vehicles monitored" : "No hay vehículos monitorizados",
+  "Nothing to add."      : "No hay nada que añadir.",
+  "Nothing matched"      : "No hubo coincidencias",
+  "Nothing to show"      : "No hay nada que mostrar",
+  "VIN is empty."        : "El VIN está vacío.",
+
+  /* charge states — this board's own words */
+  "Charging"             : "Cargando",
+  "Complete"             : "Completo",
+  "Completed vehicles"   : "Vehículos completados",
+  "Fully charged"        : "Carga completa",
+  "Charge complete"      : "Carga completada",
+  "Charge idle"          : "Carga inactiva",
+  "Charge complete and still connected to the Supercharger"
+    : "Carga completada y todavía conectado al Supercargador",
+  "Plugged in, not drawing power" : "Enchufado, sin consumir energía",
+  "Latched"              : "Enganchado",
+  "Awaiting data"        : "Esperando datos",
+  "Data unavailable"     : "Datos no disponibles",
+  "Ready to move"        : "Listo para mover",
+  "Standby"              : "En espera",
+  "Leaving"              : "Saliendo",
+  "None charging"        : "Ninguno cargando",
+  "None complete"        : "Ninguno completado",
+  "None offsite"         : "Ninguno fuera del centro",
+  "None on destination chargers" : "Ninguno en cargadores de destino",
+  "Auto-clear when finished" : "Limpiar automáticamente al terminar",
+  "Completed vehicles collect at the bottom of the list"
+    : "Los vehículos completados se agrupan al final de la lista",
+  "The vehicle is probably asleep." : "Probablemente el vehículo está dormido.",
+  "Polling Garage"       : "Consultando Garage",
+
+  /* filters and scope */
+  "Search scope"         : "Ámbito de búsqueda",
+  "Show all"             : "Mostrar todo",
+  "Show every monitored vehicle" : "Mostrar todos los vehículos monitorizados",
+  "Show only finished vehicles"  : "Mostrar solo los vehículos terminados",
+  "Show only vehicles outside the main geofence"
+    : "Mostrar solo los vehículos fuera de la geocerca principal",
+  "Show vehicles on a charger — charging, or finished but still plugged in"
+    : "Mostrar vehículos en un cargador — cargando, o terminados pero aún enchufados",
+  "Deliveries"           : "Entregas",
+  "Deliveries only"      : "Solo entregas",
+  "Delivery"             : "Entrega",
+  "Delivery date"        : "Fecha de entrega",
+  "Load deliveries by date" : "Cargar entregas por fecha",
+  "Everything undelivered" : "Todo lo no entregado",
+  "Destination"          : "Destino",
+  "Destination chargers" : "Cargadores de destino",
+  "Offsite"              : "Fuera del centro",
+  "Main only"            : "Solo el principal",
+  "Main + Offsite"       : "Principal + externo",
+  "Pick a valid date first." : "Elige primero una fecha válida.",
+  "Pick at least one vehicle type." : "Elige al menos un tipo de vehículo.",
+  "Vehicle types to load"  : "Tipos de vehículo que cargar",
+  "Vehicle types to track" : "Tipos de vehículo que seguir",
+  "Bulk-load and other options" : "Carga masiva y otras opciones",
+  "Track LowSoC"         : "Batería baja",
+  "Searching for low-battery vehicles…"
+    : "Buscando vehículos con batería baja…",
+
+  /* geofence and environment */
+  "Environment"          : "Entorno",
+  "Production"           : "Producción",
+  "Engineering"          : "Ingeniería",
+  "Simulation"           : "Simulación",
+  "Simulation mode"      : "Modo simulación",
+  "Simulation (no backend required)" : "Simulación (no hace falta servidor)",
+  "Geofence filter"      : "Filtro de geocerca",
+  "Geofence sync engaged" : "Sincronización de geocerca activa",
+  "Main geofence TRT"    : "TRT de la geocerca principal",
+  "Offsite TRT"          : "TRT externo",
+  "Offsite TRT cleared"  : "TRT externo borrado",
+  "No Tesla facility geofence" : "Sin geocerca de instalación Tesla",
+  "Active Mode"          : "Modo activo",
+  "Active Mode state"    : "Estado del modo activo",
+  "Enable Active Mode"   : "Activar el modo activo",
+  "Disable Active Mode"  : "Desactivar el modo activo",
+  "Disable and clear"    : "Desactivar y limpiar",
+  "Clear and enable"     : "Limpiar y activar",
+  "Active instance"      : "Instancia activa",
+  "Active Mode is unavailable in this environment"
+    : "El modo activo no está disponible en este entorno",
+  "Unavailable in this environment" : "No disponible en este entorno",
+  "Signed in"            : "Sesión iniciada",
+  "Signed out"           : "Sesión cerrada",
+  "Sign in to Garage"    : "Iniciar sesión en Garage",
+  "Not signed in to Garage" : "Sin sesión en Garage",
+  "Not signed in to Garage — open Admin to sign in, then try again."
+    : "Sin sesión en Garage — abre Administración, inicia sesión e inténtalo de nuevo.",
+  "Garage cookie needs a refresh." : "La cookie de Garage necesita renovarse.",
+  "Proxy unreachable — is server.js still running?"
+    : "No se llega al proxy — ¿sigue ejecutándose server.js?",
+
+  /* live read */
+  "Live"                 : "En vivo",
+  "Live read"            : "Lectura en vivo",
+  "Live read on"         : "Lectura en vivo activada",
+  "Live read off"        : "Lectura en vivo desactivada",
+  /* "Constantes vitales en vivo" is the faithful translation and does not fit
+     the 196px rail beside its status dot. Shortened rather than letting the
+     label wrap — ZO-1 rail items are one line. */
+  "Live vitals"          : "Datos en vivo",
+  "Live endpoint"        : "Endpoint en vivo",
+  "Live read activity"   : "Actividad de la lectura en vivo",
+  "Live mode issues"     : "Problemas del modo en vivo",
+  "Enable live read"     : "Activar la lectura en vivo",
+  "No live endpoint configured" : "No hay endpoint en vivo configurado",
+  "Live Garage data"     : "Datos en vivo de Garage",
+  "Test against a vehicle" : "Probar contra un vehículo",
+  "Add a VIN first — the test reads a real vehicle."
+    : "Añade primero un VIN — la prueba lee un vehículo real.",
+  "Request throttle"     : "Límite de peticiones",
+  "Rate gate disabled"   : "Limitador desactivado",
+  "Activity log"         : "Registro de actividad",
+  "No activity recorded yet." : "Todavía no hay actividad registrada.",
+
+  /* alerts */
+  "Alerts"               : "Avisos",
+  "Alerts are muted"     : "Los avisos están silenciados",
+  "Alerts are muted."    : "Los avisos están silenciados.",
+  "Alerts muted"         : "Avisos silenciados",
+  "Alerts unmuted"       : "Avisos reactivados",
+  "Mute all alerts"      : "Silenciar todos los avisos",
+  "Muted"                : "Silenciado",
+  "Armed"                : "Armado",
+  "Alert delivery state" : "Estado de envío de avisos",
+  "Alert for cars on destination chargers"
+    : "Avisar de los coches en cargadores de destino",
+  "Destination chargers muted" : "Cargadores de destino silenciados",
+  "Destination chargers will alert" : "Los cargadores de destino avisarán",
+  "Still-latched reminders" : "Recordatorios de enganche",
+  "Email alerts"         : "Avisos por correo",
+  "Email alerts on"      : "Avisos por correo activados",
+  "Email alerts off"     : "Avisos por correo desactivados",
+  "Send alerts by email" : "Enviar avisos por correo",
+  "Save recipients"      : "Guardar destinatarios",
+  "Recipients saved"     : "Destinatarios guardados",
+  "Recipients cleared"   : "Destinatarios borrados",
+  "Send test"            : "Enviar prueba",
+  "Sample card"          : "Tarjeta de ejemplo",
+  "Message"              : "Mensaje",
+  "Teams alert webhook"  : "Webhook de avisos de Teams",
+  "Webhook saved"        : "Webhook guardado",
+  "Webhook cleared"      : "Webhook borrado",
+  "Teams webhook saved." : "Webhook de Teams guardado.",
+  "Teams webhook cleared — alerts are off."
+    : "Webhook de Teams borrado — los avisos están desactivados.",
+  "No webhook set — charge-complete alerts are not being sent."
+    : "No hay webhook configurado — no se envían avisos de carga completada.",
+  "Not configured"       : "Sin configurar",
+  "Clear notifications"  : "Borrar notificaciones",
+  "Notifications cleared" : "Notificaciones borradas",
+
+  /* settings */
+  "Charge limit"         : "Límite de carga",
+  "Battery threshold — USOE %" : "Umbral de batería — USOE %",
+  "Target charge level (%)" : "Nivel de carga objetivo (%)",
+  "A vehicle is marked complete once USOE reaches this value."
+    : "Un vehículo se marca como completo cuando el USOE alcanza este valor.",
+  "Data source"          : "Origen de datos",
+  "Source"               : "Origen",
+  "Maintenance"          : "Mantenimiento",
+  "Seconds"              : "Segundos",
+  "Minutes"              : "Minutos",
+  "Every cycle"          : "Cada ciclo",
+  "Once only"            : "Solo una vez",
+  "Approx. download"     : "Descarga aprox.",
+  "Open the dashboard through server.js to configure alerts."
+    : "Abre el panel a través de server.js para configurar los avisos.",
+  "Open the dashboard through server.js to switch environments."
+    : "Abre el panel a través de server.js para cambiar de entorno.",
+  "Open the dashboard through server.js to use live read."
+    : "Abre el panel a través de server.js para usar la lectura en vivo.",
+  "Delivery lookup needs the live server — not available in this mode."
+    : "La búsqueda de entregas necesita el servidor en vivo — no disponible en este modo.",
+  "LowSoC lookup needs the live server — not available in this mode."
+    : "La búsqueda de batería baja necesita el servidor en vivo — no disponible en este modo.",
+  "Settings apply to both environments; vehicle lists do not."
+    : "Los ajustes se aplican a ambos entornos; las listas de vehículos no.",
+  "The other environment's list is untouched."
+    : "La lista del otro entorno no se toca.",
+  "The board is cleared first" : "Primero se limpia el tablero",
+  "An empty selection would scan the entire lot."
+    : "Una selección vacía escanearía todo el patio.",
+
+  /* composed */
+  "{n} min ago"          : "hace {n} min",
+  "{n}h ago"             : "hace {n} h",
+  "{n}d ago"             : "hace {n} d",
+  "just now"             : "ahora mismo",
+  "never"                : "nunca"
+};
+
+const ZoI18n = (() => {
+  const ATTRS = ["placeholder", "title", "aria-label"];
+  const textWas = new WeakMap();   // text node  -> its English value
+  const attrWas = new WeakMap();   // element    -> Map(attr -> English value)
+  const listeners = [];
+  let lang = "en";
+  let obs = null;
+  let titleEn = null;   // the tab title, which lives outside body
+
+  /* Keys are single-spaced, because markup wraps and a key that had to match
+     the indentation of the line it was written on would break the first time
+     someone reformatted the file. Surrounding whitespace is put back exactly
+     as it was found. */
+  const key = s => s.replace(/\s+/g, " ").trim();
+
+  function swapText(node){
+    const en = textWas.has(node) ? textWas.get(node) : node.nodeValue;
+    const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(en);
+    const core = m[2];
+    if(!core) return;
+    const hit = lang === "es" ? ES[key(core)] : null;
+    const next = m[1] + (hit || core) + m[3];
+    if(hit && !textWas.has(node)) textWas.set(node, en);
+    if(node.nodeValue !== next) node.nodeValue = next;
+  }
+
+  function swapAttrs(el){
+    for(const a of ATTRS){
+      if(!el.hasAttribute(a)) continue;
+      let was = attrWas.get(el);
+      const en = was && was.has(a) ? was.get(a) : el.getAttribute(a);
+      const hit = lang === "es" ? ES[key(en)] : null;
+      const next = hit || en;
+      if(hit){
+        if(!was){ was = new Map(); attrWas.set(el, was); }
+        if(!was.has(a)) was.set(a, en);
+      }
+      if(el.getAttribute(a) !== next) el.setAttribute(a, next);
+    }
+  }
+
+  const SKIP = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1, SVG: 1 };
+
+  function walk(node){
+    if(node.nodeType === 3) return swapText(node);
+    if(node.nodeType !== 1) return;
+    if(SKIP[node.tagName] || node.hasAttribute("data-i18n-skip")) return;
+    swapAttrs(node);
+    for(let n = node.firstChild; n; n = n.nextSibling) walk(n);
+  }
+
+  const apply = root => walk(root || document.body);
+
+  /* Added nodes only. Nothing here writes a child, so the observer cannot see
+     its own work — no re-entry flag, no takeRecords, no loop. */
+  function watch(){
+    if(obs) return;
+    obs = new MutationObserver(muts => {
+      for(const m of muts) for(const n of m.addedNodes) walk(n);
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+  }
+  function unwatch(){ if(obs){ obs.disconnect(); obs = null; } }
+
+  function set(next){
+    const want = next === "es" ? "es" : "en";
+    if(want === lang) return false;
+    lang = want;
+    // Sweep before watching: the sweep restores English from the WeakMaps
+    // when going back, and the observer only ever needs to handle what
+    // arrives after this point.
+    apply(document.body);
+    // <title> is in <head>, so the sweep cannot see it. Same rule as the
+    // rest: the English original is kept so switching back is exact.
+    if(titleEn === null) titleEn = document.title;
+    document.title = (lang === "es" && ES[titleEn]) || titleEn;
+    lang === "es" ? watch() : unwatch();
+    listeners.forEach(fn => { try { fn(lang); } catch {} });
+    return true;
+  }
+
+  /* For strings a board composes rather than writes whole — "{n} min ago".
+     The placeholder travels with the string, so Spanish can put the number
+     somewhere English does not. */
+  function t(s, vars){
+    const out = (lang === "es" && ES[s]) || s;
+    return vars ? out.replace(/\{(\w+)\}/g, (_, k) => (k in vars ? vars[k] : "{" + k + "}")) : out;
+  }
+
+  return {
+    apply, set, t,
+    get     : () => lang,
+    locale  : () => (lang === "es" ? "es-ES" : "en-US"),
+    onChange: fn => listeners.push(fn)
+  };
+})();
+
+/* Read at boot and then on a timer, because the language is set somewhere
+   else — on this Hub's Admin panel, or from a board's point of view on the
+   Hub entirely. Ten seconds is a local file read; the alternative is a board
+   sitting in the wrong language until somebody reloads it. */
+async function pollLang(){
+  try{
+    const r = await fetch("/api/lang", { cache: "no-store" });
+    if(r.ok) ZoI18n.set((await r.json()).lang);
+  }catch{ /* the language is not worth a visible error */ }
+}
+pollLang();
+setInterval(pollLang, 10000);
+
+/* Boards carry a read-only row saying which language they are in and where it
+   is set. The Hub is where it is set, so it has no such row and this does
+   nothing there — which is why it can live in the shared block. */
+function paintLangRow(){
+  const el = document.getElementById("langNow");
+  if(el) el.textContent = ZoI18n.get() === "es" ? "Español" : "English";
+}
+ZoI18n.onChange(paintLangRow);
+paintLangRow();
+
 /* ═══════════════════════════════════════════════════════════════════════
    Charging Tracker
    Tracks USOE (usable state of energy) per VIN through to a target level.
@@ -2133,7 +2573,7 @@ const shortVin = v => v.length > 8 ? "…" + v.slice(-8) : v;
 
 function clockTime(ts){
   const d = new Date(ts);
-  return d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"});
+  return d.toLocaleTimeString(ZoI18n.locale(), {hour:"2-digit", minute:"2-digit", second:"2-digit"});
 }
 function relTime(ts){
   const s = Math.max(0, Math.round((Date.now()-ts)/1000));
@@ -3299,7 +3739,7 @@ setInterval(() => { if(SERVED) loadLiveStatus(); }, 90_000);
 
 /* ───────────────────────────── Monitoring engine ───────────────────────────── */
 let busy = false;
-const sweep = { done: 0, total: 0, active: null };  // live progress for the stat strip
+const sweep = { done: 0, total: 0, sleeping: 0, active: null };  // live progress for the stat strip
 let overrunWarned = false;             // so the overrun notice fires only once
 
 /* Active Mode: the list mirrors the main-TRT geofence, so cars are added and
@@ -3438,86 +3878,41 @@ async function scanActiveMode(){
 }
 
 
-/* ── What each car costs to read (production Active Mode) ───────────────────
-   There used to be a sleep skip here: a car whose `hermes_last_seen` was more
-   than 45 minutes old was assumed asleep, and since "a charging car is always
-   awake", it was not read at all.
+/* ── Sleeping cars (production Active Mode only) ────────────────────────────
+   A charging vehicle is awake and in touch with Hermes the whole time — the
+   measured snapshot cadence while charging is 8-12 minutes. A car parked and
+   asleep may go hours without saying anything. So the last-contact stamp the
+   scan already carries separates the two for free, and a car we can show is
+   asleep is a car there is no point reading: it cannot have started charging
+   without waking up first.
 
-   The premise was false, and it cost us a charging car.
+   This matters most with live read on, where a read does not merely cost
+   ~140 KB but actively WAKES the vehicle. Skipping sleepers is the difference
+   between waking a handful of cars a sweep and waking the entire lot.
 
-   `hermes_last_seen` freezes at the last wakeup-class event and does NOT
-   advance on subsequent telemetry. Measured on 7SAYGDEE8TA757020
-   (2026-08-20, UTC): the stamp sat at its 15:30:23 wakeup while the car went
-   on to report drive_ended at 15:58, was_charging at 16:19 AND 16:57, and a
-   vital_pull at 17:27 — 44% to 80% USOE, ~30 kWh of DC delivered, none of it
-   moving the stamp. Garage's own device_info carries the identical stale
-   value, so this was not Tesladex indexing lag. A control car showed the same
-   shape: frozen at its 12:42 wakeup through eight later snapshots.
+   Reusing HIST_MAX_AGE_MS (45 min) rather than picking a new number: it is
+   already defined as how stale a vehicle's own snapshot may be before it stops
+   counting as evidence about right now, which is the identical question. At
+   ~4x the charging cadence it leaves a wide margin — a charging car checks in
+   several times over before it could ever be mistaken for asleep.
 
-   It was not marginal, either. Measured against the live geofence the same
-   afternoon: 99 of 158 undelivered cars scanned as "asleep" and would not
-   have been read at all. 27 of them shared a hermes_last_seen inside a single
-   91-second window ~5 hours old — dozens of cars stamped in the same second
-   is a fleet-level bulk write, not 27 cars independently falling asleep
-   together. The field tracks something fleet-wide, not per-car activity.
+   Deliberately fails toward polling. No stamp at all reads as awake, because
+   the cost of a needless read is one request and the cost of skipping a
+   charging car is the bug this dashboard exists to avoid. */
+const ASLEEP_AFTER_MS = HIST_MAX_AGE_MS;
 
-   Worst of all it was self-sealing. Only a read can set status to charging,
-   and the read was gated on the stamp, so a car that plugged in while
-   "asleep" stayed `pending` — and therefore hidden by the charging-only
-   filter — for its entire session. The old "never drop a live session"
-   escape could not help: it only rescued a car ALREADY known to be charging,
-   which is precisely what a skipped car can never become.
+function isAsleep(v){
+  if(v.lastSeen == null) return false;              // unknown -> treat as awake
+  return (Date.now() - v.lastSeen * 1000) > ASLEEP_AFTER_MS;
+}
 
-   So nothing is skipped any more. Every in-play car is read every sweep. The
-   two reads have very different costs and are now gated separately:
-
-     · CACHED — a few hundred bytes, does not touch the vehicle. Affordable
-       for the whole lot: 158 cars at concurrency 4 / spacing 150ms is a ~24s
-       sweep against a 300s interval. This is what removes the blind spot, and
-       it detects charging on its own — the payload carries the vehicle's own
-       previous snapshot, so a first reading settles charging/idle with no
-       baseline of ours (see the histDelta stand-in in the sweep).
-
-     · LIVE — ~140 KB, and it wakes the vehicle. Spent only on cars in or near
-       a session, which is what server.js's /api/usoe comment always intended
-       ("only where it is worth 140 KB"). The page had drifted into asking for
-       it on every car, and the sleep skip was the wrong fix for the resulting
-       load: it cut reads by hiding cars instead of by cutting cost per car.
-
-   A car that starts charging is therefore visible from its next cached read,
-   and picks up live proximity on the sweep after. Detection never waits on a
-   live read. */
-
-/* Whether this car earns the expensive live read on top of the cached one.
-
-   Charging and latched are exactly the cars that need it: proximity is the
-   whole question for both — is it still drawing, is it still occupying the
-   stall — and CP_proximity exists only in the live dump. Nothing else does.
-
-   Note what is deliberately NOT here: a "near the charge limit" clause. It
-   sounds right and measures terribly at this site. Houston's standing
-   population charges to 80 and then waits days for delivery, so 85 of 158
-   cars sit within ten points of the limit while parked and finished — they
-   would each be woken every sweep to be told nothing. A parked car never
-   crosses the limit; only a charging one does, and a charging one is already
-   covered by the first clause.
-
-   This costs nothing in detection, because detection does not run on live
-   data. A cached reading carries the vehicle's own previous snapshot, so the
-   inference path in the sweep (`else if(rising)`) resolves a car to charging
-   on its FIRST cached read — measured on 7SAYGDEE8TA757020, whose cached
-   payload returned prevUsoe 79.121 against 79.095 over a 25 s span, plus a
-   counter-inferred FAST_CHARGE pilot. So a car that plugs in goes visible on
-   the next cached read and picks up live proximity the sweep after. Live
-   reads therefore scale with the number of occupied stalls, not with the size
-   of the lot.
-
-   Engineering and hand-added rows stay live throughout: those lists are small
-   and deliberately chosen, and the load this guards against is a 158-car
-   geofence nobody picked by hand. */
-function needsLiveRead(v){
+/* Whether this car earns a per-VIN read this sweep. Engineering and hand-built
+   lists read everything, exactly as before — the sleep skip is production
+   Active Mode only, which is where the lot is big enough to matter. */
+function needsRead(v){
   if(!activeMode || isEng() || !v.viaActive) return true;
-  return v.status === "charging" || isLatched(v);
+  if(v.status === "charging" || isLatched(v)) return true;   // never drop a live session
+  return !isAsleep(v);
 }
 
 /* Show/hide the "Active Mode" pill by the environment chip. */
@@ -3575,8 +3970,8 @@ function renderActiveSection(){
     note.innerHTML = isEng()
       ? `<b>Engineering</b> — the whole geofence, unfiltered.`
       : `<b>Production</b> — undelivered ${typeListHtml(settings.activeTypes)} ` +
-        `cars only. <b>Every one of them is read every sweep</b>; the expensive ` +
-        `live read is spent on cars charging, latched or near the limit.`;
+        `cars only. Cars that are <b>asleep</b> are tracked but not read: a charging ` +
+        `car is always awake, so a sleeping one cannot have started.`;
   }
 
   renderActiveTypes();
@@ -3950,30 +4345,29 @@ async function tick(){
 
   // 2. Poll everything still charging — plus anything finished but latched,
   //    because the only way to learn it has been unplugged is to keep asking.
-  /* Cars still in play. Two gates have been tried here and both were removed
-     for the same reason: each could hide a car that was actually charging.
-     The first keyed on whether the indexed USOE had RISEN, which needed two
-     sweeps to see anything and left the car `pending` and hidden in between.
-     The second was the hermes_last_seen sleep skip, which was worse — it
-     could hide a charging car for its whole session. Nothing is gated here
-     now; the read-cost section above explains what replaced it. */
+  /* Cars still in play. An earlier attempt also gated on whether the indexed
+     USOE had RISEN, and that was removed: the index moves one value per sweep,
+     so a rise could not be seen until it appeared across two of them, and the
+     car stayed `pending` and hidden throughout. The sleep test below has no
+     such lag — waking is instantaneous and visible on the very next scan. */
   const inPlay = vehicles.filter(v => v.status !== "complete" || isLatched(v));
 
-  const active   = inPlay;
+  const active   = inPlay.filter(needsRead);
+  const sleeping = inPlay.length - active.length;
 
   sweep.total    = active.length;
+  sweep.sleeping = sleeping;                // surfaced in the progress line
   sweep.done     = 0;
   sweep.active   = active;                  // referenced by the shown-progress count
   for(const v of active) v.swept = false;   // flips true as each car is polled
 
   await runPooled(active, async v => {
     try{
-      // Every car is read; needsLiveRead decides whether this one is worth
-      // the ~140 KB live dump or takes the cached path. Live read being off
-      // makes the whole list cached, exactly as before. Either way the server
-      // falls back to cached on any live failure, so this can only ever
-      // change which reading we get — never whether we get one.
-      const reading = await fetchUsoe(v.vin, liveState.ready && needsLiveRead(v));
+      // With live read on, every monitored vehicle gets a real-time read.
+      // A live response is ~140 KB, so a large list is genuinely heavy —
+      // deliberately accepted, because these lists are normally small and
+      // partial freshness was more confusing than it was worth.
+      const reading = await fetchUsoe(v.vin, liveState.ready);
       const usoe    = reading.usoe;
 
       /* Read BEFORE lastUpdate is stamped below, and the only trustworthy
@@ -4169,6 +4563,7 @@ async function tick(){
   save(KEY.veh, vehicles);
   busy = false;
   sweep.total    = 0;
+  sweep.sleeping = 0;
   sweep.active   = null;
   render();
 
@@ -4195,18 +4590,19 @@ function renderNextStat(){
     const act = sweep.active || [];
     // With the charging-only filter on, the X/X tracks only the cars actually
     // on screen; the full sweep size trails as a grey total.
-    // There is no longer a skipped count to disclose here: every in-play car
-    // is read, so sweep.total IS the list. The "N asleep" suffix went with the
-    // sleep skip — it was reporting a blind spot as though it were a saving.
+    // Skipped sleepers are stated, never silent — otherwise "2/2" looks like a
+    // list of two cars rather than 118 with 116 of them asleep.
+    const zzz = sweep.sleeping ? ` <small class="stat-sub">${sweep.sleeping} asleep</small>` : "";
+
     if(activeMode && activeChargingOnly && act.length){
       const shown     = act.filter(v => !hiddenByActiveFilter(v));
       const shownDone = shown.filter(v => v.swept).length;
       $("sNext").innerHTML =
         `<span style="font-size:17px">${shownDone}/${shown.length}</span>` +
-        ` <small class="stat-sub">of ${sweep.total}</small>`;
+        ` <small class="stat-sub">of ${sweep.total}</small>${zzz}`;
     }else{
       $("sNext").innerHTML =
-        `<span style="font-size:17px">${sweep.done}/${sweep.total}</span>`;
+        `<span style="font-size:17px">${sweep.done}/${sweep.total}</span>${zzz}`;
     }
   }else{
     $("sNextK").textContent = "Next refresh";

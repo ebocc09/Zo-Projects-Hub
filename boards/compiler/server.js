@@ -17,6 +17,7 @@ const path = require("path");
 
 const L    = require("./lib");
 const xlsx = require("./xlsx");
+const credstore = require("./credstore");
 
 const PORT  = Number(process.env.PORT || L.CONFIG.port || 3130);
 const INDEX = path.join(__dirname, "index.html");
@@ -126,6 +127,14 @@ const server = http.createServer(async (req, res) => {
           String(body.msg || "").slice(0, 500));
       res.writeHead(204).end();
       return;
+    }
+
+    /* ── the language, set on the Hub ──
+       Read off the shared file on every call rather than cached at startup,
+       so flipping it on the Hub reaches this board while it is open. The Hub
+       does not need to be running for this to answer: the file outlives it. */
+    if(p === "/api/lang" && req.method === "GET"){
+      return sendJson(res, 200, { lang: credstore.language() });
     }
 
     /* ── current state, for first paint ── */
@@ -312,6 +321,53 @@ const server = http.createServer(async (req, res) => {
       finally { jobEnd(); }
 
       log(`expenable ${out.location.name}: ${out.rows.length} matched, not scheduled`);
+      return sendJson(res, 200, out);
+    }
+
+    /* ── Pending Inventory's other half: what there is to give somebody ──
+
+       No TRT guard, and that is the difference from the route above. Every
+       other scan on this board is one centre at a time and refuses without
+       one; availability is a question that legitimately reaches past the
+       centre, so Location is a filter the page sends like any other. */
+    if(p === "/api/inv/filters" && req.method === "GET"){
+      const force = url.searchParams.get("refresh") === "1";
+      const s = await L.invFilters({ force });
+      return sendJson(res, 200, {
+        models: s.models, conds: s.conds, filters: s.filters,
+        at: s.at, stale: Boolean(s.stale)
+      });
+    }
+
+    if(p === "/api/inv/scan" && req.method === "POST"){
+      const body      = await readBody(req);
+      const model     = String(body.model     || "").toLowerCase().trim();
+      const condition = String(body.condition || "").toLowerCase().trim();
+
+      /* Checked against the site's own lists rather than a copy kept here —
+         the same reason the filter keys are checked inside invScan. */
+      const schema = await L.invFilters();
+      if(!schema.models.includes(model)){
+        return sendJson(res, 400, {
+          error: `Tesla inventory has no model "${model}". It has: ${schema.models.join(", ")}.` });
+      }
+      if(!schema.conds.includes(condition)){
+        return sendJson(res, 400, {
+          error: `Condition must be one of: ${schema.conds.join(", ")}.` });
+      }
+
+      jobStart();
+      let out;
+      try{
+        out = await L.invScan({ model, condition,
+                                options: body.options || {},
+                                sort   : body.sort || "Relevance",
+                                onProgress: jobUpdate });
+      }finally{ jobEnd(); }
+
+      const where = (out.options.Vrl || []).length ? `vrl ${out.options.Vrl.join("/")}`
+                  : (out.options.FleetSalesRegions || []).join("/") || "everywhere";
+      log(`inventory ${condition} ${model} · ${where}: ${out.rows.length} of ${out.total}`);
       return sendJson(res, 200, out);
     }
 
@@ -817,7 +873,11 @@ const server = http.createServer(async (req, res) => {
            keyed on, for pasting somewhere that is not a spreadsheet — the same
            job "VIN + delivery date" does on the other two, which this bucket
            cannot offer because not being given a date is what put a car in it. */
-        "vin-rn"      : ["vin", "rn"]
+        "vin-rn"      : ["vin", "rn"],
+        /* Open Inventory's narrow sheet. Deliberately not VIN-led: new
+           inventory has no published VIN, so a VIN-first preset there would
+           produce a column of blanks. */
+        "spec-price"  : ["year", "model", "trim", "price", "odometer", "location"]
       };
       const preset = PRESETS[body.preset] ? body.preset : "all";
       const pick = cols => {
@@ -842,6 +902,68 @@ const server = http.createServer(async (req, res) => {
          averaged, and the person exporting this is usually about to do one of
          those. Computed here from the timestamp rather than taken from OS's
          own `time_since_matched`, so the sheet and the screen agree. */
+      /* ── Open Inventory ──
+         One row per available car. Price and mileage go out as NUMBERS for the
+         reason matchedDays and dwell do on the sheets either side of this one:
+         "$52,990" cannot be summed and "62,354 mi" cannot be averaged, and the
+         person exporting availability is usually about to do one of those.
+
+         The VIN column is blank on new inventory rather than carrying the
+         masked `7SAY…`+hash form. That string looks enough like a VIN to be
+         pasted into Garage, and it will never match anything — a sheet is read
+         away from the card that explained itself. `vinKnown` says which case
+         a blank is, so the gap is an answer rather than a hole. */
+      if(String(body.kind || "") === "inv"){
+        const invSheet = rows.map(r => ({
+          vin      : r.vin || "",
+          vinKnown : r.masked ? "Not published until matched" : "",
+          year     : r.year || "",
+          model    : r.modelName || r.model || "",
+          trim     : r.trim || "",
+          condition: r.condition || "",
+          price    : r.price == null ? "" : r.price,
+          monroney : r.monroney == null ? "" : r.monroney,
+          odometer : r.odometer == null ? "" : r.odometer,
+          ...Object.fromEntries((r.spec || []).map(s => [s.k.toLowerCase(), s.v])),
+          location : r.vrl || r.city || "",
+          state    : r.state || "",
+          trt      : r.trt || "",
+          status   : [r.inTransit ? "In transit" : "At location",
+                      r.demo ? "Demo" : "", r.damage ? "Repair disclosed" : ""]
+                     .filter(Boolean).join(" · "),
+          options  : r.options || "",
+          listing  : r.listing || ""
+        }));
+
+        const invBuf = xlsx.build({
+          sheetName: "Open inventory",
+          columns: pick([
+            { key: "vin",       header: "VIN",            width: 20 },
+            { key: "vinKnown",  header: "VIN note",       width: 26 },
+            { key: "year",      header: "Year",           width: 7,  type: "number", digits: 0 },
+            { key: "model",     header: "Model",          width: 13 },
+            { key: "trim",      header: "Trim",           width: 26 },
+            { key: "condition", header: "New / used",     width: 11 },
+            { key: "price",     header: "Price",          width: 12, type: "number", digits: 0 },
+            { key: "monroney",  header: "Monroney",       width: 12, type: "number", digits: 0 },
+            { key: "odometer",  header: "Mileage",        width: 10, type: "number", digits: 0 },
+            { key: "paint",     header: "Paint",          width: 18 },
+            { key: "wheels",    header: "Wheels",         width: 20 },
+            { key: "interior",  header: "Interior",       width: 18 },
+            { key: "drive",     header: "Drive",          width: 16 },
+            { key: "autopilot", header: "Autopilot",      width: 26 },
+            { key: "location",  header: "Location",       width: 20 },
+            { key: "state",     header: "State",          width: 7 },
+            { key: "trt",       header: "TRT",            width: 9 },
+            { key: "status",    header: "Status",         width: 26 },
+            { key: "listing",   header: "Listing",        width: 46 },
+            { key: "options",   header: "Option codes",   width: 40 }
+          ]),
+          rows: invSheet
+        });
+        return sendXlsx(res, invBuf, label);
+      }
+
       if(String(body.kind || "") === "exp"){
         const days = at => at ? (Date.now() - new Date(at).getTime()) / 86400000 : "";
 
