@@ -2,6 +2,12 @@
 .connections.json
 .admin.json
 
+# Where the Tracker's sweep writes. Not a cache — it is the only copy of every
+# recorded path, and it is the live position of customer cars. It cannot be
+# rebuilt from anywhere (Garage keeps one current fix and no history), and it
+# is the last thing that should reach a public remote.
+.tracker/
+
 # Caches, rebuildable from the source systems.
 .trt-cache.json
 # Open Inventory's filter vocabulary, refetched from inventory.tesla.com daily.

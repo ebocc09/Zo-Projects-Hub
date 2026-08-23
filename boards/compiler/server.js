@@ -117,6 +117,28 @@ const server = http.createServer(async (req, res) => {
       return res.end(fs.readFileSync(INDEX));
     }
 
+    /* ── the vendored map library ──
+       Leaflet is in the folder rather than on a CDN, because this board's
+       promise is that it runs from its own directory: a tool that goes blank
+       when a CDN is blocked would break that. Two files, still no build step.
+       The path is hard-matched rather than joined from the URL — a static
+       handler that concatenates user input is how a board starts serving
+       .connections.json. */
+    if(p === "/vendor/leaflet.js" || p === "/vendor/leaflet.css"){
+      const file = path.join(__dirname, "vendor", path.basename(p));
+      if(!fs.existsSync(file)){
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        return res.end("Leaflet is not vendored — the map will not draw");
+      }
+      res.writeHead(200, {
+        "Content-Type" : p.endsWith(".css") ? "text/css; charset=utf-8"
+                                            : "application/javascript; charset=utf-8",
+        // Pinned at 1.9.4 and never regenerated, so it can be cached hard.
+        "Cache-Control": "public, max-age=86400"
+      });
+      return res.end(fs.readFileSync(file));
+    }
+
     /* ── client-side reporting ──
        A JavaScript error in someone else's browser is otherwise invisible:
        the page just stops doing things and the console is on their machine,
@@ -1238,6 +1260,40 @@ const server = http.createServer(async (req, res) => {
       return sendXlsx(res, buf, label);
     }
 
+    /* ── Tracker ──
+       Reads only. The sweep writes to this board's own store and to nothing
+       else; not one call in this tool changes anything in Garage. */
+    if(p === "/api/trk/scan" && req.method === "POST"){
+      const body = await readBody(req);
+      const out  = await L.trackerScan({ vin: body.vin || null, date: body.date || null });
+      log(`tracker scan: ${out.scope.kind === "vin" ? out.scope.vin : out.scope.date}` +
+          ` · ${out.rows.length} cars`);
+      return sendJson(res, 200, out);
+    }
+
+    /* The recorded path for one car, with stops and legs derived on read. */
+    if(p === "/api/trk/path" && req.method === "GET"){
+      const vin = String(url.searchParams.get("vin") || "").trim().toUpperCase();
+      const out = L.trackerPath(vin);
+      if(!out) return sendJson(res, 200, { vin, tracked: false });
+      return sendJson(res, 200, { ...out, tracked: true });
+    }
+
+    /* One live read of one car. Not part of any sweep — see liveFix(). */
+    if(p === "/api/trk/live" && req.method === "POST"){
+      const body = await readBody(req);
+      const out  = await L.liveFix(body.vin);
+      log(`tracker live: ${out.vin} ${out.ok ? "fix" : "no fix — " + out.reason}`);
+      return sendJson(res, 200, out);
+    }
+
+    /* When a car drove, for the stretches where nobody recorded where. */
+    if(p === "/api/trk/drives" && req.method === "GET"){
+      const vin = String(url.searchParams.get("vin") || "").trim().toUpperCase();
+      const hrs = Number(url.searchParams.get("hours")) || 72;
+      return sendJson(res, 200, await L.driveEvents(vin, hrs));
+    }
+
     /* ── admin ── */
     if(p === "/api/admin/unlock" && req.method === "POST"){
       const body = await readBody(req);
@@ -1356,6 +1412,43 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, out);
     }
 
+    /* ── Tracker settings ──
+       Admin-gated because switching tracking on starts a background loop that
+       keeps reading the fleet whether or not anybody has the board open. */
+    if(p === "/api/admin/tracker" && req.method === "POST"){
+      const body = await readBody(req);
+      if(!authed(body)) return sendJson(res, 401, { error: "Wrong password" });
+      const s = L.saveTrackerSettings(body.settings || {});
+      /* Stop then start on every save, so a changed interval or a flipped
+         switch takes effect now rather than at the end of the current wait. */
+      L.stopTrackerLoop();
+      if(s.enabled) L.startTrackerLoop(log);
+      log(`tracker: ${s.enabled ? "on" : "off"} · every ${s.everyMinutes}m · ` +
+          `move ${s.minMoveMetres}m · stop ${s.stopMinutes}m · keep ${s.retainDays}d`);
+      return sendJson(res, 200, { ok: true, status: L.trackerStatus() });
+    }
+
+    if(p === "/api/admin/tracker-status" && req.method === "GET"){
+      return sendJson(res, 200, L.trackerStatus());
+    }
+
+    /* Sweep on demand. Useful on the first run, when waiting two minutes to
+       find out whether the thing works at all is its own small misery. */
+    if(p === "/api/admin/tracker-sweep" && req.method === "POST"){
+      const body = await readBody(req);
+      if(!authed(body)) return sendJson(res, 401, { error: "Wrong password" });
+      const out = await L.trackerSweep({ log });
+      return sendJson(res, 200, { ok: true, ...out, status: L.trackerStatus() });
+    }
+
+    if(p === "/api/admin/tracker-forget" && req.method === "POST"){
+      const body = await readBody(req);
+      if(!authed(body)) return sendJson(res, 401, { error: "Wrong password" });
+      const out = L.trackerForgetAll();
+      log(`tracker: forgot ${out.forgotten} paths`);
+      return sendJson(res, 200, { ok: true, ...out, status: L.trackerStatus() });
+    }
+
     if(p === "/api/admin/reset" && req.method === "POST"){
       const body = await readBody(req);
       if(!authed(body)) return sendJson(res, 401, { error: "Wrong password" });
@@ -1408,5 +1501,18 @@ server.listen(PORT, "127.0.0.1", () => {
     L.startTeamsLoop(log);
     log(`  teams: poll ${t.hasPoll ? "on" : "off"} · refresh ` +
         `${t.autoMinutes ? t.autoMinutes + "m" : "off"}`);
+  }
+
+  /* The Tracker sweep, for the same reason as the Teams loop: a path is only
+     worth having if it was being recorded while nobody was watching. Off
+     unless somebody pulled the lever — this reads the fleet on a timer, so it
+     does not start itself. */
+  const k = L.trackerSettings();
+  if(k.enabled){
+    L.startTrackerLoop(log);
+    log(`  tracker: on · every ${k.everyMinutes}m · move ${k.minMoveMetres}m · ` +
+        `${L.trackerStatus().cars} cars on record`);
+  }else{
+    log("  tracker: off");
   }
 });

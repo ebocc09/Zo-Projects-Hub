@@ -7,6 +7,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- Served by this board out of vendor/, not from a CDN: the promise is that
+     the board runs from its own folder. Tiles still need the network, and a
+     tile server that cannot be reached leaves an empty grid with the path
+     drawn on it rather than a broken map. -->
+<link rel="stylesheet" href="/vendor/leaflet.css">
 <style>
 /* ═══════════════════════════════ ZO-1 ═══════════════════════════════
    House style. Near-black ink, flat greys, one accent used sparingly.
@@ -677,6 +682,54 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
   to  {opacity:1;transform:translate(-50%,-48%)}
 }
 .modal.wide{width:760px}
+
+/* ── Tracker ──────────────────────────────────────────────────────────────
+   The map wants width and height in a way nothing else on this board does: a
+   path across a city in a 760px box is a squiggle. This is the sheet width and
+   a fixed map height, because fitBounds on a box whose height depends on how
+   many stops are listed below it lands at a different zoom every time. */
+#trkMapModal{width:1040px;height:min(88vh,820px)}
+#trkMapBody{display:flex;flex-direction:column;gap:0;padding:0;overflow:hidden}
+.trk-map{height:440px;flex:none;background:var(--paper-alt);
+  border-bottom:1px solid var(--line-soft)}
+/* Leaflet writes its own font into the tiles pane; the attribution and the
+   zoom control should still read as this board rather than as a map widget. */
+.trk-map .leaflet-container{font:400 11px/1.4 Inter,system-ui,sans-serif}
+.trk-map .leaflet-bar a{color:var(--ink);border-radius:0}
+.trk-map .leaflet-control-attribution{background:rgba(255,255,255,.82);
+  color:var(--ink-mute);font-size:10px}
+/* Basemap toggle. Chips, in the corner of the map, because it is a property
+   of what you are looking at rather than of the car. */
+.trk-base{position:absolute;z-index:500;right:10px;top:10px;display:flex;gap:4px}
+.trk-base .chip{background:var(--paper);box-shadow:var(--shadow-sm)}
+/* Lifting the chip off the map re-states `background`, and `.chip.on` up at the
+   top of the sheet is the same weight and loses on order — so the selected
+   basemap kept its white text and got a white ground with it, and the label
+   for the map you were looking at was the one you could not read. Restated
+   here rather than reordered: the override above has to stay for the
+   unselected chip, which sits directly on the tiles. */
+.trk-base .chip.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.trk-legs{flex:1;min-height:0;overflow:auto;padding:14px 18px 18px}
+/* One row per stop. Numbered to match the marker, so the list and the map are
+   read together rather than each on its own. */
+.trk-stop{display:grid;grid-template-columns:26px 1fr auto;gap:10px;
+  align-items:baseline;padding:8px 0;border-bottom:1px solid var(--line-soft)}
+.trk-stop:last-child{border-bottom:0}
+.trk-stop b{font-variant-numeric:tabular-nums}
+.trk-n{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;
+  background:var(--ink);color:#fff;font-size:11px;font-weight:600}
+.trk-stop.open .trk-n{background:var(--blue)}
+.trk-dwell{font-size:19px;font-weight:600;letter-spacing:-.01em;
+  font-variant-numeric:tabular-nums}
+/* A leg the board will not vouch for as a route. Said in words as well as in
+   the dash on the map — a dashed line is a convention nobody was taught. */
+.trk-gap{color:var(--ink-mute);font-size:12px;padding:6px 0 6px 36px}
+.trk-gap b{color:var(--red)}
+/* Fix age. The single most load-bearing number on a Tracker row: about one car
+   in five is hours or days stale while sitting there `online`, so a position
+   with no age beside it would read as "here, now". */
+.trk-age{font-variant-numeric:tabular-nums}
+.trk-age.warn{color:var(--red)}
 /* The ticket editor. Sized to the Zo Hub's unlocked admin panel, which is the
    house shape for "a working surface" rather than "a question" — the row-level
    actions needed the room and were cluttering the list inline. */
@@ -1030,6 +1083,11 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 .hub-note a{display:inline-block;margin-top:6px;color:var(--blue);
   text-decoration:none;border-bottom:1px solid transparent}
 .hub-note a:hover{border-bottom-color:currentColor}
+
+/* Shown when this page is newer than the board serving it: /api/lang does not
+   exist until the process is restarted, and a row that just sat at "English"
+   would be lying about which language is in force. */
+#langNow.stale{color:var(--red);font-size:11.5px}
 </style>
 </head>
 <body>
@@ -1093,6 +1151,10 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
            button is the whole rename — the internals were left alone rather
            than churning forty identifiers across three files for a label. -->
       <button class="btn btn-primary" id="expBtn">Pending Inventory</button>
+      <!-- The only tool here that answers WHERE. Its modal is a VIN box and a
+           date, because a position is asked about one car or one day's
+           handovers and never about a facet of the fleet. -->
+      <button class="btn btn-primary" id="trkBtn">Tracker</button>
     </div>
   </div>
 </section>
@@ -1439,6 +1501,65 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 </div>
 
 <!-- TRT -->
+<!-- Tracker — one VIN, or one day's deliveries.
+
+     Two ways in and no facets, because a position is not a property of a
+     fleet: you are either holding a VIN or you are looking at Thursday. The
+     VIN box answers about ANY car, delivered or not, for the same reason
+     Service Visits' one-VIN lookup ignores its own filters — looking at a car
+     is not doing anything to it, and "no cars found" in reply to a VIN
+     somebody is holding is the worst possible answer. -->
+<div class="modal" id="trkModal" role="dialog" aria-label="Tracker">
+  <div class="modal-head"><h3>Tracker</h3>
+    <span class="modal-sub" id="trkCtx"></span>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body">
+    <!-- Written by paintTrkState(): whether anything is being recorded at all.
+         A board that answered "no path" without saying the recorder was off
+         would send the reader looking for a fault in the car. -->
+    <div id="trkState"></div>
+
+    <div class="facet">
+      <div class="facet-head"><span>One VIN</span></div>
+      <div class="field">
+        <input type="text" id="trkVin" autocomplete="off" spellcheck="false"
+               placeholder="5YJ… / 7SA… — 17 characters" maxlength="17">
+        <div class="hint">Any car, delivered or not. A delivered one says so and
+          still shows whatever was recorded before handover.</div>
+      </div>
+      <button class="btn btn-dark" id="trkVinGo" style="width:100%">Look up this VIN</button>
+    </div>
+
+    <div class="facet">
+      <div class="facet-head"><span>Delivering on</span></div>
+      <div class="field">
+        <input type="date" id="trkDate" autocomplete="off">
+        <div class="hint">Intrepid's appointment list for this centre — the same
+          list the delivery board reads.</div>
+      </div>
+    </div>
+  </div>
+  <div class="modal-foot">
+    <span class="modal-sub" id="trkCount" style="margin-right:auto"></span>
+    <button class="btn btn-ghost" data-close>Cancel</button>
+    <button class="btn btn-dark" id="runTrk">Load that day</button>
+  </div>
+</div>
+
+<!-- The path one car took.
+
+     A real Leaflet map rather than a plotted SVG, because "a general layout of
+     the area" is the question — a stop is only meaningful once you can see it
+     is the back row of the offsite lot rather than a dot at 29.88, -95.58. -->
+<div class="modal wide" id="trkMapModal" role="dialog" aria-label="Path">
+  <div class="modal-head"><h3 id="trkMapTitle">Path</h3>
+    <span class="modal-sub" id="trkMapCtx"></span>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body" id="trkMapBody"></div>
+</div>
+
 <div class="modal" id="trtModal" role="dialog" aria-label="Set TRT">
   <div class="modal-head"><h3>Set TRT</h3>
     <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
@@ -1521,6 +1642,13 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
         </svg>
         Teams
         <span class="warn" id="railWarnTeams" hidden></span>
+      </button>
+      <button class="rail-item" data-sec="tracker">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+        </svg>
+        Tracker
+        <span class="warn" id="railWarnTracker" hidden></span>
       </button>
       <button class="rail-item" data-sec="checks">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
@@ -1728,6 +1856,60 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
       <div class="why" id="twMsg" style="margin-top:4px"></div>
     </section>
 
+    <section class="sec" id="secTracker">
+      <h4 class="sec-h">Tracker</h4>
+      <p class="sec-p">Records where every undelivered customer and inventory
+        car at this centre is, on a timer, so the Tracker tool can show the
+        path one took. Off unless you switch it on — it reads the fleet whether
+        or not anybody has the board open.</p>
+
+      <!-- Slide rather than click, and the board's own slide-to-confirm rather
+           than a new control: this starts a background loop that reads the
+           whole fleet every couple of minutes whether or not anybody has the
+           board open, and a drag from end to end cannot be produced by a stray
+           click or a repeated Enter. -->
+      <div id="trkSwitchRow" style="margin:10px 0 14px">
+        <button class="btn btn-dark" id="trkOn">Enable tracking</button>
+        <button class="btn btn-ghost" id="trkOff" hidden>Turn tracking off</button>
+      </div>
+
+      <div class="conn" id="trkOnRow"><i class="dot"></i><b>Tracking</b><span id="trkOnState">—</span></div>
+      <div class="conn" id="trkSweepRow"><i class="dot"></i><b>Last sweep</b><span id="trkSweepState">—</span></div>
+      <div class="conn" id="trkNextRow"><i class="dot"></i><b>Next sweep</b><span id="trkNextState">—</span></div>
+      <div class="conn" id="trkCarsRow"><i class="dot"></i><b>On record</b><span id="trkCarsState">—</span></div>
+
+      <div class="sec-title">How it sweeps</div>
+      <div class="row2">
+        <div class="field"><label>Sweep every (minutes)</label>
+          <input type="text" id="trkEvery" inputmode="numeric" autocomplete="off"></div>
+        <div class="field"><label>Counts as moved (metres)</label>
+          <input type="text" id="trkMove" inputmode="numeric" autocomplete="off"></div>
+      </div>
+      <div class="hint" style="margin:-4px 0 12px">
+        Measured on this fleet: only about one car in ten reports a new fix in
+        any 200 seconds, so sweeping faster than a minute re-reads the same
+        rows. A parked car's fix wanders — one drifted <b>17 m in 17 minutes</b>
+        standing still — which is what the metres are for. Below about 25 m the
+        board would record that drift as a journey.
+      </div>
+      <div class="row2">
+        <div class="field"><label>Counts as a stop (minutes)</label>
+          <input type="text" id="trkStop" inputmode="numeric" autocomplete="off"></div>
+        <div class="field"><label>Keep a delivered path (days)</label>
+          <input type="text" id="trkKeep" inputmode="numeric" autocomplete="off"></div>
+      </div>
+      <button class="btn-block" id="trkSave">Save sweep settings</button>
+      <button class="btn-block" id="trkSweepNow">Sweep now</button>
+
+      <div class="sep"></div>
+      <p class="sec-p">A path cannot be filled in backwards. Garage keeps one
+        current position per car and no history — Datatank's GPS history carries
+        heading, elevation and accuracy and <b>no coordinates at all</b> — so
+        forgetting a path forgets it for good.</p>
+      <button class="btn-block red" id="trkForget">Forget every recorded path</button>
+      <div class="why" id="trkMsg" style="margin-top:4px"></div>
+    </section>
+
     <section class="sec" id="secChecks">
       <h4 class="sec-h">Checks</h4>
       <p class="sec-p">Tesladex is tested separately from Garage: a live session
@@ -1756,6 +1938,10 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
   </div>
 </div>
 
+<!-- Before the board's own script, and not deferred: drawTrkMap() checks for
+     `L` and simply draws nothing if the file is missing, so a board whose
+     vendor/ was not copied loses the map and keeps every other tool. -->
+<script src="/vendor/leaflet.js"></script>
 <script>
 "use strict";
 
@@ -2186,11 +2372,20 @@ const ZoI18n = (() => {
    else — on this Hub's Admin panel, or from a board's point of view on the
    Hub entirely. Ten seconds is a local file read; the alternative is a board
    sitting in the wrong language until somebody reloads it. */
+let langStale = false;   // this page is newer than the server that sent it
+
 async function pollLang(){
   try{
     const r = await fetch("/api/lang", { cache: "no-store" });
-    if(r.ok) ZoI18n.set((await r.json()).lang);
-  }catch{ /* the language is not worth a visible error */ }
+    /* A 404 means one specific thing, and it is worth naming. index.html is
+       read off disk on every request, so the page is always current; server.js
+       is whatever was loaded when the process started. Update the files
+       without restarting and you get a picker that renders and an endpoint
+       that does not exist. Staying quiet about that reads as "the language
+       feature is broken", which is the wrong thing to go and debug. */
+    if(r.status === 404){ langStale = true; paintLangRow(); return; }
+    if(r.ok){ langStale = false; ZoI18n.set((await r.json()).lang); }
+  }catch{ /* server down: the page has louder ways of saying so */ }
 }
 pollLang();
 setInterval(pollLang, 10000);
@@ -2200,7 +2395,11 @@ setInterval(pollLang, 10000);
    nothing there — which is why it can live in the shared block. */
 function paintLangRow(){
   const el = document.getElementById("langNow");
-  if(el) el.textContent = ZoI18n.get() === "es" ? "Español" : "English";
+  if(!el) return;
+  el.textContent = langStale
+    ? "restart this board to finish the update"
+    : (ZoI18n.get() === "es" ? "Español" : "English");
+  el.classList.toggle("stale", langStale);
 }
 ZoI18n.onChange(paintLangRow);
 paintLangRow();
@@ -2268,7 +2467,14 @@ const S = {
   /* Three-valued on purpose: true, false, and "nobody has asked yet". The
      probe costs a call to the pipeline, so the dot must be paintable before
      it comes back. */
-  osLive:null
+  osLive:null,
+  /* Tracker. `trkScope` is what the last scan asked — a VIN or a date — and
+     goes in the subtitle, because a list of one car and a list of Thursday's
+     twelve are otherwise the same screen. `trkStatus` is the sweep's own
+     state, refetched with every scan so the list can say whether anything is
+     being recorded at all rather than leaving a reader to infer it from an
+     absence of paths. */
+  trkScope:null, trkStatus:null, trkSettings:null
 };
 
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g,
@@ -2314,6 +2520,11 @@ const modalStack = [];
 function emptyModal(el){
   if(el.id === "shots") $("shotsBody").innerHTML = "";
   if(el.id === "ticketModal") $("ticketBody").innerHTML = "";
+  /* The map is destroyed rather than merely hidden, and that is the same
+     argument as the photo viewer above: a live Leaflet instance in a hidden
+     div holds its tile cache, its event handlers and its animation frames.
+     Emptying the div alone would leave the instance orphaned and running. */
+  if(el.id === "trkMapModal"){ trkDestroyMap(); $("trkMapBody").innerHTML = ""; }
 }
 
 function showModal(el, over){
@@ -5819,6 +6030,11 @@ function visibleRows(){
      opinion about an order the search already applied, and filtering again
      would make the count disagree with `total`. */
   if(S.tool === "inv") return S.rows;
+  /* Tracker's order comes off the server — a VIN lookup is one row, and a
+     day's deliveries are in the order the appointment list gave them, which is
+     the order the delivery board is read in. Re-sorting here would be this
+     board having an opinion about somebody else's running order. */
+  if(S.tool === "trk") return S.rows;
   if(S.tool === "cog"){
     /* Sorted here rather than re-scanned: the server hands back longest-first
        and the other order is the same rows read the other way up. */
@@ -6308,6 +6524,7 @@ function paintList(){
      filters and sort keeps asking `exp`. The two are not the same question:
      inventory narrows server-side and has no facet panel here. */
   const inv  = S.tool === "inv";
+  const trk  = S.tool === "trk";
   const deck = exp || inv;
   /* Before the rows are taken, not after: this is what prunes a concern the
      view toggle has just retired, and visibleRows() must not be asked for a
@@ -6328,14 +6545,17 @@ function paintList(){
     if(rows.length){ paintDeck(); }
     else { S.expIndex = 0; deckRows = []; deckItems = []; $("list").innerHTML = ""; }
   }else{
-    $("list").innerHTML = rows.map(cog ? cogRowHtml : rowHtml).join("");
+    const row = trk ? trkRowHtml : (cog ? cogRowHtml : rowHtml);
+    $("list").innerHTML = rows.map(row).join("");
   }
   // Both inventory tools are a wheel of cards; the other two are a column of
   // rows. Same element either way, so the head, the empty state and the export
   // are one implementation rather than four.
   $("list").classList.toggle("cards", deck);
 
-  for(const id of ["viewFlagged", "viewAll"]) $(id).hidden = cog || deck;
+  /* Tracker has no flagged/clear split — every row is a car somebody asked
+     about — so the view toggle would be two chips that do the same thing. */
+  for(const id of ["viewFlagged", "viewAll"]) $(id).hidden = cog || deck || trk;
   for(const id of ["sortDwell", "sortRecent"]) $(id).hidden = !cog;
   /* Both hidden outright off Pending Inventory rather than greyed: a control that
      cannot do anything says less than no control at all, and the board has
@@ -6921,6 +7141,493 @@ $("adminBtn").addEventListener("click", () => {
 const otpBoxes = Array.from(document.querySelectorAll("#otp .otp-box"));
 const otpValue = () => otpBoxes.map(b => b.value).join("");
 
+/* ═══════════════════════════════ Tracker ═══════════════════════════════
+
+   Where a car is, and where it has been.
+
+   The position comes from Garage's index rather than from the live vitals
+   read, and that was measured rather than assumed: on three cars checked back
+   to back the two agreed to 0.1 m, 1.0 m and 1.0 m, and the index costs one
+   query per hundred cars against 141-156 KB and 1-2 seconds each. The live
+   read survives as the button on the map panel, where what it adds is not
+   accuracy but `show_gps_reason` — the only field anywhere that says why a car
+   has no position.
+
+   ── the number this screen exists to keep honest ──
+
+   Every row carries how OLD its fix is, and that is not decoration. About one
+   car in five is hours or days stale while Garage still calls it `online`; one
+   sampled car's last position was 3.8 days old. A coordinate printed without
+   its age reads as "here, now" when it means "here, on Thursday", and somebody
+   would walk out to an empty space.                                          */
+
+const TRK_STALE = 3600;        // an hour: past this the age is called out in red
+const TRK_ANCIENT = 43200;     // twelve hours: past this the row stops claiming a position
+
+function trkAge(sec){
+  if(sec == null) return "no fix";
+  if(sec < 90)     return sec + "s ago";
+  if(sec < 5400)   return Math.round(sec / 60) + "m ago";
+  if(sec < 172800) return Math.round(sec / 3600) + "h ago";
+  return Math.round(sec / 86400) + "d ago";
+}
+
+const trkDist = m => m == null ? "—"
+  : m < 1000 ? Math.round(m) + " m"
+  : (m / 1000).toFixed(m < 10000 ? 1 : 0) + " km";
+
+function trkDwell(sec){
+  if(sec == null) return "—";
+  if(sec < 5400)  return Math.round(sec / 60) + "m";
+  if(sec < 172800) return Math.round(sec / 3600) + "h";
+  return Math.round(sec / 86400) + "d";
+}
+
+const trkTime = t => t == null ? "" : new Date(t * 1000)
+  .toLocaleString(ZoI18n.locale(), { month:"short", day:"numeric",
+                                     hour:"numeric", minute:"2-digit" });
+
+function trkRowHtml(r){
+  /* State in the border, as everywhere else on this board. Red for a car whose
+     position is too old to act on, amber for one going that way, blue for a
+     car that has actually moved since tracking started, nothing for a car
+     standing quietly where it was. */
+  const age = r.fixAgeSec;
+  const cls = r.fix == null || age >= TRK_ANCIENT ? "ct"
+            : age >= TRK_STALE ? "sv"
+            : r.points > 1 ? "lg" : "";
+
+  const pills = [];
+  if(r.delivered){
+    pills.push(`<span class="pill p-idle" title="Garage stops publishing coordinates at handover">Delivered</span>`);
+  }
+  if(!r.inGarage){
+    pills.push(`<span class="pill p-err">Not in Garage</span>`);
+  }
+  if(r.vpnState) pills.push(`<span class="pill p-info"><i></i>${esc(r.vpnState)}</span>`);
+  if(r.fix && r.fix.mode) pills.push(`<span class="pill p-work">${esc(r.fix.mode)}</span>`);
+
+  const bits = [
+    String(r.model || "").toUpperCase(),
+    r.vehicleType,
+    r.scheduled ? "delivery " + fmtDate(r.scheduled) : "",
+    r.points ? `${r.points} point${r.points === 1 ? "" : "s"}` : "",
+    r.stops   ? `${r.stops} stop${r.stops === 1 ? "" : "s"}`   : "",
+    r.metres  ? trkDist(r.metres) + " travelled" : ""
+  ].filter(Boolean);
+
+  /* Three different silences, and they want three different next moves, so
+     they are three different sentences rather than one blank. */
+  let where;
+  if(r.delivered && !r.tracked){
+    where = `<div class="hold-line" style="color:var(--ink-mute)">delivered — nothing was recorded before handover</div>`;
+  }else if(r.delivered){
+    where = `<div class="hold-line" style="color:var(--ink-mute)">delivered — tracking stopped, path kept</div>`;
+  }else if(!r.fix){
+    where = `<div class="hold-line" style="color:var(--ink-mute)">Garage holds no position for this car</div>`;
+  }else if(!r.tracked){
+    where = `<div class="hold-line" style="color:var(--ink-mute)">no path yet — not swept since tracking came on</div>`;
+  }else{
+    where = `<div class="hold-line" style="color:var(--ink-mute)">${esc(r.fix.lat.toFixed(5))}, ${esc(r.fix.lon.toFixed(5))}</div>`;
+  }
+
+  const ageCls = age != null && age >= TRK_STALE ? "trk-age warn" : "trk-age";
+
+  return `<div class="veh ${cls}" data-trk="${esc(r.vin)}" role="button" tabindex="0"
+               title="Open the recorded path">
+    <div>
+      <div class="vin-row">${vinLink(r)}
+        ${pills.join("")}
+      </div>
+      <div class="veh-sub">${bits.map(b => esc(b)).join(' <span class="dot"></span> ')}</div>
+    </div>
+    <div class="holds">
+      <div class="hold-line ${ageCls}" style="font-size:19px;font-weight:600;letter-spacing:-.01em;color:var(--ink)">
+        ${esc(trkAge(age))}</div>
+      ${where}
+    </div>
+  </div>`;
+}
+
+function renderTrk(data){
+  S.tool     = "trk";
+  S.rows     = data.rows || [];
+  S.notes    = data.notes || [];
+  S.trkScope = data.scope || null;
+  S.trkStatus   = data.status || null;
+  S.trkSettings = data.settings || null;
+
+  const rows = S.rows;
+  const withFix = rows.filter(r => r.fix);
+  const moving  = rows.filter(r => r.points > 1);
+  const stale   = withFix.filter(r => r.fixAgeSec >= TRK_ANCIENT);
+  const del     = rows.filter(r => r.delivered);
+
+  paintStats([
+    { k: "Cars",        v: rows.length.toLocaleString(ZoI18n.locale()) },
+    { k: "With a fix",  v: withFix.length.toLocaleString(ZoI18n.locale()),
+      small: rows.length - withFix.length ? ` · ${rows.length - withFix.length} without` : "" },
+    { k: "Has moved",   v: moving.length.toLocaleString(ZoI18n.locale()) },
+    /* Its own tile rather than a footnote. A fix over twelve hours old is the
+       single thing most likely to send somebody to the wrong side of the lot,
+       and it is invisible unless it is counted. */
+    { k: "Stale 12h+",  v: stale.length.toLocaleString(ZoI18n.locale()) },
+    { k: "Delivered",   v: del.length.toLocaleString(ZoI18n.locale()) }
+  ]);
+
+  S.listSub = S.trkScope && S.trkScope.kind === "vin"
+    ? "one VIN"
+    : `delivering ${fmtDate((S.trkScope && S.trkScope.date) || "")}`;
+
+  $("listTitle").textContent = "Tracker";
+  $("listHead").hidden = false;
+  $("empty").hidden = true;
+  paintList();
+
+  if(S.notes.length) note(S.notes.join("  ")); else clearNotes();
+
+  if(!rows.length){
+    /* An empty date and an empty VIN are different failures. One means nobody
+       is taking delivery that day; the other cannot happen, because a VIN
+       always produces a row even when Garage has never heard of it. */
+    $("list").innerHTML = `<div class="empty"><h3>Nothing delivering that day</h3>
+      <p>Intrepid has no delivery appointments at this centre on
+         ${esc(fmtDate((S.trkScope && S.trkScope.date) || ""))}. Try another date,
+         or look a VIN up directly.</p></div>`;
+  }
+}
+
+/* ── the two ways in ── */
+
+$("trkBtn").addEventListener("click", async () => {
+  if(S.busy) return;
+  if(!S.trtId){ note("Choose a centre first — Enter TRT in the top corner.", true); return; }
+  $("trkDate").value = $("trkDate").value || new Date().toLocaleDateString("en-CA");
+  $("trkCtx").textContent = S.trt && S.trt.name ? S.trt.name : "";
+  showModal($("trkModal"));
+  paintTrkState();
+});
+
+/* Whether anything is being recorded, said at the point of asking. Without
+   this the modal is a search box over a recorder that may be switched off, and
+   an empty answer would read as a fact about the cars. */
+async function paintTrkState(){
+  const el = $("trkState");
+  el.innerHTML = `<div class="hint">Checking the recorder…</div>`;
+  try{
+    const s = await api("/api/admin/tracker-status");
+    S.trkStatus = s;
+    if(!s.enabled){
+      el.innerHTML = `<div class="note err">Tracking is <b>off</b>, so no positions
+        are being recorded. You can still look a car up — Garage's current fix
+        is always there — but there will be no path.
+        <br><b>Admin › Tracker</b> to switch it on.</div>`;
+    }else{
+      const when = s.lastSweepAt
+        ? trkAge(Math.round(Date.now() / 1000 - s.lastSweepAt))
+        : "not yet";
+      el.innerHTML = `<div class="note">Tracking is <b>on</b> — every
+        ${esc(String(s.everyMinutes))}m, last sweep ${esc(when)},
+        ${esc(s.cars.toLocaleString(ZoI18n.locale()))} cars and
+        ${esc(s.points.toLocaleString(ZoI18n.locale()))} points on record.</div>`;
+    }
+  }catch(err){
+    el.innerHTML = `<div class="note err">${esc(err.message)}</div>`;
+  }
+}
+
+async function trkRun(payload, btn){
+  if(S.busy) return;
+  S.busy = true;
+  const was = btn ? btn.textContent : "";
+  if(btn){ btn.textContent = "Loading…"; btn.disabled = true; }
+  clearNotes();
+  try{
+    const data = await api("/api/trk/scan", payload);
+    hideModal();
+    renderTrk(data);
+  }catch(err){
+    note(err.message, true);
+  }finally{
+    S.busy = false;
+    if(btn){ btn.textContent = was; btn.disabled = false; }
+  }
+}
+
+$("trkVinGo").addEventListener("click", e => {
+  const vin = $("trkVin").value.trim().toUpperCase();
+  if(!vin){ note("Type a VIN, or use the date below.", true); return; }
+  trkRun({ vin }, e.currentTarget);
+});
+$("trkVin").addEventListener("keydown", e => {
+  if(e.key === "Enter"){ e.preventDefault(); $("trkVinGo").click(); }
+});
+$("runTrk").addEventListener("click", e =>
+  trkRun({ date: $("trkDate").value }, e.currentTarget));
+
+/* ── the map ───────────────────────────────────────────────────────────────
+
+   Leaflet, out of vendor/. Two basemaps, neither needing a key or an account:
+   Carto Light because it is the one that looks like this board, and Esri World
+   Imagery because a stop is only useful once you can see it is the back row of
+   the offsite lot rather than a dot on a road.
+
+   The instance is destroyed on close. A Leaflet map left alive in a hidden div
+   keeps its tile cache, its handlers and its animation frames — the same
+   argument that makes the photo viewer empty itself.                        */
+
+const TRK_BASES = {
+  street: { name: "Street",
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    attr: "© OpenStreetMap, © CARTO", max: 20 },
+  sat: { name: "Satellite",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attr: "Esri, Maxar, Earthstar Geographics", max: 19 }
+};
+
+let trkMap = null, trkLayer = null, trkBase = "street";
+
+function trkDestroyMap(){
+  if(trkMap){ trkMap.remove(); trkMap = null; trkLayer = null; }
+}
+
+async function openTrkPath(vin){
+  const row = S.rows.find(r => r.vin === vin) || { vin };
+  $("trkMapTitle").textContent = vin;
+  $("trkMapCtx").textContent = [
+    String(row.model || "").toUpperCase(),
+    row.delivered ? "delivered — tracking stopped" : null
+  ].filter(Boolean).join(" · ");
+  $("trkMapBody").innerHTML = `<div class="trk-legs"><div class="hint">Reading the path…</div></div>`;
+  showModal($("trkMapModal"), true);
+
+  let d;
+  try { d = await api(`/api/trk/path?vin=${encodeURIComponent(vin)}`); }
+  catch(err){
+    $("trkMapBody").innerHTML = `<div class="trk-legs"><div class="note err">${esc(err.message)}</div></div>`;
+    return;
+  }
+
+  if(!d.tracked || !d.points || !d.points.length){
+    /* No path is not one situation. A delivered car may never have been
+       recorded; an undelivered one simply has not been swept yet; and either
+       way there is still a current position to offer, which is the thing the
+       reader actually came for. */
+    $("trkMapBody").innerHTML = `<div class="trk-legs">
+      <div class="note">${row.delivered
+        ? "This car was delivered and nothing was recorded before handover."
+        : "No path recorded yet. A path begins at the first sweep after tracking " +
+          "is switched on — Garage keeps no location history, so it cannot be " +
+          "filled in backwards."}</div>
+      ${row.fix ? `<p class="sec-p">Garage's current fix is
+        <b>${esc(row.fix.lat.toFixed(5))}, ${esc(row.fix.lon.toFixed(5))}</b>,
+        ${esc(trkAge(row.fixAgeSec))}.</p>` : ""}
+      <button class="btn btn-dark" id="trkLiveBtn">Read it now</button>
+      <div id="trkLiveOut" style="margin-top:10px"></div>
+      <div id="trkDrivesOut" style="margin-top:10px"></div>
+    </div>`;
+    wireTrkPanel(vin);
+    return;
+  }
+
+  $("trkMapBody").innerHTML = `
+    <div class="trk-map" id="trkMapEl" style="position:relative">
+      <div class="trk-base">
+        <button class="chip${trkBase === "street" ? " on" : ""}" data-base="street">Street</button>
+        <button class="chip${trkBase === "sat" ? " on" : ""}" data-base="sat">Satellite</button>
+      </div>
+    </div>
+    <div class="trk-legs" id="trkLegs"></div>`;
+
+  paintTrkLegs(d, row);
+  drawTrkMap(d);
+  wireTrkPanel(vin);
+}
+
+function paintTrkLegs(d, row){
+  const stops = d.stops || [];
+  const pts   = d.points || [];
+
+  const head = `<div class="veh-sub" style="margin-bottom:10px">
+    ${pts.length} point${pts.length === 1 ? "" : "s"}
+    <span class="dot"></span> ${stops.length} stop${stops.length === 1 ? "" : "s"}
+    <span class="dot"></span> ${esc(trkDist(d.metresTravelled))} travelled
+    ${d.metresGapped ? `<span class="dot"></span> ${esc(trkDist(d.metresGapped))} unreported` : ""}
+    <span class="dot"></span> recorded since ${esc(trkTime(d.firstSeen))}
+  </div>`;
+
+  /* Only the legs the board will not vouch for get a line of their own. A car
+     that reappears far away after a long silence was moved while asleep, and
+     the straight line between those two points is not a route it drove — so
+     it is said in words here as well as dashed on the map, because a dashed
+     line is a convention nobody was taught. */
+  const gaps = (d.legs || []).filter(l => l.gap).map(l => {
+    const a = pts[l.from], b = pts[l.to];
+    return `<div class="trk-gap"><b>Unreported</b> — ${esc(trkDist(l.metres))} between
+      ${esc(trkTime(a.t))} and ${esc(trkTime(b.t))}
+      (${esc(trkDwell(l.seconds))}, ${l.kph} km/h implied). The car reported nothing
+      in between, so the line on the map is not a route it drove.</div>`;
+  }).join("");
+
+  const list = stops.length ? stops.map((s, i) => `
+    <div class="trk-stop${s.open ? " open" : ""}">
+      <div class="trk-n">${i + 1}</div>
+      <div>
+        <b>${esc(s.lat.toFixed(5))}, ${esc(s.lon.toFixed(5))}</b>
+        <div class="veh-sub">first reported ${esc(trkTime(s.firstReported))}
+          ${s.open ? "<span class=\"dot\"></span> still here"
+                   : `<span class="dot"></span> left ${esc(trkTime(s.departed))}`}
+          ${s.mode ? `<span class="dot"></span> ${esc(s.mode)}` : ""}</div>
+      </div>
+      <div class="trk-dwell">${esc(trkDwell(s.dwell))}</div>
+    </div>`).join("")
+    : `<div class="hint">Nothing stood still for ${esc(String(d.stopMinutes))} minutes yet,
+       so there are no stops to list — every point so far is the car on its way
+       somewhere.</div>`;
+
+  $("trkLegs").innerHTML = head + list + gaps + `
+    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-dark" id="trkLiveBtn">Read it now</button>
+      <button class="btn btn-ghost" id="trkDrivesBtn">When did it drive?</button>
+    </div>
+    <div id="trkLiveOut" style="margin-top:10px"></div>
+    <div id="trkDrivesOut" style="margin-top:10px"></div>`;
+}
+
+function drawTrkMap(d){
+  trkDestroyMap();
+  const pts = d.points || [];
+  if(!pts.length || typeof L === "undefined") return;
+
+  trkMap = L.map("trkMapEl", { zoomControl: true, attributionControl: true });
+  setTrkBase(trkBase);
+
+  const line = pts.map(p => [p.lat, p.lon]);
+
+  /* Solid where the car reported its way along, dashed where it did not.
+     Drawn as separate polylines per leg rather than one line with a pattern,
+     because the two say different things and one of them is a claim. */
+  (d.legs || []).forEach(l => {
+    L.polyline([line[l.from], line[l.to]], {
+      color: l.gap ? "#5C5E62" : "#3E6AE1",
+      weight: l.gap ? 2 : 3,
+      opacity: l.gap ? .7 : .9,
+      dashArray: l.gap ? "6 7" : null
+    }).addTo(trkMap);
+  });
+
+  const stopAt = new Map((d.stops || []).map((s, i) => [s.index, i + 1]));
+
+  pts.forEach((p, i) => {
+    const n = stopAt.get(i);
+    const last = i === pts.length - 1;
+    if(n){
+      /* Numbered to match the list underneath, so the two are read together
+         rather than each having to be decoded on its own. */
+      L.marker([p.lat, p.lon], { icon: L.divIcon({
+        className: "", iconSize: [22, 22], iconAnchor: [11, 11],
+        html: `<div style="width:22px;height:22px;border-radius:50%;
+          background:${last ? "#3E6AE1" : "#171A20"};color:#fff;font:600 11px/22px Inter,sans-serif;
+          text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.4)">${n}</div>` })
+      }).addTo(trkMap).bindPopup(
+        `<b>Stop ${n}</b><br>first reported ${esc(trkTime(p.t))}<br>` +
+        `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}`);
+    }else{
+      L.circleMarker([p.lat, p.lon], {
+        radius: last ? 6 : 4, color: last ? "#3E6AE1" : "#171A20",
+        weight: 2, fillColor: "#fff", fillOpacity: 1
+      }).addTo(trkMap).bindPopup(
+        `${last ? "<b>Last reported</b><br>" : ""}${esc(trkTime(p.t))}<br>` +
+        `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}` +
+        (p.mode ? `<br>${esc(p.mode)}` : ""));
+    }
+  });
+
+  /* A single point has no bounds to fit — fitBounds on it zooms to the
+     maximum and shows one roof. */
+  if(line.length > 1) trkMap.fitBounds(L.latLngBounds(line), { padding: [36, 36] });
+  else trkMap.setView(line[0], 17);
+
+  $("trkMapBody").querySelectorAll("[data-base]").forEach(b =>
+    b.addEventListener("click", () => {
+      trkBase = b.dataset.base;
+      $("trkMapBody").querySelectorAll("[data-base]").forEach(o =>
+        o.classList.toggle("on", o.dataset.base === trkBase));
+      setTrkBase(trkBase);
+    }));
+}
+
+function setTrkBase(key){
+  if(!trkMap) return;
+  const b = TRK_BASES[key] || TRK_BASES.street;
+  if(trkLayer) trkMap.removeLayer(trkLayer);
+  trkLayer = L.tileLayer(b.url, { attribution: b.attr, maxZoom: b.max }).addTo(trkMap);
+}
+
+function wireTrkPanel(vin){
+  const live = $("trkLiveBtn");
+  if(live) live.addEventListener("click", async e => {
+    const btn = e.currentTarget;
+    btn.disabled = true; btn.textContent = "Reading…";
+    try{
+      const d = await api("/api/trk/live", { vin });
+      $("trkLiveOut").innerHTML = d.ok
+        ? `<div class="note">Live read: <b>${esc(d.lat.toFixed(6))}, ${esc(d.lon.toFixed(6))}</b>
+             ${d.at ? "at " + esc(new Date(d.at).toLocaleString(ZoI18n.locale())) : ""}
+             ${d.gpsReason ? `<br><span class="hint">Garage: “${esc(d.gpsReason)}”</span>` : ""}</div>`
+        /* Garage's own sentence, verbatim. Paraphrasing it would put this
+           board's words on Garage's redaction rule. */
+        : `<div class="note err">No live fix — ${esc(d.reason || "Garage returned none")}.
+             ${d.gpsReason ? `<br>Garage: “${esc(d.gpsReason)}”` : ""}</div>`;
+    }catch(err){
+      $("trkLiveOut").innerHTML = `<div class="note err">${esc(err.message)}</div>`;
+    }finally{
+      btn.disabled = false; btn.textContent = "Read it now";
+    }
+  });
+
+  /* Datatank knows WHEN a car drove even for the stretches nobody recorded
+     where — its GPS history carries heading, elevation and accuracy and no
+     coordinates at all. So a path with a hole in it can still say a drive
+     happened there, and a drive with no matching point means the sweep
+     missed a move. */
+  const drives = $("trkDrivesBtn");
+  if(drives) drives.addEventListener("click", async e => {
+    const btn = e.currentTarget;
+    btn.disabled = true; btn.textContent = "Reading…";
+    try{
+      const d = await api(`/api/trk/drives?vin=${encodeURIComponent(vin)}&hours=72`);
+      $("trkDrivesOut").innerHTML = d.drives.length
+        ? `<div class="note"><b>${d.drives.length} drive${d.drives.length === 1 ? "" : "s"}</b>
+             on record in the last ${esc(String(d.hours))}h, from Datatank's GPS history:
+             <br>${d.drives.map(x =>
+               esc(new Date(x.at + "Z").toLocaleString(ZoI18n.locale()))).join("<br>")}
+             <br><span class="hint">Times only. That history carries heading, elevation
+             and accuracy and no coordinates — which is why a path cannot be
+             filled in backwards.</span></div>`
+        : `<div class="note">No drive-end events in the last ${esc(String(d.hours))}h
+             (${esc(String(d.rows))} snapshots read).</div>`;
+    }catch(err){
+      $("trkDrivesOut").innerHTML = `<div class="note err">${esc(err.message)}</div>`;
+    }finally{
+      btn.disabled = false; btn.textContent = "When did it drive?";
+    }
+  });
+}
+
+/* Row click opens the path. Delegated, because the list is rebuilt wholesale
+   on every paint and per-row listeners would leak with it. */
+$("list").addEventListener("click", e => {
+  const row = e.target.closest("[data-trk]");
+  if(row && S.tool === "trk" && !e.target.closest("a")) openTrkPath(row.dataset.trk);
+});
+$("list").addEventListener("keydown", e => {
+  const row = e.target.closest("[data-trk]");
+  if(row && S.tool === "trk" && (e.key === "Enter" || e.key === " ")){
+    e.preventDefault(); openTrkPath(row.dataset.trk);
+  }
+});
+
 function otpClear(focus){
   otpBoxes.forEach(b => { b.value = ""; b.classList.remove("filled"); });
   $("otp").classList.remove("bad");
@@ -6988,6 +7695,15 @@ async function tryUnlock(){
     $("settings").hidden = false;
     $("adminModal").classList.add("unlocked");
     paintConnections(d.connections);
+    /* Its own fetch rather than a field on the unlock payload: the sweep state
+       moves on its own timer, so a panel opened an hour after unlocking would
+       otherwise be showing the counters from whenever the password was typed.
+       Not awaited — the panel should paint now and fill this row in when it
+       answers, rather than holding the whole thing on one status call. */
+    api("/api/admin/tracker-status").then(paintTracker).catch(() => {
+      $("trkOnState").textContent = "could not be read";
+      $("trkOnRow").classList.add("bad");
+    });
   }catch(err){
     $("otp").classList.add("bad");
     $("gateErr").textContent = err.message === "Wrong password" ? "Incorrect code." : err.message;
@@ -7259,6 +7975,147 @@ $("runTests").addEventListener("click", async e => {
     $(id + "Row").classList.toggle("bad", !r.ok);
   };
   show("tIntrepid", d.intrepid); show("tGarage", d.garage); show("tTesladex", d.tesladex);
+});
+
+/* ── Tracker, in the admin panel ─────────────────────────────────────────
+   Admin-gated because the switch starts a loop that keeps reading the fleet
+   with nobody watching, and because the thresholds decide what counts as a
+   car having moved — get those wrong and every path is either a straight line
+   or a scribble. */
+
+function paintTracker(s){
+  if(!s) return;
+  S.trkStatus = s;
+
+  $("trkOn").hidden  = s.enabled;
+  $("trkOff").hidden = !s.enabled;
+
+  $("trkOnState").textContent = s.enabled
+    ? `on · sweeping every ${s.everyMinutes} min`
+    : "off · nothing is being recorded";
+  $("trkOnRow").classList.toggle("ok", s.enabled);
+  $("trkOnRow").classList.toggle("bad", !s.enabled && s.cars > 0);
+
+  /* The counters from the last sweep, and `backwards` is deliberately its own
+     number rather than folded into the total. "Nothing new" is the ordinary
+     case and runs into the hundreds every sweep; a fix arriving OLDER than one
+     already held is a fault worth seeing, and reported together the second
+     would never be noticed inside the first. */
+  $("trkSweepState").textContent = s.lastSweepAt
+    ? `${trkAge(Math.round(Date.now() / 1000 - s.lastSweepAt))} · ${s.lastSweepMs} ms · ` +
+      `+${s.lastAppended} points · ${s.lastStale} nothing new · ` +
+      `${s.lastBackwards} backwards · ${s.lastNoFix} no fix`
+    : "never";
+  $("trkSweepRow").classList.toggle("ok", Boolean(s.lastSweepAt) && !s.lastError);
+  $("trkSweepRow").classList.toggle("bad", Boolean(s.lastError));
+  if(s.lastError) $("trkSweepState").textContent = s.lastError;
+
+  $("trkNextState").textContent = !s.enabled ? "—"
+    : s.sweeping ? "sweeping now"
+    : s.nextSweepIn ? `in ${trkDwell(s.nextSweepIn)}` : "due";
+  $("trkNextRow").classList.toggle("ok", s.enabled);
+
+  $("trkCarsState").textContent =
+    `${s.cars.toLocaleString(ZoI18n.locale())} cars · ` +
+    `${s.withPath.toLocaleString(ZoI18n.locale())} with a path · ` +
+    `${s.points.toLocaleString(ZoI18n.locale())} points` +
+    (s.delivered ? ` · ${s.delivered} delivered` : "");
+  $("trkCarsRow").classList.toggle("ok", s.cars > 0);
+
+  $("trkEvery").value = String(s.everyMinutes);
+  $("trkMove").value  = String(s.minMoveMetres);
+  $("trkStop").value  = String(s.stopMinutes);
+  $("trkKeep").value  = String(s.retainDays);
+
+  /* The rail warns when tracking is off but paths exist: the tool will keep
+     answering off a store that has stopped growing, which looks like working
+     software right up until somebody trusts a position from yesterday. */
+  $("railWarnTracker").hidden = !(!s.enabled && s.cars > 0);
+}
+
+async function trkSave(patch, btn){
+  const d = await admin("/api/admin/tracker", { settings: patch }, btn);
+  paintTracker(d.status);
+  return d.status;
+}
+
+$("trkOn").addEventListener("click", async e => {
+  const btn = e.currentTarget;
+  const ok = await confirmBySlide(btn, "Slide to start tracking",
+    { end: "Release to start" });
+  if(!ok) return;
+  $("trkMsg").textContent = "Starting…";
+  try{
+    const s = await trkSave({ enabled: true });
+    $("trkMsg").textContent = `Tracking on. First sweep within ${s.everyMinutes} min — ` +
+      `press Sweep now if you would rather not wait.`;
+  }catch(err){ $("trkMsg").textContent = err.message; }
+});
+
+$("trkOff").addEventListener("click", async e => {
+  const btn = e.currentTarget;
+  /* Not a danger slide: switching off stops the recorder and keeps every path.
+     Forgetting the paths is the destructive one and has its own red button. */
+  const ok = await confirmBySlide(btn, "Slide to stop tracking",
+    { end: "Release to stop" });
+  if(!ok) return;
+  try{
+    await trkSave({ enabled: false });
+    $("trkMsg").textContent = "Tracking off. Recorded paths are kept — " +
+      "they just stop growing, and no path can be filled in for the gap.";
+  }catch(err){ $("trkMsg").textContent = err.message; }
+});
+
+$("trkSave").addEventListener("click", async e => {
+  const patch = {
+    everyMinutes : Number($("trkEvery").value),
+    minMoveMetres: Number($("trkMove").value),
+    stopMinutes  : Number($("trkStop").value),
+    retainDays   : Number($("trkKeep").value)
+  };
+  for(const [k, v] of Object.entries(patch)){
+    if(!Number.isFinite(v) || v <= 0){
+      $("trkMsg").textContent = `${k} has to be a positive number.`;
+      return;
+    }
+  }
+  try{
+    const s = await trkSave(patch, e.currentTarget);
+    /* Said out loud because the stop threshold is applied on READ, not on
+       record — the whole history is re-read against the new number, so an
+       existing path can gain or lose stops without anything being re-swept. */
+    $("trkMsg").textContent = `Saved. Stops are derived when a path is opened, ` +
+      `so every path already recorded now reads against ${s.stopMinutes} minutes.`;
+  }catch(err){ $("trkMsg").textContent = err.message; }
+});
+
+$("trkSweepNow").addEventListener("click", async e => {
+  $("trkMsg").textContent = "Sweeping…";
+  try{
+    const d = await admin("/api/admin/tracker-sweep", {}, e.currentTarget);
+    paintTracker(d.status);
+    $("trkMsg").textContent =
+      `${d.tracked} cars in ${d.ms} ms · ${d.fresh} fresh fixes · ` +
+      `${d.appended} points recorded (${d.moved} of them a move) · ` +
+      `${d.stale} had nothing new · ${d.backwards} arrived out of order · ` +
+      `${d.noFix} have no position at all` +
+      (d.delivered ? ` · ${d.delivered} delivered since the last sweep` : "");
+  }catch(err){ $("trkMsg").textContent = err.message; }
+});
+
+$("trkForget").addEventListener("click", async e => {
+  const btn = e.currentTarget;
+  const s = S.trkStatus || {};
+  const ok = await confirmBySlide(btn,
+    `Slide to forget ${(s.cars || 0).toLocaleString(ZoI18n.locale())} paths`,
+    { tone: "danger", end: "Release to forget" });
+  if(!ok) return;
+  try{
+    const d = await admin("/api/admin/tracker-forget", {}, btn);
+    paintTracker(d.status);
+    $("trkMsg").textContent = `Forgot ${d.forgotten} paths. They cannot be ` +
+      `rebuilt — Garage keeps no location history.`;
+  }catch(err){ $("trkMsg").textContent = err.message; }
 });
 
 $("refreshTrt").addEventListener("click", async e => {

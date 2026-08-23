@@ -810,6 +810,14 @@ a.mini.dark{color:#fff}
         <button data-lang="es">Español</button>
       </div>
 
+      <!-- Shown when this page is newer than the process serving it: the
+           picker is here because index.html is read off disk every request,
+           but /api/lang does not exist until the Hub is restarted. -->
+      <div class="note err" id="langStale" hidden style="margin-top:12px">
+        This page is newer than the Hub running it — restart the Hub to finish
+        the update. The boards need the same, and each says so in its own Admin.
+      </div>
+
       <div class="hint" style="margin-top:12px">Labels, buttons and panels change.
         Anything that came from Garage or Intrepid — a VIN, a centre name, an alert —
         is shown exactly as it arrived and is never translated.</div>
@@ -1096,11 +1104,20 @@ const ZoI18n = (() => {
    else — on this Hub's Admin panel, or from a board's point of view on the
    Hub entirely. Ten seconds is a local file read; the alternative is a board
    sitting in the wrong language until somebody reloads it. */
+let langStale = false;   // this page is newer than the server that sent it
+
 async function pollLang(){
   try{
     const r = await fetch("/api/lang", { cache: "no-store" });
-    if(r.ok) ZoI18n.set((await r.json()).lang);
-  }catch{ /* the language is not worth a visible error */ }
+    /* A 404 means one specific thing, and it is worth naming. index.html is
+       read off disk on every request, so the page is always current; server.js
+       is whatever was loaded when the process started. Update the files
+       without restarting and you get a picker that renders and an endpoint
+       that does not exist. Staying quiet about that reads as "the language
+       feature is broken", which is the wrong thing to go and debug. */
+    if(r.status === 404){ langStale = true; paintLangRow(); return; }
+    if(r.ok){ langStale = false; ZoI18n.set((await r.json()).lang); }
+  }catch{ /* server down: the page has louder ways of saying so */ }
 }
 pollLang();
 setInterval(pollLang, 10000);
@@ -1110,7 +1127,11 @@ setInterval(pollLang, 10000);
    nothing there — which is why it can live in the shared block. */
 function paintLangRow(){
   const el = document.getElementById("langNow");
-  if(el) el.textContent = ZoI18n.get() === "es" ? "Español" : "English";
+  if(!el) return;
+  el.textContent = langStale
+    ? "restart this board to finish the update"
+    : (ZoI18n.get() === "es" ? "Español" : "English");
+  el.classList.toggle("stale", langStale);
 }
 ZoI18n.onChange(paintLangRow);
 paintLangRow();
@@ -2283,8 +2304,13 @@ document.querySelectorAll(".rail-item[data-sec]").forEach(item => {
    machine where the Hub was never started. */
 function paintLang(){
   const cur = ZoI18n.get();
-  document.querySelectorAll("#langSeg button")
-    .forEach(b => b.classList.toggle("on", b.dataset.lang === cur));
+  document.querySelectorAll("#langSeg button").forEach(b => {
+    b.classList.toggle("on", b.dataset.lang === cur);
+    /* Dead until the restart. A control that still looks pressable but
+       answers 404 is what made this look broken in the first place. */
+    b.disabled = langStale;
+  });
+  $("langStale").hidden = !langStale;
   if(S.langFile) $("langPath").textContent = S.langFile;
 }
 

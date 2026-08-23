@@ -25,6 +25,11 @@ const osx       = require("./os");
    in half the functions below. Nothing to sign in to, so unlike sca/osx it is
    only ever called, never connected. */
 const invx      = require("./inventory");
+/* Tracker owns its own store and its own loop and opens no sockets: it reaches
+   Garage through the functions handed to `trk.init()` at the foot of this
+   file. Required here rather than requiring lib.js from there, because that
+   direction is a cycle. */
+const trk       = require("./tracker");
 
 const HERE = __dirname;
 
@@ -4076,6 +4081,257 @@ function summarise(rows){
   };
 }
 
+/* ────────────────────────────── Tracker ──────────────────────────────────
+
+   tracker.js holds the store, the sweep and the geometry, and opens no
+   sockets. What lives here is everything that touches Garage: the two reads
+   below, and the scan that turns a VIN or a delivery date into rows.       */
+
+/* ── the live read, and the only thing it is better at ──
+
+   The sweep does not use this: the index carries the same fix to within a
+   metre (measured 0.1 m, 1.0 m and 1.0 m on three cars, back to back) for
+   ~1/400th of the bytes. What the live read has that the index has not is
+   `show_gps_reason` — the only field anywhere that says WHY a car has no
+   position. On an undelivered Tesla-owned car it reads
+
+     "vehicle is not delivered and under Tesla possession"
+
+   and on a car that is not reporting GPS at all there is no lat, no lon and
+   no reason either, which is itself the answer. So this is the per-VIN
+   "read it now" and nothing more.
+
+   A sleeping car answers 408 here. That is not an error worth throwing over —
+   it is the honest reply "the car is asleep and there is nothing newer" — so
+   it comes back as a result rather than as an exception. */
+async function liveFix(vin){
+  const v = String(vin || "").toUpperCase();
+  if(!isVin(v)) throw new Error(`${vin} is not a VIN`);
+
+  const page = await tesladexSearch({
+    query: `vin:${v}`, fields: ["vin", "id", "delivered", "vpn_state"], size: 1
+  });
+  const row = (page.results || [])[0];
+  if(!row || row.id == null){
+    return { vin: v, ok: false, reason: "not in the Garage index" };
+  }
+
+  const res = await request(`${GARAGE}/vehicles/${row.id}/vitals`, {
+    headers: { Cookie: garageCookie(), Accept: "application/json",
+               "User-Agent": GARAGE_UA }
+  });
+
+  if(res.status === 401 || res.status === 403 ||
+     (res.status >= 300 && res.status < 400)){
+    const err = new Error("Garage session expired or rejected — sign in again");
+    err.needsAuth = true;
+    throw err;
+  }
+  /* Garage answers 408 for a car that is asleep. Reported, not thrown: the
+     caller asked where a car is and "it is asleep" is an answer. */
+  if(res.status === 408){
+    return { vin: v, ok: false, asleep: true, delivered: Boolean(row.delivered),
+             reason: "the car is asleep — nothing newer than the last fix" };
+  }
+  if(res.status !== 200) throw new Error(`Live vitals returned HTTP ${res.status}`);
+
+  let body;
+  try { body = JSON.parse(res.body); }
+  catch { throw new Error("Live vitals did not return JSON — the session may be a sign-in redirect"); }
+
+  const lat = Number(body.lat), lon = Number(body.lon);
+  const has = Number.isFinite(lat) && Number.isFinite(lon);
+
+  return {
+    vin: v, ok: has,
+    delivered: Boolean(row.delivered),
+    vpnState : row.vpn_state || "",
+    lat: has ? lat : null,
+    lon: has ? lon : null,
+    at : body.timestamp || null,
+    /* Verbatim. It is Garage's own sentence about its own redaction rule, and
+       paraphrasing it would put this board's words on Garage's decision. */
+    gpsReason: typeof body.show_gps_reason === "string" ? body.show_gps_reason : null,
+    /* A delivered car has to be named as delivered. Garage withholds the
+       coordinates at handover, so "it is not reporting GPS" is true of the
+       reply and false about the car — it reads as a fault to go and chase on
+       a car that is doing exactly what it should. The delivered flag is
+       already on the row above; not using it here was the whole bug. */
+    reason   : has ? null
+      : row.delivered
+        ? "This car is delivered, so Garage no longer publishes its position — " +
+          "that is the handover rule, not a fault on the car"
+        : "Garage returned no coordinates for this car — it is not reporting GPS"
+  };
+}
+
+/* ── when a car moved, for the times we do not know where ──
+
+   Datatank keeps a GPS history and it carries no latitude and no longitude —
+   that is the redaction, and it is why a path cannot be backfilled. What it
+   does carry is a `source` on every snapshot, and `drive_ended` among the
+   values, plus a heading and an elevation that move when the car does.
+
+   So a path with a hole in it can at least say a drive happened there. This is
+   one call for one car, never part of a sweep. */
+const DRIVE_FIELDS = ["last_gps", "gps_hdg", "gps_elevation", "gps_accuracy", "valid_gps"];
+
+async function driveEvents(vin, hours = 72){
+  const v = String(vin || "").toUpperCase();
+  if(!isVin(v)) throw new Error(`${vin} is not a VIN`);
+
+  const page = await tesladexSearch({ query: `vin:${v}`, fields: ["vin", "id"], size: 1 });
+  const row  = (page.results || [])[0];
+  if(!row || row.id == null) return { vin: v, drives: [], rows: 0 };
+
+  /* Repeated `fields[]` params and not one comma-joined value — the same Rails
+     convention tesladexSearch obeys, and it fails the same silent way: a
+     comma-joined `fields=` is accepted and answers with zero rows, which reads
+     as "this car never drove" rather than as a malformed request. */
+  const qs = [
+    "hours=" + Number(hours),
+    "asc=true",
+    ...DRIVE_FIELDS.map(f => "fields[]=" + encodeURIComponent(f))
+  ].join("&");
+
+  const d = await garageGet(
+    `/api/1/vehicles/${row.id}/vitals_snapshots/datatank_historical_vitals?${qs}`)
+    .catch(() => null);
+
+  // `response`, like every other Garage REST payload on this board.
+  const rows = (d && d.response) || [];
+  const drives = rows
+    .filter(r => String(r.source || "") === "drive_ended")
+    .map(r => ({ at: r.time || null, heading: r.gps_hdg == null ? null : Number(r.gps_hdg),
+                 elevation: r.gps_elevation == null ? null : Number(r.gps_elevation),
+                 accuracy : r.gps_accuracy == null ? null : Number(r.gps_accuracy) }));
+
+  return { vin: v, hours, rows: rows.length, drives };
+}
+
+/* ── a VIN, or a day's deliveries ──
+
+   Two ways in and they resolve to the same row shape.
+
+   A VIN is answered about ANY car, delivered or not, for the same reason
+   Service Visits answers a one-VIN lookup outside its own filters: looking at
+   a car is not doing anything to it, and "no cars found" in reply to a VIN
+   somebody is holding is the worst possible answer.
+
+   A date goes through Intrepid's appointment list, which is what the centre's
+   own delivery board reads. Its known gap — a car booked and then stuck may
+   be absent from every date — does not bite here: this asks who is booked for
+   Thursday, which is exactly the question that list answers. */
+async function trackerScan({ vin = null, date = null } = {}){
+  const notes = [];
+  let vins = [];
+  let scope;
+
+  if(vin){
+    const v = String(vin).trim().toUpperCase();
+    if(!isVin(v)) throw new Error(`${vin} is not a VIN — 17 characters, no I, O or Q`);
+    vins  = [v];
+    scope = { kind: "vin", vin: v };
+  }else{
+    const d = String(date || "").trim() || todayLocal();
+    if(!isDate(d)) throw new Error(`${date} is not a date — use YYYY-MM-DD`);
+    const appts = await appointmentsOn(d, savedTrtId());
+    vins = [...new Set(appts
+      .map(a => String(a.Vin || a.VIN || a.vin || "").trim().toUpperCase())
+      .filter(isVin))];
+    scope = { kind: "date", date: d, appointments: appts.length };
+    if(!vins.length){
+      notes.push(`Intrepid has no delivery appointments at this centre on ${d}.`);
+    }else if(appts.length !== vins.length){
+      notes.push(`${appts.length} appointments on ${d} carried ${vins.length} distinct VINs.`);
+    }
+  }
+
+  /* Garage is asked about every VIN regardless of how we got here, because
+     the store cannot say whether a car has been delivered since the last
+     sweep and the tracker must never keep recording one that has. */
+  const meta = new Map();
+  for(let i = 0; i < vins.length; i += 100){
+    const chunk = vins.slice(i, i + 100);
+    const page  = await tesladexSearch({
+      query : "vin:(" + chunk.join(" OR ") + ")",
+      fields: ["vin", "id", "delivered", "vpn_state", "model", "vehicle_type",
+               "trt_id", "last_known_location",
+               "delivery_details.scheduled_delivery_date"],
+      size  : chunk.length,
+      sort  : "vin:asc"
+    });
+    for(const r of (page.results || [])){
+      if(r.vin) meta.set(String(r.vin).toUpperCase(), r);
+    }
+  }
+
+  const t = trk.settings();
+  const nowSec = Math.floor(Date.now() / 1000);
+  const rows = vins.map(v => {
+    const g    = meta.get(v) || null;
+    const path = trk.pathFor(v, { nowSec });
+    const L    = g && g.last_known_location;
+    const live = L && Number.isFinite(Number(L.latitude)) ? {
+      lat : Number(L.latitude), lon: Number(L.longitude),
+      t   : Math.floor(Number(L.timestamp)),
+      acc : L.gps_precision == null ? null : Number(L.gps_precision),
+      mode: L.transmission_mode || null
+    } : null;
+
+    return {
+      vin       : v,
+      inGarage  : Boolean(g),
+      deviceId  : g && g.id != null ? String(g.id) : null,
+      delivered : g ? Boolean(g.delivered) : null,
+      vpnState  : g ? (g.vpn_state || "") : "",
+      model     : g ? (g.model || "") : "",
+      vehicleType: g ? (g.vehicle_type || "") : "",
+      trtId     : g && g.trt_id != null ? g.trt_id : null,
+      scheduled : (g && g.delivery_details &&
+                   g.delivery_details.scheduled_delivery_date) || null,
+      /* The freshest position Garage holds, and how old it is. The age is not
+         optional and never rounded away: about one car in five is hours or
+         days stale while sitting there `online`, so a position with no age
+         beside it would read as "here, now" when it means "here, Thursday". */
+      fix       : live,
+      fixAgeSec : live ? nowSec - live.t : null,
+      tracked   : Boolean(path),
+      points    : path ? path.points.length : 0,
+      stops     : path ? path.stops.length  : 0,
+      metres    : path ? path.metresTravelled : 0,
+      firstSeen : path ? path.firstSeen : null,
+      pathDelivered: path ? Boolean(path.delivered) : false,
+      deliveredAt  : path ? path.deliveredAt : null
+    };
+  });
+
+  const missing = rows.filter(r => !r.inGarage).length;
+  if(missing) notes.push(`${missing} of ${rows.length} are not in the Garage index.`);
+  const del = rows.filter(r => r.delivered).length;
+  if(del) notes.push(`${del} already delivered — tracking stops at handover, ` +
+                     `because Garage stops publishing the coordinates.`);
+  const untracked = rows.filter(r => !r.tracked && r.delivered === false).length;
+  if(untracked){
+    notes.push(`${untracked} have no recorded path yet. A path starts at the ` +
+               `first sweep after tracking is switched on and cannot be filled ` +
+               `in backwards — Garage keeps no location history.`);
+  }
+  if(!t.enabled){
+    notes.push("Tracking is off, so nothing is being recorded. " +
+               "Admin › Tracker to switch it on.");
+  }
+
+  return { scope, rows, notes, settings: t, status: trk.status() };
+}
+
+/* Everything tracker.js needs from Garage, handed over once. It never opens a
+   socket itself, so this is the whole of its access. */
+trk.init({
+  tesladexSearch, buildQuery, savedTrtId, savedOffsiteTrtId,
+  loadConnections, saveConnections
+});
+
 /* ──────────────────────────── connection tests ────────────────────────────
    Each returns {ok, detail} rather than throwing, so the panel can show every
    row's state at once instead of dying on the first failure. */
@@ -4245,6 +4501,17 @@ module.exports = {
   scaSignInStatus: sca.signInStatus, scaCancelSignIn: sca.cancelSignIn,
   scaBrowserStatus: sca.browserStatus,
   appointmentAdvisor, advisorsByRn,
+  /* Tracker. The scan and the two Garage reads are here; the store, the sweep
+     and the geometry are tracker.js, which this file initialised above. */
+  trackerScan, liveFix, driveEvents,
+  trackerSettings   : trk.settings,
+  saveTrackerSettings: trk.saveSettings,
+  trackerStatus     : trk.status,
+  trackerSweep      : trk.sweep,
+  trackerPath       : trk.pathFor,
+  trackerForgetAll  : trk.forgetAll,
+  startTrackerLoop  : trk.start,
+  stopTrackerLoop   : trk.stop,
   cogStatuses, carsOnGround, dwellLabel, DWELL_WINDOWS,
   trtInfo, trtDirectory, searchSites,
   ensureSession, callTool, tesladexSearch, tesladexPage, dayRangeEpoch,
