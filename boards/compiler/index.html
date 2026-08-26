@@ -1510,6 +1510,17 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
                 title="Show only the cars whose service visit still has a non-Tesla contact on it">Contact: All</button>
         <div class="qmenu down" id="ctMenu" role="menu"></div>
       </div>
+      <!-- Where each car actually is. A Cypress scan is not one place: 541
+           cars came back across eleven, from the offsite lot to Collision
+           Houston to a refurbishment centre two states away. Built from the
+           rows rather than a list, because the set is whatever the scan
+           found. Client-side like the two chips beside it, so the count, the
+           export and the switch lever all narrow with it. -->
+      <div class="qwrap" id="locWrap" hidden>
+        <button class="chip" id="locBtn" aria-haspopup="true" aria-expanded="false"
+                title="Show only the cars standing at these locations">Location: All</button>
+        <div class="qmenu down" id="locMenu" role="menu"></div>
+      </div>
       <!-- Beside the filter because it is the filter's other half: the chip
            finds the cars still on a customer, this puts Tesla on them without
            opening sixty rows one at a time. It pulls rather than clicks for
@@ -2908,6 +2919,14 @@ const S = {
      only once SCA has answered, so this narrows rows already on screen and
      goes through visibleRows() with everything else. */
   contact:[],
+  /* Which locations the list is narrowed to, empty meaning all of them. This
+     one COULD have gone into the scan — `site` comes off Garage, which the
+     query already reaches — and deliberately did not: a scan across the
+     Onsite & Offsite group is the expensive part, and re-running it to hide
+     rows already fetched would cost a minute to answer a question the page
+     can answer instantly. Same reasoning as the two above, reached from the
+     other direction. */
+  location:[],
   cogStatuses:null, cogChosen:[], cogSort:"dwell", cogTally:[], cogTotal:0, cogNoRecord:0,
   /* Two of them: `cogDwell` is what the menu has selected, `cogWindow` is what
      the rows on screen were actually scanned with. They diverge the moment
@@ -3940,7 +3959,7 @@ function renderInv(data){
   S.expIndex = 0;
   /* Filters and orderings belonging to the other tools say nothing about
      these rows, and a leftover would put a stale word in the subtitle. */
-  S.concern = []; S.contact = []; S.expFilters = {}; S.expWait = 0;
+  S.concern = []; S.contact = []; S.location = []; S.expFilters = {}; S.expWait = 0;
 
   const prices = S.rows.map(r => r.price).filter(n => n != null).sort((a, b) => a - b);
   const here   = S.rows.filter(r => !r.inTransit).length;
@@ -6585,6 +6604,19 @@ function visibleRows(){
     const want = new Set(S.contact);
     rows = rows.filter(r => { for(const c of contactsOf(r)) if(want.has(c)) return true; });
   }
+  /* Where the car is. One value per row rather than a set, so this is a plain
+     membership test — and it narrows alongside the other two rather than
+     replacing them: "Offsite lot" and "cosmetic" together is the cosmetic
+     work sitting out at the lot, which is the question somebody picking both
+     is holding.
+
+     Being in here is what makes it apply to the export as well: the count,
+     the export and the switch lever all read visibleRows(), so there is no
+     second place that can disagree about which cars are on screen. */
+  if(S.location.length){
+    const want = new Set(S.location);
+    rows = rows.filter(r => want.has(siteOf(r)));
+  }
   return rows;
 }
 
@@ -6761,6 +6793,98 @@ function paintContactChip(){
         <span class="qn">${t.count.toLocaleString(ZoI18n.locale())}</span>
       </button>`).join("");
 }
+
+/* ─────────────────────────── where the car is ───────────────────────────
+
+   `site` is the row's own location, off Garage: "Houston-Cypress" for the
+   centre itself, "Offsite lot" for Ed's TRT 487417, and whatever else the
+   scan reaches — a Cypress run returned eleven, including Collision Houston,
+   Refurbishment Richmond and a Robo Service factory in Austin.
+
+   Not the same thing as the ticket's `location`, which is the centre that
+   OWNS the visit and can differ from where the car is standing. This chip
+   answers "where is it", which is the question asked when somebody is about
+   to go and look at it, and it is the one Ed asked for.
+
+   Built from the rows because the set is whatever the scan found — there is
+   no vocabulary to copy, exactly like the concern menu. */
+const NO_SITE = " nowhere";     // leading space, so it cannot collide with a name
+
+const siteOf = r => r.site || NO_SITE;
+const siteLabel = v => (v === NO_SITE ? "No location on record" : v);
+
+function locationTally(rows){
+  const n = new Map();
+  for(const r of rows){ const v = siteOf(r); n.set(v, (n.get(v) || 0) + 1); }
+  /* Biggest first: the centre itself is almost always the bulk of a scan and
+     the interesting ones are the tail, but a tail is easier to find under a
+     known-large head than in an alphabet. A blank always sorts last. */
+  return [...n].sort((a, b) =>
+      (a[0] === NO_SITE) - (b[0] === NO_SITE) || b[1] - a[1])
+    .map(([v, count]) => ({ v, count, label: siteLabel(v) }));
+}
+
+function paintLocationChip(){
+  const wrap = $("locWrap");
+  if(S.tool !== "sv"){ wrap.hidden = true; closeLocations(); return; }
+
+  const scanned = scannedRows();
+  const tally = locationTally(scanned);
+  /* Hidden only with nothing to group by at all. NOT hidden when one location
+     covers everything — same argument as the contact chip, which used to
+     vanish exactly when the news was good: "Location: All" over a menu
+     reading "Houston-Cypress 323" is the answer to the question, and a click
+     that changes nothing costs less than hiding the readout. */
+  wrap.hidden = !tally.length;
+  if(wrap.hidden){ S.location = []; closeLocations(); return; }
+
+  const live = new Set(tally.map(t => t.v));
+  S.location = S.location.filter(v => live.has(v));
+
+  const picked = tally.filter(t => S.location.includes(t.v));
+  $("locBtn").classList.toggle("on", picked.length > 0);
+  $("locBtn").textContent =
+    !picked.length        ? "Location: All"
+    : picked.length === 1 ? "Location: " + picked[0].label
+                          : `Location: ${picked.length} of ${tally.length}`;
+
+  const tick = `<svg class="qtick" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
+
+  $("locMenu").innerHTML =
+    `<button class="qrow crow${S.location.length ? "" : " on"}" data-loc="">
+       ${tick}<span class="qt">All locations</span>
+       <span class="qn">${scanned.length.toLocaleString(ZoI18n.locale())}</span></button>
+     <div class="qsep"></div>` +
+    tally.map(t => `
+      <button class="qrow crow${S.location.includes(t.v) ? " on" : ""}" data-loc="${esc(t.v)}">
+        ${tick}<span class="qt">${esc(t.label)}</span>
+        <span class="qn">${t.count.toLocaleString(ZoI18n.locale())}</span>
+      </button>`).join("");
+}
+
+const closeLocations = () => {
+  $("locMenu").classList.remove("on");
+  $("locBtn").setAttribute("aria-expanded", "false");
+};
+
+$("locBtn").addEventListener("click", e => {
+  e.stopPropagation();
+  const open = $("locMenu").classList.toggle("on");
+  $("locBtn").setAttribute("aria-expanded", String(open));
+});
+
+// Stays open across a pick — picking three locations is one visit to the menu.
+$("locMenu").addEventListener("click", e => {
+  const row = e.target.closest("[data-loc]");
+  if(!row) return;
+  e.stopPropagation();
+  const v = row.dataset.loc;
+  if(!v) S.location = [];
+  else S.location = S.location.includes(v)
+    ? S.location.filter(x => x !== v) : [...S.location, v];
+  paintList();
+});
 
 const closeContacts = () => {
   $("ctMenu").classList.remove("on");
@@ -7063,6 +7187,7 @@ function paintList(){
      states beside it. */
   paintConcerns();
   paintContactChip();
+  paintLocationChip();
   /* After the chip, never before: the lever counts what the filter has left on
      screen, so it has to be told the same story the list is about to be. */
   paintCtSwitch();
