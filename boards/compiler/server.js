@@ -197,7 +197,11 @@ const server = http.createServer(async (req, res) => {
         /* Whether an SV Call webhook is saved, and its host — never its path.
            The page needs the boolean to know whether the two buttons can do
            anything, and says so on the button rather than failing on press. */
-        svcall: L.svCallSettings()
+        svcall: L.svCallSettings(),
+        /* Same shape and the same reason: the page needs to know whether
+           Follow Up can do anything before it is pressed. The GitHub half of
+           check-in is NOT here — that lives in the browser. */
+        followup: L.followUpSettings()
       });
     }
 
@@ -1572,6 +1576,31 @@ const server = http.createServer(async (req, res) => {
       const out = L.saveSvCallWebhook(body.webhook);
       log(out.cleared ? "sv call webhook cleared" : `sv call webhook -> ${out.host}`);
       return sendJson(res, 200, { ok: true, ...out, svcall: L.svCallSettings() });
+    }
+
+    /* ── the Follow Up webhook ──
+       A third key, apart from the other two so clearing one cannot take
+       another with it. Admin-gated for the same reason: a webhook URL decides
+       where VINs get posted. */
+    if(p === "/api/admin/followup-webhook" && req.method === "POST"){
+      const body = await readBody(req);
+      if(!authed(body)) return sendJson(res, 401, { error: "Wrong password" });
+      const out = L.saveFollowUpWebhook(body.webhook);
+      log(out.cleared ? "follow up webhook cleared" : `follow up webhook -> ${out.host}`);
+      return sendJson(res, 200, { ok: true, ...out, followup: L.followUpSettings() });
+    }
+
+    /* Pressing Follow Up is using the board, so no admin gate — same call as
+       the two below. Note what is NOT here: check-in state itself never
+       touches this server. The GitHub token lives in the browser and the page
+       talks to GitHub directly, which is the whole point of keeping it out of
+       `.connections.json`. */
+    if(p === "/api/followup" && req.method === "POST"){
+      const body = await readBody(req);
+      const vin  = String(body.vin || "").trim().toUpperCase();
+      const out  = await L.sendFollowUp({ vin });
+      log(`follow up posted: ${vin}`);
+      return sendJson(res, 200, out);
     }
 
     /* ── the two messages ──

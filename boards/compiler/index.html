@@ -389,6 +389,10 @@ a.rnl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 .svcall .mini{justify-content:center;min-width:132px}
 .svcall .svc-msg{margin-top:2px;max-width:34ch}
 .svcall .svc-msg:empty{display:none}
+/* Checked in reads as done rather than as another thing to press: filled, not
+   outlined, so a list of forty shows at a glance which ones have been walked. */
+.mini.chk.done{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+.mini.chk.done:hover{opacity:.9}
 
 /* ── on a list row ──
    Its own column between the car and its holds, vertically centred, rather
@@ -1490,37 +1494,21 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
            the status you asked for — so its view toggle is a sort instead. -->
       <button class="chip on" id="sortDwell" hidden>Longest first</button>
       <button class="chip" id="sortRecent" hidden>Newest first</button>
-      <!-- Groups the list by what the tickets on it actually say. Built from
-           the rows on screen, not from a list kept here: the concern names
-           are SCA's, they are not in its bundle as an enum, and a hard-coded
-           copy would quietly drop whatever it had not heard of. Hidden
-           outright when the rows carry no ticket detail — the Service App
-           prompt above already says why, and a dead chip would say it worse. -->
-      <div class="qwrap" id="concernWrap" hidden>
-        <button class="chip" id="concernBtn" aria-haspopup="true" aria-expanded="false"
-                title="Show only the cars whose tickets name these concerns">Concern: All</button>
-        <div class="qmenu down" id="concernMenu" role="menu"></div>
-      </div>
-      <!-- Who is on the visit. Reading it a car at a time is the job this
-           replaces: pick Non-Tesla and the list is every car still carrying
-           the customer on main or on billing. Same door as the concern chip
-           beside it — the verdict is already on the rows. -->
-      <div class="qwrap" id="ctWrap" hidden>
-        <button class="chip" id="ctBtn" aria-haspopup="true" aria-expanded="false"
-                title="Show only the cars whose service visit still has a non-Tesla contact on it">Contact: All</button>
-        <div class="qmenu down" id="ctMenu" role="menu"></div>
-      </div>
-      <!-- Where each car actually is. A Cypress scan is not one place: 541
-           cars came back across eleven, from the offsite lot to Collision
-           Houston to a refurbishment centre two states away. Built from the
-           rows rather than a list, because the set is whatever the scan
-           found. Client-side like the two chips beside it, so the count, the
-           export and the switch lever all narrow with it. -->
-      <div class="qwrap" id="locWrap" hidden>
-        <button class="chip" id="locBtn" aria-haspopup="true" aria-expanded="false"
-                title="Show only the cars standing at these locations">Location: All</button>
-        <div class="qmenu down" id="locMenu" role="menu"></div>
-      </div>
+      <!-- One chip for all four ways of narrowing a Service Visits scan. It
+           was four separate drop-downs and the row read as clutter, which is
+           what Ed said; the panel behind this is the same .facet/.opt shape
+           Pending Inventory has used since it shipped, so this is the board's
+           own pattern rather than a new one. Every group is still built from
+           the rows on screen — the concern names are SCA's and are not an
+           enum anywhere, and the locations are whatever the scan reached. -->
+      <button class="chip" id="svFilterBtn" hidden
+              title="Narrow the list — what flagged the car, the concern on its ticket, whose contact is on the visit, where it is standing">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+             style="vertical-align:-1px;margin-right:6px">
+          <path d="M3 5h18M7 12h10M11 19h2"/>
+        </svg><span id="svFilterLabel">Filters</span>
+      </button>
       <!-- Beside the filter because it is the filter's other half: the chip
            finds the cars still on a customer, this puts Tesla on them without
            opening sixty rows one at a time. It pulls rather than clicks for
@@ -1860,6 +1848,23 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
   <div class="modal-foot">
     <span class="modal-sub" id="expFilterCount" style="margin-right:auto"></span>
     <button class="btn btn-ghost" id="expFilterClear">Clear all</button>
+    <button class="btn btn-dark" data-close>Done</button>
+  </div>
+</div>
+
+<!-- Service Visits' own filter panel. Same classes and the same shape as the
+     one above, deliberately: they are two panels over two different tools and
+     nothing is shared but the CSS, which is how the rest of this estate is
+     put together. -->
+<div class="modal wide" id="svFilterModal" role="dialog" aria-label="Narrow the list">
+  <div class="modal-head"><h3>Filters</h3>
+    <span class="modal-sub" id="svFilterCtx"></span>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body" id="svFilterBody"></div>
+  <div class="modal-foot">
+    <span class="modal-sub" id="svFilterCount" style="margin-right:auto"></span>
+    <button class="btn btn-ghost" id="svFilterClear">Clear all</button>
     <button class="btn btn-dark" data-close>Done</button>
   </div>
 </div>
@@ -2226,6 +2231,53 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
       </div>
       <div class="conn" id="svcRow"><i class="dot"></i><b>SV Call</b><span id="svcState">—</span></div>
       <button class="btn-block" id="svcSave">Save SV Call webhook</button>
+
+      <!-- ── Follow Up ──
+           A third webhook, and apart from the other two for the same reason
+           they are apart from each other: clearing one must never take
+           another with it. Posted to by the Follow Up button, which is what
+           Check In becomes once a car has been walked. -->
+      <div class="sec-title">Follow Up</div>
+      <p class="sec-p">The chat the <b>Follow Up</b> button posts to. That
+        button appears on a card once somebody has checked the car in, so the
+        message is a nudge about a car that has already been looked at.</p>
+      <div class="field">
+        <label>Follow Up webhook</label>
+        <input type="text" id="fuUrl" autocomplete="off"
+               placeholder="https://…logic.azure.com/… or …webhook.office.com/…">
+        <div class="hint">Leave it empty and Follow Up says so when pressed
+          rather than disappearing.</div>
+      </div>
+      <div class="conn" id="fuRow"><i class="dot"></i><b>Follow Up</b><span id="fuState">—</span></div>
+      <button class="btn-block" id="fuSave">Save Follow Up webhook</button>
+
+      <!-- ── Check-in ──
+           The GitHub token lives in the BROWSER, not in `.connections.json`
+           and not on the server. Ed's call and the right one: the Hub
+           publishes this estate to a public remote, and a PAT with push on it
+           has no business in a file that gets committed. It is also why this
+           one section saves without the admin password — nothing leaves the
+           browser to save it. -->
+      <div class="sec-title">Check-in</div>
+      <p class="sec-p">Where <b>Check In</b> keeps its answers. A car absent
+        from the file is <b>Not_Checked_In</b>, so nothing has to be written
+        before the first press.</p>
+      <div class="field">
+        <label>GitHub repository</label>
+        <input type="text" id="ghRepo" autocomplete="off" placeholder="owner/repo">
+      </div>
+      <div class="field">
+        <label>GitHub token</label>
+        <input type="password" id="ghToken" autocomplete="off"
+               placeholder="github_pat_… — needs Contents: read and write">
+        <div class="hint"><b>Kept in this browser only</b>, never in the
+          board's files and never sent to the board's server — the page talks
+          to GitHub directly. Clearing browser data clears it, and it has to be
+          pasted again on another machine.</div>
+      </div>
+      <div class="conn" id="ghRow"><i class="dot"></i><b>Check-in</b><span id="ghState">—</span></div>
+      <button class="btn-block" id="ghSave">Save check-in settings</button>
+      <div class="why" id="ghMsg" style="margin-top:4px"></div>
 
       <!-- ── push ──
            The board leaves the finished card in a SharePoint row and the
@@ -2927,6 +2979,33 @@ const S = {
      can answer instantly. Same reasoning as the two above, reached from the
      other direction. */
   location:[],
+  /* Which KINDS of flag the list is narrowed to — a service visit, a
+     containment hold, a logistics hold — empty meaning all of them. Ed's ask,
+     in his words: a filter for concern type, so you can see if there is a
+     bulk of anything like containment holds.
+
+     The one Service Visits filter whose vocabulary is fixed rather than read
+     off the rows, because it is not a vendor's word list: these three are the
+     three things a scan looks for, they are the three pills on the row, and
+     they are the same three `scannedRows()` tests to decide a car is flagged
+     at all. Client-side with the rest — the kinds are already a toggle on the
+     scan, so a rescan is how you fetch fewer cars and this is how you read
+     the ones you have. */
+  flag:[],
+  /* Which containment holds by name, empty meaning all of them. Read off the
+     rows like the concerns and the locations — the campaign names are the
+     vendor's and there is no list of them to copy. */
+  containment:[],
+  /* What has been typed into a long group's search box, keyed by facet. Not a
+     filter: it narrows the OPTIONS on offer, never the cars. */
+  svSearch:{},
+  /* VIN → {status, at, by}, straight out of the GitHub file. **null means the
+     file could not be read**, which is deliberately different from `{}`
+     meaning nobody has checked anything in — the first is a broken token and
+     the second is a fresh morning, and a button must not claim to know which
+     is which. Either way every car reads as not checked in, because that is
+     the only honest default. */
+  checkins:null, followup:null,
   cogStatuses:null, cogChosen:[], cogSort:"dwell", cogTally:[], cogTotal:0, cogNoRecord:0,
   /* Two of them: `cogDwell` is what the menu has selected, `cogWindow` is what
      the rows on screen were actually scanned with. They diverge the moment
@@ -3959,7 +4038,7 @@ function renderInv(data){
   S.expIndex = 0;
   /* Filters and orderings belonging to the other tools say nothing about
      these rows, and a leftover would put a stale word in the subtitle. */
-  S.concern = []; S.contact = []; S.location = []; S.expFilters = {}; S.expWait = 0;
+  svClearFilters(); S.expFilters = {}; S.expWait = 0;
 
   const prices = S.rows.map(r => r.price).filter(n => n != null).sort((a, b) => a - b);
   const here   = S.rows.filter(r => !r.inTransit).length;
@@ -4277,8 +4356,6 @@ $("savedBtn").addEventListener("click", e => {
 document.addEventListener("click", e => {
   const wrap = e.target.closest(".qwrap");
   if(wrap !== $("savedBtn").closest(".qwrap")) closeQuick();
-  if(wrap !== $("concernWrap")) closeConcerns();
-  if(wrap !== $("ctWrap")) closeContacts();
   if(wrap !== $("expSortWrap")) closeExpSort();
 });
 /* Before the shared Escape handler, which closes the whole modal: one press
@@ -4286,10 +4363,8 @@ document.addEventListener("click", e => {
 document.addEventListener("keydown", e => {
   if(e.key !== "Escape") return;
   if($("qmenu").classList.contains("on")){ e.stopPropagation(); closeQuick(); }
-  // Same bargain for the concern menu, which sits over the list rather than
-  // inside a modal — Escape should dismiss it before it reaches anything else.
-  if($("concernMenu").classList.contains("on")){ e.stopPropagation(); closeConcerns(); }
-  if($("ctMenu").classList.contains("on")){ e.stopPropagation(); closeContacts(); }
+  /* The Service Visits menus used to be handled here too. They are one modal
+     now, and a modal is what the shared Escape handler below is for. */
   if($("expSortMenu").classList.contains("on")){ e.stopPropagation(); closeExpSort(); }
 }, true);
 
@@ -5648,9 +5723,13 @@ function rowHtml(r){
   /* Between the car and its holds, so the pair sits in the middle of the row
      and stays vertically centred however many concerns are listed beside it.
      The extra grid column only exists when there is something to put in it. */
-  const asks = svCallHtml(r);
+  /* Check In is on EVERY card; the SV Call pair only on an offsite car with a
+     visit. They share the middle column, so the column now always exists on a
+     Service Visits row rather than only sometimes. */
+  const asks = `<div class="svcall" data-vin="${esc(r.vin)}">
+    ${checkHtml(r)}${svCallButtons(r)}</div>`;
 
-  return `<div class="veh ${cls}${asks ? " has-call" : ""}" data-vin="${esc(r.vin)}">
+  return `<div class="veh ${cls} has-call" data-vin="${esc(r.vin)}">
     <div>
       <div class="vin-row">${vinLink(r)}
         <span class="mdl">${esc(labelFor("model", r.model))}</span>
@@ -5757,6 +5836,137 @@ const daysSince = at => {
   return isNaN(t) ? null : Math.floor((Date.now() - t) / 86400000);
 };
 
+/* ══════════════════════ checked in ══════════════════════
+
+   Who has walked the car. One press per car, and the answer outlives the tab
+   because it lives in a GitHub repo rather than in this page — anybody's
+   board reads the same file.
+
+   ── the token stays in the browser ──
+
+   Ed's, and it is the right call: `.connections.json` is the board's own
+   store and the Hub publishes this estate to a PUBLIC remote. A GitHub PAT
+   with push on it has no business anywhere near a file that gets committed,
+   so it lives in localStorage and the browser talks to GitHub directly.
+   Nothing about check-in passes through the board's server.
+
+   ── absent means not checked in ──
+
+   The file holds only the cars somebody has actually checked in. A car that
+   is not in it is `Not_Checked_In`, which is the default for every car ever
+   scanned without having to write a row for each of them first. */
+const GH_KEY   = "compiler.github";          // { token, repo }
+const GH_FILE  = "checkins.json";
+const GH_REPO  = "ebocc09/CompilerData";
+
+const ghConf = () => {
+  try{
+    const v = JSON.parse(localStorage.getItem(GH_KEY) || "{}");
+    return { token: String(v.token || ""), repo: String(v.repo || GH_REPO) };
+  }catch{ return { token: "", repo: GH_REPO }; }
+};
+const ghSave = conf => {
+  try{ localStorage.setItem(GH_KEY, JSON.stringify(conf)); }catch{ /* blocked store */ }
+};
+
+async function ghApi(path, init){
+  const { token } = ghConf();
+  if(!token){
+    const e = new Error("No GitHub token saved — put one in Admin › Check-in");
+    e.needsGh = true; throw e;
+  }
+  const res = await fetch("https://api.github.com" + path, {
+    ...init,
+    headers: { Authorization: "Bearer " + token,
+               Accept: "application/vnd.github+json",
+               "X-GitHub-Api-Version": "2022-11-28",
+               ...(init && init.body ? { "Content-Type": "application/json" } : {}) }
+  });
+  if(res.status === 404) return { missing: true, status: 404 };
+  let data = null;
+  try{ data = await res.json(); }catch{ /* 204 and friends */ }
+  if(!res.ok){
+    const e = new Error((data && data.message) || `GitHub said ${res.status}`);
+    e.status = res.status; throw e;
+  }
+  return data;
+}
+
+/* base64 both ways, UTF-8 safe. `atob` alone mangles anything non-ASCII and a
+   service centre name will find that out eventually. */
+const b64enc = s => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+const b64dec = s => new TextDecoder().decode(
+  Uint8Array.from(atob(String(s).replace(/\n/g, "")), c => c.charCodeAt(0)));
+
+/* The whole file, with the sha that has to go back with any write. An empty
+   repo answers 404 to this and that is not an error — it is the state before
+   anybody has checked anything in. */
+async function ghLoad(){
+  const { repo } = ghConf();
+  const out = await ghApi(`/repos/${repo}/contents/${GH_FILE}`);
+  if(out.missing) return { cars: {}, sha: null };
+  let doc = {};
+  try{ doc = JSON.parse(b64dec(out.content)); }catch{ doc = {}; }
+  return { cars: doc.cars || {}, sha: out.sha };
+}
+
+/* Read, change one car, write back with the sha we read. GitHub rejects the
+   write if anybody else moved the file in between, which is the only thing
+   standing between two people checking cars in at once and one of them losing
+   their entry — so a 409 re-reads and tries once more rather than forcing. */
+async function ghSetStatus(vin, status){
+  const { repo } = ghConf();
+  for(let attempt = 0; attempt < 2; attempt++){
+    const { cars, sha } = await ghLoad();
+    cars[vin] = { status, at: new Date().toISOString(), by: S.who || "" };
+    const body = {
+      message: `${status === "Checked_In" ? "Check in" : "Update"} ${vin}`,
+      content: b64enc(JSON.stringify({ version: 1, cars }, null, 2) + "\n"),
+      ...(sha ? { sha } : {})
+    };
+    try{
+      await ghApi(`/repos/${repo}/contents/${GH_FILE}`,
+                  { method: "PUT", body: JSON.stringify(body) });
+      S.checkins = cars;
+      return cars[vin];
+    }catch(err){
+      // 409 is the race; anything else is ours to report.
+      if(err.status !== 409 || attempt) throw err;
+    }
+  }
+}
+
+/* Pulled once per scan rather than per row. A failure is not fatal and not
+   silent: every car reads as not checked in, which is the truthful default,
+   and the strip says the file could not be read. */
+async function loadCheckins(){
+  if(!ghConf().token){ S.checkins = null; return; }
+  try{
+    const { cars } = await ghLoad();
+    S.checkins = cars;
+  }catch(err){
+    S.checkins = null;
+    note(`Check-in state could not be read from GitHub — ${err.message}`, true);
+  }
+}
+
+const checkedIn = vin =>
+  Boolean(S.checkins && S.checkins[vin] && S.checkins[vin].status === "Checked_In");
+
+/* Every Service Visits card gets one. Not hidden without a token: pressing it
+   then says where to put one, which is more use than a button that quietly is
+   not there — the same call as the SV Call pair below. */
+function checkHtml(r){
+  const on = checkedIn(r.vin);
+  const when = on && S.checkins[r.vin].at
+    ? new Date(S.checkins[r.vin].at).toLocaleDateString(ZoI18n.locale()) : "";
+  return `<button class="mini chk${on ? " done" : ""}" data-chk="${esc(r.vin)}"
+    title="${on ? "Checked in" + (when ? " " + esc(when) : "") +
+                  " — press to post a follow-up to Teams"
+               : "Mark this car as checked in"}"
+    >${on ? "Follow Up" : "Check In"}</button>`;
+}
+
 /* ══════════════ Call Onsite / Send to Body ══════════════
 
    A car with an open service visit standing at the overflow lot is a car
@@ -5770,17 +5980,62 @@ const daysSince = at => {
 
    Shown rather than hidden when no webhook is saved: pressing then says where
    to paste one, which is more use than a button that quietly is not there. */
-function svCallHtml(r, inPanel){
+/* Just the two buttons. Split out from the wrapper below because the row now
+   shares that wrapper with Check In, and two `.svcall` divs on one card would
+   give the click handler two `data-vin` ancestors to choose between. */
+function svCallButtons(r){
   const offsite = S.offsiteTrtId && Number(r.trtId) === Number(S.offsiteTrtId);
   if(!offsite || !(r.visits && r.visits.length)) return "";
+  return `<button class="mini svc-on">Call Onsite</button>
+    <button class="mini svc-body">Send to Body</button>`;
+}
+
+function svCallHtml(r, inPanel){
+  const btns = svCallButtons(r);
+  if(!btns) return "";
   return `<div class="svcall" data-vin="${esc(r.vin)}">
-    <button class="mini svc-on">Call Onsite</button>
-    <button class="mini svc-body">Send to Body</button>
+    ${btns}
     ${/* Only in the panel, which is a modal with room to grow. On a row the
           answer goes to the notice strip instead — see the CSS. */
       inPanel ? `<div class="why svc-msg"></div>` : ""}
   </div>`;
 }
+
+/* Delegated for the same reason as the pair below: the list is rewritten on
+   every render, so a handler bound per button is bound to a button that no
+   longer exists. */
+document.addEventListener("click", async e => {
+  const btn = e.target.closest("[data-chk]");
+  if(!btn) return;
+  e.stopPropagation();          // the row itself opens the ticket panel
+  if(btn.disabled) return;
+
+  const vin  = btn.dataset.chk;
+  const was  = btn.textContent;
+  const post = checkedIn(vin);   // already in → this press is the follow-up
+  btn.disabled = true;
+  btn.textContent = post ? "Posting…" : "Checking in…";
+
+  try{
+    if(post){
+      /* Teams goes through the SERVER, unlike GitHub: a webhook does not send
+         CORS headers, and the board already owns the one webhook route. */
+      await api("/api/followup", { vin });
+      note(`Follow-up posted for ${vin}.`);
+      btn.textContent = was;
+    }else{
+      await ghSetStatus(vin, "Checked_In");
+      note(`${vin} checked in.`);
+      paintList();               // the button becomes Follow Up with the repaint
+      return;
+    }
+  }catch(err){
+    note(err.message, true);
+    btn.textContent = was;
+  }finally{
+    btn.disabled = false;
+  }
+});
 
 /* One handler for both places. The list is rewritten on every render and the
    panel is built on open, so anything bound per button would be bound to a
@@ -6527,7 +6782,7 @@ $("expSortMenu").addEventListener("click", e => {
    silently drop whatever it had not heard of. They are counted off the rows
    instead, which also means the menu only ever offers concerns that are
    actually on screen. */
-const NO_TYPE = " untyped";
+const NO_TYPE = "\uFFFFuntyped";
 
 function concernsOf(r){
   const out = new Set();
@@ -6536,27 +6791,8 @@ function concernsOf(r){
   return out;
 }
 
-/* Counted in CARS, not in concerns, because a car is what the filter
-   produces: pick "Cosmetic 31" and 31 rows remain. A car carrying two
-   cosmetic tickets is one car in that number and a car carrying one of each
-   kind is counted under both, so the column does not sum to the list length
-   and is not meant to. */
-function concernTally(rows){
-  const n = new Map();
-  for(const r of rows) for(const c of concernsOf(r)) n.set(c, (n.get(c) || 0) + 1);
-  /* Commonest first — the pile worth walking out to is usually the big one —
-     and the unnamed bucket last however big it grows, because a ticket with no
-     type is a gap in the record rather than a kind of work. */
-  return [...n]
-    .sort((a, b) => (a[0] === NO_TYPE) - (b[0] === NO_TYPE) || b[1] - a[1] ||
-                     String(a[0]).localeCompare(String(b[0])))
-    .map(([v, count]) => ({ v, count, label: v === NO_TYPE ? "No concern type" : v }));
-}
-
-const concernLabel = c => c === NO_TYPE ? "no concern type" : String(c).toLowerCase();
-
-/* The list before the concern filter: what the counts in the menu are
-   measured over, and what clearing it goes back to. Kept apart from
+/* The list before the filters: what the counts in the panel are
+   measured over, and what clearing them goes back to. Kept apart from
    visibleRows() so the numbers beside each concern do not move as concerns
    are picked — a count that changed under the cursor would be describing the
    selection rather than the centre. */
@@ -6590,115 +6826,12 @@ function visibleRows(){
        and the other order is the same rows read the other way up. */
     return S.cogSort === "recent" ? [...S.rows].reverse() : S.rows;
   }
-  let rows = scannedRows();
-  // Any of them, not all of them: two concerns picked means either will do,
-  // which is the only reading under which picking a second one adds cars.
-  if(S.concern.length){
-    const want = new Set(S.concern);
-    rows = rows.filter(r => { for(const c of concernsOf(r)) if(want.has(c)) return true; });
-  }
-  /* The two chips narrow each other rather than widening: "cosmetic" and
-     "non-Tesla contact" picked together is the cosmetic tickets still on a
-     customer, which is the question somebody asking both is holding. */
-  if(S.contact.length){
-    const want = new Set(S.contact);
-    rows = rows.filter(r => { for(const c of contactsOf(r)) if(want.has(c)) return true; });
-  }
-  /* Where the car is. One value per row rather than a set, so this is a plain
-     membership test — and it narrows alongside the other two rather than
-     replacing them: "Offsite lot" and "cosmetic" together is the cosmetic
-     work sitting out at the lot, which is the question somebody picking both
-     is holding.
-
-     Being in here is what makes it apply to the export as well: the count,
-     the export and the switch lever all read visibleRows(), so there is no
-     second place that can disagree about which cars are on screen. */
-  if(S.location.length){
-    const want = new Set(S.location);
-    rows = rows.filter(r => want.has(siteOf(r)));
-  }
-  return rows;
+  /* All four Service Visits filters, through one test — see SV_FACETS. Being
+     in here is what makes them apply to everything else: the count, the
+     subtitle, the export and the Switch lever all read visibleRows(), so
+     there is no second place that can disagree about what is on screen. */
+  return scannedRows().filter(r => svMatches(r));
 }
-
-/* ── the concern menu ──
-   Repainted from the rows on every list paint, so the view toggle, a new scan
-   and a cleared selection all reach it without anything having to remember to
-   call it. */
-function paintConcerns(){
-  const wrap = $("concernWrap");
-  if(S.tool !== "sv"){ wrap.hidden = true; closeConcerns(); return; }
-
-  const tally = concernTally(scannedRows());
-  /* Nothing to group by is not a filter worth offering, so the chip goes
-     rather than greying out. That is the ordinary state with the Service App
-     disconnected — every ticket comes back null — and the prompt above the
-     list already says so in words a dead chip could not. */
-  wrap.hidden = tally.length === 0;
-  if(wrap.hidden){ S.concern = []; closeConcerns(); return; }
-
-  /* Selections survive the view toggle, and All scanned → Flagged only can
-     retire a concern entirely. Dropping the dead ones here keeps the chip
-     honest, and it is also what makes an empty list impossible from this
-     filter alone: every concern still offered has at least one car behind it. */
-  const live = new Set(tally.map(t => t.v));
-  S.concern = S.concern.filter(c => live.has(c));
-
-  const picked = tally.filter(t => S.concern.includes(t.v));
-  $("concernBtn").classList.toggle("on", picked.length > 0);
-  $("concernBtn").textContent =
-    !picked.length        ? "Concern: All"
-    : picked.length === 1 ? "Concern: " + picked[0].label
-                          : `Concern: ${picked.length} of ${tally.length}`;
-
-  const tick = `<svg class="qtick" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
-
-  /* Indexed rather than carrying the value, because one of the values is a
-     sentinel for "SCA left this blank" and a sentinel does not belong in the
-     DOM. The index is resolved against the same tally that drew the menu. */
-  $("concernMenu").innerHTML =
-    `<button class="qrow crow${S.concern.length ? "" : " on"}" data-ci="-1">
-       ${tick}<span class="qt">All concerns</span>
-       <span class="qn">${scannedRows().length.toLocaleString(ZoI18n.locale())}</span></button>
-     <div class="qsep"></div>` +
-    tally.map((t, i) => `
-      <button class="qrow crow${S.concern.includes(t.v) ? " on" : ""}" data-ci="${i}">
-        ${tick}<span class="qt">${esc(t.label)}</span>
-        <span class="qn">${t.count.toLocaleString(ZoI18n.locale())}</span>
-      </button>`).join("");
-  concernMenuTally = tally;
-}
-
-let concernMenuTally = [];
-
-const closeConcerns = () => {
-  $("concernMenu").classList.remove("on");
-  $("concernBtn").setAttribute("aria-expanded", "false");
-};
-
-$("concernBtn").addEventListener("click", e => {
-  e.stopPropagation();
-  const open = $("concernMenu").classList.toggle("on");
-  $("concernBtn").setAttribute("aria-expanded", String(open));
-});
-
-/* The menu stays open across a pick. Choosing three concerns is the point of
-   it being multi-select, and a menu that shut on the first one would make
-   that three trips to the chip. */
-$("concernMenu").addEventListener("click", e => {
-  const row = e.target.closest("[data-ci]");
-  if(!row) return;
-  e.stopPropagation();
-  const i = Number(row.dataset.ci);
-  if(i < 0){
-    S.concern = [];
-  }else{
-    const v = (concernMenuTally[i] || {}).v;
-    if(v === undefined) return;
-    S.concern = S.concern.includes(v) ? S.concern.filter(x => x !== v) : [...S.concern, v];
-  }
-  paintList();
-});
 
 /* ─────────────────────── whose contact is on the visit ───────────────────────
 
@@ -6731,69 +6864,6 @@ function contactsOf(r){
   return out;
 }
 
-/* Counted in cars, like the concerns, because a car is what the filter
-   produces. A car with two visits in different states is counted under both,
-   so the column does not sum to the list length and is not meant to. */
-function contactTally(rows){
-  const n = new Map();
-  for(const r of rows) for(const c of contactsOf(r)) n.set(c, (n.get(c) || 0) + 1);
-  return CONTACT_STATES.filter(s => n.has(s.v)).map(s => ({ ...s, count: n.get(s.v) }));
-}
-
-const contactLabel = c => (CONTACT_LABEL[c] || c).toLowerCase();
-
-/* Repainted from the rows on every list paint, for the same reasons as the
-   concern menu: the view toggle, a new scan and a cleared selection all reach
-   it without anything having to remember to call it. */
-function paintContactChip(){
-  const wrap = $("ctWrap");
-  if(S.tool !== "sv"){ wrap.hidden = true; closeContacts(); return; }
-
-  const scanned = scannedRows();
-  const tally = contactTally(scanned);
-  /* Hidden rather than greyed only when there is nothing to group by at all —
-     the ordinary state with the Service App disconnected, where every ticket
-     comes back null and the prompt above the list already says so.
-
-     It used to hide when a single state covered every row too, on the grounds
-     that offering "Non-Tesla 69" over a list of 69 is a click that cannot
-     change anything. That was measured against a scan full of delivered cars,
-     where two states always existed. Undelivered-only scans made one state the
-     NORMAL case — a Service Visits scan flags only cars that have a visit, so
-     a tidy centre is 59 rows all reading Tesla — and the chip disappeared
-     exactly when the news was good, which reads as the filter having broken.
-
-     The chip is also the readout, not just the filter: "Contact: All" over a
-     menu saying "Tesla contact 59" is the answer to the question it was built
-     to ask. A click that changes nothing is a smaller cost than hiding that. */
-  wrap.hidden = !tally.length;
-  if(wrap.hidden){ S.contact = []; closeContacts(); return; }
-
-  const live = new Set(tally.map(t => t.v));
-  S.contact = S.contact.filter(c => live.has(c));
-
-  const picked = tally.filter(t => S.contact.includes(t.v));
-  $("ctBtn").classList.toggle("on", picked.length > 0);
-  $("ctBtn").textContent =
-    !picked.length        ? "Contact: All"
-    : picked.length === 1 ? "Contact: " + picked[0].label.replace(/ contact$/, "")
-                          : `Contact: ${picked.length} of ${tally.length}`;
-
-  const tick = `<svg class="qtick" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
-
-  $("ctMenu").innerHTML =
-    `<button class="qrow crow${S.contact.length ? "" : " on"}" data-cs="">
-       ${tick}<span class="qt">All contacts</span>
-       <span class="qn">${scannedRows().length.toLocaleString(ZoI18n.locale())}</span></button>
-     <div class="qsep"></div>` +
-    tally.map(t => `
-      <button class="qrow crow${S.contact.includes(t.v) ? " on" : ""}" data-cs="${t.v}">
-        ${tick}<span class="qt">${esc(t.label)}</span>
-        <span class="qn">${t.count.toLocaleString(ZoI18n.locale())}</span>
-      </button>`).join("");
-}
-
 /* ─────────────────────────── where the car is ───────────────────────────
 
    `site` is the row's own location, off Garage: "Houston-Cypress" for the
@@ -6813,99 +6883,308 @@ const NO_SITE = " nowhere";     // leading space, so it cannot collide with a na
 const siteOf = r => r.site || NO_SITE;
 const siteLabel = v => (v === NO_SITE ? "No location on record" : v);
 
-function locationTally(rows){
-  const n = new Map();
-  for(const r of rows){ const v = siteOf(r); n.set(v, (n.get(v) || 0) + 1); }
-  /* Biggest first: the centre itself is almost always the bulk of a scan and
-     the interesting ones are the tail, but a tail is easier to find under a
-     known-large head than in an alphabet. A blank always sorts last. */
-  return [...n].sort((a, b) =>
-      (a[0] === NO_SITE) - (b[0] === NO_SITE) || b[1] - a[1])
-    .map(([v, count]) => ({ v, count, label: siteLabel(v) }));
+/* ══════════════════ narrowing a Service Visits scan ══════════════════
+
+   Four ways of narrowing the list, behind one chip. They were four separate
+   drop-downs sitting in the list header and the row read as clutter — Ed's
+   word — so they are one panel now, the same `.facet`/`.opt` shape Pending
+   Inventory has used since it shipped. Nothing about what they DO changed:
+   every one of them still runs through `visibleRows()`, so the count, the
+   subtitle, the export and the Switch lever all narrow together and there is
+   no second place that can disagree about what is listed.
+
+   None of the four is part of the scan, and each for its own reason. Three
+   are only knowable after the fact — a concern and a contact arrive with
+   SCA's answer, which is the last thing a scan does. The fourth, location,
+   COULD have gone into the query and deliberately did not: re-running an
+   Onsite & Offsite scan to hide rows already fetched would cost a minute to
+   answer something the page answers instantly.
+
+   ── a group with one option is still worth showing ──
+
+   The panel above this one drops a group whose single option covers every
+   card, on the grounds that it is a click that cannot do anything. That rule
+   is WRONG here and the board has already been bitten by it: the contact chip
+   used to hide the same way, and once scans went undelivered-only a tidy
+   centre became 59 rows all reading Tesla — so the chip vanished exactly when
+   the news was good, and Ed reported it as the filter being broken. These
+   groups are the readout as well as the filter. "Containment hold 47" over a
+   list of 69 is the answer somebody opened the panel to get, whether or not
+   pressing it changes the screen. A group is dropped only when it has nothing
+   in it at all. */
+
+/* The one fixed vocabulary here. Not read off the rows like the other three,
+   because it is not a vendor's word list: these are the three things a scan
+   looks for, the three pills on a row, and the same three `scannedRows()`
+   tests to decide a car is flagged at all. */
+const SV_FLAGS = [
+  { v: "sv", label: "Service visit" },
+  { v: "ct", label: "Containment hold" },
+  { v: "lg", label: "Logistics hold" }
+];
+
+/* A campaign with no name of its own. Same shape as NO_TYPE and NO_SITE, and
+   the same rule: a noncharacter, so it can never collide with a real title,
+   and never a NUL — one of those made the whole file read as binary to grep. */
+const NO_CAMP = "￿unnamed";
+
+/* Past this many options a group gets a search box and a capped, scrolling
+   list instead of a wall of chips — the same threshold and the same treatment
+   Open Inventory gives its long groups. Containment is the one that needs it:
+   29 names at Cypress, median 46 characters, so laid out as chips it would be
+   taller than the other five groups put together. The rest stay chips, and a
+   quiet centre with six holds gets chips too — the form follows the count, so
+   nothing has to be declared. */
+const SV_BIG  = 14;
+const SV_SHOW = 40;
+const SV_FLAG_LABEL = Object.fromEntries(SV_FLAGS.map(f => [f.v, f.label]));
+
+function flagsOf(r){
+  const out = new Set();
+  if((r.visits    || []).length) out.add("sv");
+  if((r.campaigns || []).length) out.add("ct");
+  if((r.logistics || []).length) out.add("lg");
+  return out;
 }
 
-function paintLocationChip(){
-  const wrap = $("locWrap");
-  if(S.tool !== "sv"){ wrap.hidden = true; closeLocations(); return; }
+/* Commonest first — the pile worth walking out to is usually the big one. */
+const svBySize = (a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0]));
 
-  const scanned = scannedRows();
-  const tally = locationTally(scanned);
-  /* Hidden only with nothing to group by at all. NOT hidden when one location
-     covers everything — same argument as the contact chip, which used to
-     vanish exactly when the news was good: "Location: All" over a menu
-     reading "Houston-Cypress 323" is the answer to the question, and a click
-     that changes nothing costs less than hiding the readout. */
-  wrap.hidden = !tally.length;
-  if(wrap.hidden){ S.location = []; closeLocations(); return; }
-
-  const live = new Set(tally.map(t => t.v));
-  S.location = S.location.filter(v => live.has(v));
-
-  const picked = tally.filter(t => S.location.includes(t.v));
-  $("locBtn").classList.toggle("on", picked.length > 0);
-  $("locBtn").textContent =
-    !picked.length        ? "Location: All"
-    : picked.length === 1 ? "Location: " + picked[0].label
-                          : `Location: ${picked.length} of ${tally.length}`;
-
-  const tick = `<svg class="qtick" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
-
-  $("locMenu").innerHTML =
-    `<button class="qrow crow${S.location.length ? "" : " on"}" data-loc="">
-       ${tick}<span class="qt">All locations</span>
-       <span class="qn">${scanned.length.toLocaleString(ZoI18n.locale())}</span></button>
-     <div class="qsep"></div>` +
-    tally.map(t => `
-      <button class="qrow crow${S.location.includes(t.v) ? " on" : ""}" data-loc="${esc(t.v)}">
-        ${tick}<span class="qt">${esc(t.label)}</span>
-        <span class="qn">${t.count.toLocaleString(ZoI18n.locale())}</span>
-      </button>`).join("");
-}
-
-const closeLocations = () => {
-  $("locMenu").classList.remove("on");
-  $("locBtn").setAttribute("aria-expanded", "false");
+/* Declared order, for the two groups that have one. A fixed vocabulary read
+   in size order would move under the cursor between scans, and these two are
+   read as lists rather than searched. */
+const svFixed = list => {
+  const at = new Map(list.map((x, i) => [x.v, i]));
+  return (a, b) => (at.has(a[0]) ? at.get(a[0]) : 99) - (at.has(b[0]) ? at.get(b[0]) : 99);
 };
 
-$("locBtn").addEventListener("click", e => {
-  e.stopPropagation();
-  const open = $("locMenu").classList.toggle("on");
-  $("locBtn").setAttribute("aria-expanded", String(open));
+/* `of` returns a SET per row, because a car can be in a group more than once:
+   two visits with different concerns, a containment hold and a service visit
+   together. Location is the exception and is wrapped in a set of one so the
+   four read the same way here.
+
+   `many` is the plural for the subtitle. Derived from the label it would give
+   "3 flagged fors", which is why it is written out. */
+const SV_FACETS = [
+  { k: "flag", label: "Flagged for", many: "flag kinds", of: flagsOf,
+    lab: v => SV_FLAG_LABEL[v] || v, order: svFixed(SV_FLAGS) },
+  /* Which containment hold, by name. Ed asked for it by example — reflector,
+     sail delamination — and those are real: "Model Y RR Fascia Reflector Poor
+     Retention (Inspect and Rework)" is 13 cars at Cypress and the biggest
+     single pile on the board.
+
+     `title` is the only field on a campaign worth filtering by. Measured over
+     539 cars: `type` is "Containment" on all 63 holds, `status` is "Active" on
+     all 63, `severity` is one sentence on all 63, and `action` is two values
+     that say nothing about the work. Only the name varies — 29 of them.
+
+     Trimmed, because the vendor's own strings are not: "MY Airbag Detachment
+     Risk " and "Cybertruck Sail Applique Rework " both arrive with a trailing
+     space, and untrimmed they would sit in the menu as separate holds from
+     themselves the first time one comes back clean. */
+  { k: "containment", label: "Containment hold", many: "containment holds",
+    of: r => new Set((r.campaigns || []).map(c => String(c.title || "").trim() || NO_CAMP)),
+    lab: v => v === NO_CAMP ? "Unnamed hold" : v,
+    order: (a, b) => (a[0] === NO_CAMP) - (b[0] === NO_CAMP) || svBySize(a, b) },
+  { k: "concern", label: "Concern", many: "concerns", of: concernsOf,
+    lab: v => v === NO_TYPE ? "No concern type" : v,
+    /* The unnamed bucket last however big it grows: a ticket with no type is
+       a gap in the record rather than a kind of work. */
+    order: (a, b) => (a[0] === NO_TYPE) - (b[0] === NO_TYPE) || svBySize(a, b) },
+  { k: "contact", label: "Contact", many: "contact states", of: contactsOf,
+    lab: v => CONTACT_LABEL[v] || v, order: svFixed(CONTACT_STATES) },
+  { k: "location", label: "Location", many: "locations",
+    of: r => new Set([siteOf(r)]), lab: siteLabel,
+    order: (a, b) => (a[0] === NO_SITE) - (b[0] === NO_SITE) || svBySize(a, b) }
+];
+
+/* Any-of within a group, all-of across them. Two concerns picked means either
+   will do — the only reading under which picking a second one adds cars — but
+   "Containment hold" and "non-Tesla contact" together is the containment work
+   still on a customer, which is the question somebody picking both is holding.
+
+   `skip` leaves one group out of the test, which is what makes its counts mean
+   something: the number beside Cosmetic is how many cars you would have if you
+   added it to everything else already picked, not how many the centre owns. */
+function svMatches(r, skip){
+  for(const f of SV_FACETS){
+    if(f.k === skip) continue;
+    const want = S[f.k] || [];
+    if(!want.length) continue;
+    let hit = false;
+    for(const v of f.of(r)) if(want.includes(v)){ hit = true; break; }
+    if(!hit) return false;
+  }
+  return true;
+}
+
+const svActive = () => SV_FACETS.filter(f => (S[f.k] || []).length).length;
+
+/* One place, so a fifth facet cannot be added and then forgotten in one of
+   the three renderers that have to reset it. Location WAS forgotten in two of
+   them when it shipped, which is the whole argument for this existing. */
+function svClearFilters(){
+  for(const f of SV_FACETS) S[f.k] = [];
+  // The typing goes with the picks. A box still holding "reflector" over a
+  // group that no longer has one reads as a filter that failed to clear.
+  S.svSearch = {};
+}
+
+/* What is applied, in words, for the subtitle. A screen showing 31 rows out
+   of 443 must say why or it reads as a scan that went wrong. */
+function svSlice(){
+  const bits = [];
+  for(const f of SV_FACETS){
+    const v = S[f.k] || [];
+    if(!v.length) continue;
+    bits.push(v.length > 2
+      ? `${v.length} ${f.many}`
+      : v.map(x => String(f.lab(x)).toLowerCase()).join(" + "));
+  }
+  return bits;
+}
+
+/* Repainted after every pick rather than wired once, because the counts move
+   as the selection narrows and a stale count is worse than none. Measured
+   over `scannedRows()` — the view toggle is upstream of the filters, so
+   Flagged only and All scanned are two different populations to count. */
+function paintSvFilters(){
+  const all = scannedRows();
+  // Rebuilt with the buttons that index into it — see svOptId.
+  svOpts = {};
+
+  const groups = SV_FACETS.map(f => {
+    const tally = new Map();
+    for(const r of all){
+      if(!svMatches(r, f.k)) continue;
+      for(const v of f.of(r)) if(v) tally.set(v, (tally.get(v) || 0) + 1);
+    }
+    const picked = S[f.k] || [];
+    const opts = [...tally.entries()].sort(f.order);
+    /* A pick that has become unreachable stays on screen at zero so it can be
+       undone. Dropping it silently would leave the list narrowed by something
+       with no button behind it — which is the one way a filter panel can
+       strand somebody on an empty screen. */
+    for(const v of picked) if(!tally.has(v)) opts.push([v, 0]);
+    if(!opts.length) return "";
+
+    /* A long group gets a search box and a capped list. Containment is the
+       one that needs it — see SV_BIG. */
+    const big = opts.length > SV_BIG;
+    const q   = (S.svSearch[f.k] || "").trim().toLowerCase();
+    /* A picked option survives the search, always. Otherwise typing into the
+       box makes a live filter disappear from the panel while it is still
+       narrowing the list behind it — Open Inventory's rule, same reason. */
+    const hits = big
+      ? opts.filter(([v]) => picked.includes(v) || !q || String(f.lab(v)).toLowerCase().includes(q))
+      : opts;
+    // Picked first, so what is on cannot be scrolled off the bottom.
+    if(big) hits.sort((a, b) => (picked.includes(b[0]) ? 1 : 0) - (picked.includes(a[0]) ? 1 : 0));
+    const shown = big ? hits.slice(0, SV_SHOW) : hits;
+
+    return `<div class="facet" data-svgroup="${esc(f.k)}">
+      <div class="facet-head"><span>${esc(f.label)}</span>${
+        picked.length ? `<button data-svclear="${esc(f.k)}">Clear</button>` : ""}</div>
+      ${big ? `<input class="inv-search" type="search" data-svsearch="${esc(f.k)}"
+                placeholder="Search ${esc(f.label.toLowerCase())}s — ${opts.length} of them"
+                value="${esc(S.svSearch[f.k] || "")}">` : ""}
+      <div class="opts${big ? " scroll" : ""}">${shown.map(([v, n]) =>
+        `<button class="opt sv-opt${picked.includes(v) ? " on" : ""}"
+          data-svk="${esc(f.k)}" data-svi="${esc(String(svOptId(f.k, v)))}"
+          >${esc(f.lab(v))} <small>${n.toLocaleString(ZoI18n.locale())}</small></button>`
+        ).join("")}${
+        hits.length > shown.length
+          ? `<div class="inv-more">Showing ${shown.length} of ${hits.length} —
+               type above to narrow.</div>` : ""}${
+        !hits.length ? `<div class="inv-more">Nothing matches “${esc(q)}”.</div>` : ""}</div>
+    </div>`;
+  }).join("");
+
+  const shown = all.filter(r => svMatches(r)).length;
+
+  $("svFilterBody").innerHTML = groups ||
+    `<div class="facet"><div class="hint">Nothing to narrow by yet — run a scan.</div></div>`;
+  $("svFilterCount").textContent = `${shown.toLocaleString(ZoI18n.locale())} of ${
+    all.length.toLocaleString(ZoI18n.locale())} car${all.length === 1 ? "" : "s"}`;
+  $("svFilterCtx").textContent = svActive()
+    ? `${svActive()} filter${svActive() === 1 ? "" : "s"}` : "everything on screen";
+  $("svFilterClear").hidden = !svActive();
+}
+
+/* Values reach the DOM by index, never as themselves: two of them are
+   sentinels for "SCA left this blank" and "Garage named no site", and a
+   sentinel is not something to put in an attribute and read back. The table
+   is rebuilt on every paint, alongside the buttons that index into it. */
+let svOpts = {};
+function svOptId(k, v){
+  (svOpts[k] || (svOpts[k] = []));
+  let i = svOpts[k].indexOf(v);
+  if(i < 0){ i = svOpts[k].length; svOpts[k].push(v); }
+  return i;
+}
+
+$("svFilterBtn").addEventListener("click", () => {
+  paintSvFilters();
+  showModal($("svFilterModal"));
 });
 
-// Stays open across a pick — picking three locations is one visit to the menu.
-$("locMenu").addEventListener("click", e => {
-  const row = e.target.closest("[data-loc]");
-  if(!row) return;
-  e.stopPropagation();
-  const v = row.dataset.loc;
-  if(!v) S.location = [];
-  else S.location = S.location.includes(v)
-    ? S.location.filter(x => x !== v) : [...S.location, v];
+/* One handler for the whole panel: the groups are rebuilt on every pick, so
+   anything bound to a button would be bound to a button that no longer exists
+   a moment later. */
+$("svFilterBody").addEventListener("click", e => {
+  const clear = e.target.closest("[data-svclear]");
+  const opt   = e.target.closest(".sv-opt");
+
+  if(clear){
+    const k = clear.dataset.svclear;
+    S[k] = [];
+    delete S.svSearch[k];
+  }else if(opt){
+    const k = opt.dataset.svk;
+    const v = (svOpts[k] || [])[Number(opt.dataset.svi)];
+    if(v === undefined) return;
+    const cur = S[k] || [];
+    S[k] = cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v];
+  }else return;
+
+  paintSvFilters();
   paintList();
 });
 
-const closeContacts = () => {
-  $("ctMenu").classList.remove("on");
-  $("ctBtn").setAttribute("aria-expanded", "false");
-};
-
-$("ctBtn").addEventListener("click", e => {
-  e.stopPropagation();
-  const open = $("ctMenu").classList.toggle("on");
-  $("ctBtn").setAttribute("aria-expanded", String(open));
+$("svFilterClear").addEventListener("click", () => {
+  svClearFilters();
+  paintSvFilters();
+  paintList();
 });
 
-// Stays open across a pick, like the concern menu beside it.
-$("ctMenu").addEventListener("click", e => {
-  const row = e.target.closest("[data-cs]");
-  if(!row) return;
+/* Typing in a long group's box. The panel is rebuilt wholesale on every
+   keystroke, so the caret has to be put back by hand afterwards — the input
+   it was in no longer exists. Same mechanics as Open Inventory's invFocus,
+   and the same bug if it is left out. */
+$("svFilterBody").addEventListener("input", e => {
+  const box = e.target.closest("[data-svsearch]");
+  if(!box) return;
+  const k = box.dataset.svsearch;
+  S.svSearch[k] = box.value;
+  paintSvFilters();
+  const back = $("svFilterBody").querySelector(`[data-svsearch="${CSS.escape(k)}"]`);
+  if(back){ back.focus(); back.setSelectionRange(back.value.length, back.value.length); }
+});
+
+/* Escape clears the typing rather than closing the modal — the caret is in
+   the box, not in the dialog, and losing a whole panel of picks to a keypress
+   meant for one word is not the trade anybody wants. It only closes the modal
+   once the box is already empty. */
+$("svFilterBody").addEventListener("keydown", e => {
+  const box = e.target.closest("[data-svsearch]");
+  if(!box || e.key !== "Escape" || !box.value) return;
+  e.preventDefault();
   e.stopPropagation();
-  const v = row.dataset.cs;
-  if(!v) S.contact = [];
-  else S.contact = S.contact.includes(v) ? S.contact.filter(x => x !== v) : [...S.contact, v];
-  paintList();
+  const k = box.dataset.svsearch;
+  S.svSearch[k] = "";
+  paintSvFilters();
+  const back = $("svFilterBody").querySelector(`[data-svsearch="${CSS.escape(k)}"]`);
+  if(back) back.focus();
 });
 
 /* ─────────────────── switch the whole list to the Tesla contact ───────────────────
@@ -7181,14 +7460,12 @@ function paintList(){
   const inv  = S.tool === "inv";
   const trk  = S.tool === "trk";
   const deck = exp || inv;
-  /* Before the rows are taken, not after: this is what prunes a concern the
-     view toggle has just retired, and visibleRows() must not be asked for a
-     selection that paintConcerns is about to drop. Same for the contact
-     states beside it. */
-  paintConcerns();
-  paintContactChip();
-  paintLocationChip();
-  /* After the chip, never before: the lever counts what the filter has left on
+  /* The panel is only repainted while it is open. Nothing here prunes a
+     selection any more — an option the view toggle has just retired stays in
+     the panel at zero so it can be unpicked, which is what stops a narrowed
+     list being narrowed by something with no button behind it. */
+  if($("svFilterModal").classList.contains("on")) paintSvFilters();
+  /* After the filters, never before: the lever counts what they have left on
      screen, so it has to be told the same story the list is about to be. */
   paintCtSwitch();
   const rows = visibleRows();
@@ -7227,6 +7504,15 @@ function paintList(){
     $("expFilterLabel").textContent = n ? `Filters · ${n}` : "Filters";
     paintExpSort();
   }
+  /* Service Visits' own Filters chip. Hidden off the tool and on an empty
+     screen — a panel over no rows has nothing in any of its groups — but
+     never hidden merely because a group is one-sided. See SV_FACETS. */
+  $("svFilterBtn").hidden = S.tool !== "sv" || !S.rows.length;
+  if(!$("svFilterBtn").hidden){
+    const n = svActive();
+    $("svFilterBtn").classList.toggle("on", n > 0);
+    $("svFilterLabel").textContent = n ? `Filters · ${n}` : "Filters";
+  }
   // Nothing listed is nothing to open, and a live button over an empty list
   // only ever produces an error message.
   $("trunksBtn").hidden = !cog || !rows.length;
@@ -7241,8 +7527,7 @@ function paintList(){
   /* Open Inventory's narrowing is in the query, so it is already named in
      S.listSub by renderInv — adding a slice here would say it twice. */
   const slice = S.tool === "sv"
-    ? (S.concern.length ? " · " + S.concern.map(concernLabel).join(" + ") : "") +
-      (S.contact.length ? " · " + S.contact.map(contactLabel).join(" + ") : "")
+    ? (svActive() ? " · " + svSlice().join(" · ") : "")
     : (exp && expActive() ? " · " + expSlice().join(" · ") : "");
   $("listSub").textContent = S.listSub + slice + (rows.length ? ` · showing ${rows.length}` : "");
   if(!rows.length && S.rows.length){
@@ -7250,11 +7535,21 @@ function paintList(){
        The Pending Inventory one can only be reached through the filter panel — a
        scan with nothing in it never gets here — so it names the way back
        out rather than describing the centre. */
+    /* Three empties that want different next moves, so they are three
+       messages. Both filter ones name the way back out; the third describes
+       the centre, because a scan that flagged nothing is good news rather
+       than a screen somebody has to escape from. */
     $("list").innerHTML = exp
       ? `<div class="empty"><h3>Nothing matches those filters</h3>
           <p>All ${S.rows.length.toLocaleString(ZoI18n.locale())} matched cars at this centre are
              outside ${expActive() === 1 ? "that filter" : "those filters"} —
              ${esc(expSlice().join(", "))}. Open <b>Filters</b> and clear one.</p></div>`
+      : (S.tool === "sv" && svActive())
+      ? `<div class="empty"><h3>Nothing matches those filters</h3>
+          <p>${scannedRows().length.toLocaleString(ZoI18n.locale())} car${
+            scannedRows().length === 1 ? " is" : "s are"} outside ${
+            svActive() === 1 ? "that filter" : "those filters"} —
+             ${esc(svSlice().join(", "))}. Open <b>Filters</b> and clear one.</p></div>`
       : `<div class="empty"><h3>Nothing flagged</h3>
           <p>All ${S.rows.length} vehicles in this selection came back clear.</p></div>`;
   }
@@ -7525,16 +7820,24 @@ $("runExport").addEventListener("click", async () => {
             S.cogWindow ? "-under" + (DWELL_OPTS.find(o => o.v === S.cogWindow) || {})
               .label.replace(/^Under\s*/, "") : "" }-${stamp}`,
           rows }
-      /* The concern joins the view in the name for the reason the whole
-         convention exists: a sheet of 31 cosmetic tickets and a sheet of all
-         443 cars are otherwise the same filename with different contents. */
+      /* Every filter joins the view in the name, for the reason the whole
+         convention exists: a sheet of 31 cosmetic tickets, a sheet of 47
+         containment holds and a sheet of all 443 cars are otherwise the same
+         filename with different contents. Built off SV_FACETS rather than
+         listing them, so a filter added to the panel cannot go missing from
+         the name — which is what happened to Location. */
       : { label: `compiler-service-visits-${site}-${S.view}${
-            S.concern.length ? "-" + S.concern
-              .map(c => (c === NO_TYPE ? "untyped" : c).replace(/[^A-Za-z0-9]+/g, ""))
-              .join("-") : ""}${
-            // Same convention: a sheet of the 68 cars still on a customer is
-            // not the same file as a sheet of all 69.
-            S.contact.length ? "-" + S.contact.join("-") : ""}-${stamp}`,
+            /* Two picks are named, three or more are counted, and any one name
+               is clipped. A containment title runs to 78 characters and there
+               are 29 of them — spelled out in full, four picks would put the
+               file past what Windows will open. */
+            SV_FACETS.map(f => {
+              const v = S[f.k] || [];
+              if(!v.length) return "";
+              if(v.length > 2) return `-${v.length}${f.k}`;
+              return "-" + v.map(x =>
+                String(f.lab(x)).replace(/[^A-Za-z0-9]+/g, "").slice(0, 28)).join("-");
+            }).join("")}-${stamp}`,
           rows : rows.map(r => ({
             ...r,
             modelLabel   : labelFor("model", r.model),
@@ -7598,6 +7901,11 @@ function render(data){
      each car to. Taken from the scan rather than from S.trtId: changing the
      nav picker afterwards must not silently relabel rows already on screen. */
   S.scanTrtId = data.trtId || null;
+  /* Check-in state, once per scan rather than per row, and NOT awaited: it is
+     one call to a different service, and the list should be on screen while
+     it lands. Every button starts as Check In — the truthful default — and
+     the repaint at the end turns the walked ones into Follow Up. */
+  loadCheckins().then(paintList);
   const s = data.summary;
 
   paintStats([
@@ -7617,13 +7925,14 @@ function render(data){
   $("listHead").hidden = false;
   $("empty").hidden = true;
   S.view = "flagged";
-  /* Cleared with the rows. The concerns are a property of the tickets just
-     fetched, so a selection carried over from the last centre would filter
-     this one against names it may not even use. The contact states are a
-     fixed four and would survive, but a filter nobody has looked at since the
-     last scan is still a hidden reason for a short list. */
-  S.concern = [];
-  S.contact = [];
+  /* Cleared with the rows, all four of them. The concerns and the locations
+     are properties of what was just fetched, so a selection carried over from
+     the last centre would filter this one against names it may not even use.
+     The contact states and the flag kinds are fixed vocabularies and would
+     survive — but a filter nobody has looked at since the last scan is still
+     a hidden reason for a short list. Location used to be missed here, which
+     is exactly that bug. */
+  svClearFilters();
   paintList();
 
   const msgs = [...(data.notes || [])];
@@ -7715,11 +8024,9 @@ function renderExp(data){
   S.rows = data.rows || [];
   S.expBucket = data.bucket || null;
   S.scanTrtId = data.trtId || null;
-  /* A concern or a contact state picked on a Service Visits scan has nothing
-     to say about these rows, and leaving either set would put a stale word in
-     the subtitle. */
-  S.concern = [];
-  S.contact = [];
+  /* Anything picked on a Service Visits scan has nothing to say about these
+     rows, and leaving a set behind would put a stale word in the subtitle. */
+  svClearFilters();
   /* Cleared with the rows, for the same reason: a colour picked at one centre
      is a filter against a fleet this scan may not contain, and it would hide
      cars before anyone had seen them. The ORDER survives — that is a habit
@@ -8386,6 +8693,11 @@ function paintConnections(c){
   // Kept so the SCA poll can repaint one source without the caller having to
   // refetch the other two.
   S.conns = c;
+  /* Who is at the board, for the `by` on a check-in. Taken from whichever
+     signed-in source names a person — SCA's JWT carries UserName, Tesla OS
+     carries the same login — rather than asked for, because a name somebody
+     has to type is a name that ends up blank or wrong. */
+  S.who = (c.sca && c.sca.user) || (c.os && c.os.user) || "";
   paintScaPrompt();
   const say = (s, expect) => s.set
     ? `${s.detail} ${s.hint}` + (s.looksOk ? "" : ` — does not look like ${expect}`)
@@ -8928,6 +9240,8 @@ $("svcSave").addEventListener("click", async e => {
     // stored, and an empty box means "cleared" rather than "unchanged".
     const st = await api("/api/state");
     paintSvCall(st.svcall);
+    paintFollowUp(st.followup);
+    paintGh();
     msg.className = "why done";
     msg.textContent = st.svcall && st.svcall.has
       ? "Saved. Call Onsite and Send to Body will post there."
@@ -8937,6 +9251,79 @@ $("svcSave").addEventListener("click", async e => {
     msg.textContent = err.message;
     $("svcRow").classList.remove("ok");
     $("svcRow").classList.add("bad");
+  }
+});
+
+function paintFollowUp(s){
+  S.followup = s || { has: false, host: "" };
+  const on = Boolean(S.followup.has);
+  $("fuUrl").value = "";
+  $("fuUrl").placeholder = on
+    ? `saved · ${S.followup.host} — paste a new one to replace it`
+    : "https://…logic.azure.com/… or …webhook.office.com/…";
+  $("fuState").textContent = on ? S.followup.host : "not set";
+  $("fuRow").classList.remove("bad");
+  $("fuRow").classList.toggle("ok", on);
+}
+
+$("fuSave").addEventListener("click", async e => {
+  const msg = $("twMsg");
+  try{
+    await admin("/api/admin/followup-webhook", { webhook: $("fuUrl").value }, e.target);
+    const st = await api("/api/state");
+    paintFollowUp(st.followup);
+    msg.className = "why done";
+    msg.textContent = st.followup && st.followup.has
+      ? "Saved. Follow Up will post there."
+      : "Follow Up webhook cleared. The button will say so when pressed.";
+  }catch(err){
+    msg.className = "why bad";
+    msg.textContent = err.message;
+    $("fuRow").classList.remove("ok");
+    $("fuRow").classList.add("bad");
+  }
+});
+
+/* ── check-in settings ──
+   The only Admin section that does not post to the board. Both fields live in
+   this browser, so saving is a localStorage write and the admin password does
+   not come into it — there is nothing on the server to protect. */
+function paintGh(){
+  const c = ghConf();
+  $("ghRepo").value = c.repo;
+  $("ghToken").value = "";
+  $("ghToken").placeholder = c.token
+    ? "saved in this browser — paste a new one to replace it"
+    : "github_pat_… — needs Contents: read and write";
+  $("ghState").textContent = c.token ? `${c.repo} · token in this browser` : "no token";
+  $("ghRow").classList.toggle("ok", Boolean(c.token));
+  $("ghRow").classList.toggle("bad", !c.token);
+}
+
+$("ghSave").addEventListener("click", async () => {
+  const msg  = $("ghMsg");
+  const repo = $("ghRepo").value.trim() || GH_REPO;
+  const typed = $("ghToken").value.trim();
+  // An empty box means "leave it alone", the same bargain the webhooks make.
+  const conf = { repo, token: typed || ghConf().token };
+  ghSave(conf);
+  paintGh();
+
+  /* Proved rather than assumed: a token is saved only after GitHub has been
+     asked something with it, so a typo is caught here and not on the first
+     press of Check In halfway down a list. */
+  msg.className = "why";
+  msg.textContent = "Checking…";
+  try{
+    const { cars } = await ghLoad();
+    msg.className = "why done";
+    msg.textContent = `Saved. ${repo} answered — ` +
+      `${Object.keys(cars).length.toLocaleString(ZoI18n.locale())} car(s) checked in so far.`;
+    S.checkins = cars;
+    paintList();
+  }catch(err){
+    msg.className = "why bad";
+    msg.textContent = `Saved, but ${repo} refused it — ${err.message}`;
   }
 });
 
@@ -10406,6 +10793,8 @@ async function partsRunClose(){
     paintBilling(st.billingAddress);
     paintTeams(st.teams);
     paintSvCall(st.svcall);
+    paintFollowUp(st.followup);
+    paintGh();
     /* Its own call rather than a field on /api/state: the Part Picker settings are
        read by one tool and one admin section, and widening the state payload
        for them would make every board load pay for it. */

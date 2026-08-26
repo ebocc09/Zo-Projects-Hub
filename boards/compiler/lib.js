@@ -562,6 +562,58 @@ function saveSvCallWebhook(url){
   return { saved: true, cleared: false, host: u.hostname };
 }
 
+/* ── the Follow Up webhook ──
+   A third URL and a third key, apart from the other two for the reason they
+   are apart from each other: clearing one must never take another with it.
+   This one is posted to by the Follow Up button, which is what Check In turns
+   into once somebody has walked the car. */
+function followUpSettings(){
+  const url = loadConnections().followUpWebhook || "";
+  let host = "";
+  try { host = url ? new URL(url).hostname : ""; } catch { host = "saved"; }
+  return { has: Boolean(url), host };
+}
+
+function saveFollowUpWebhook(url){
+  const raw = String(url || "").trim();
+  if(!raw){
+    saveConnections({ followUpWebhook: "" });
+    return { saved: false, cleared: true };
+  }
+  const u = checkMicrosoftUrl(raw, "Follow Up webhook");
+  saveConnections({ followUpWebhook: raw });
+  return { saved: true, cleared: false, host: u.hostname };
+}
+
+/* Sent about a car somebody has already checked in, so the card says that and
+   not much else — whoever reads it knows the car has been looked at and is
+   being chased. The VIN is the headline for the same reason as the SV Call
+   card: it is read on a phone, in a lot. */
+async function sendFollowUp({ vin }){
+  const url = loadConnections().followUpWebhook;
+  if(!url)
+    throw new Error("No Follow Up webhook saved — add one in Admin › Follow Up");
+  if(!isVin(vin)) throw new Error(`${vin} is not a valid VIN`);
+
+  /* Named from the board's own configured centre rather than from the row the
+     press came from: a page left open since yesterday should not be able to
+     put a stale centre on a card posted today. */
+  const trt  = await trtInfo(loadConnections().trtId).catch(() => null);
+  const card = {
+    $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+    type: "AdaptiveCard", version: "1.4",
+    body: [
+      { type: "TextBlock", text: "Follow up", weight: "Bolder", size: "Medium" },
+      { type: "TextBlock", text: vin, size: "Large", weight: "Bolder", wrap: true },
+      { type: "TextBlock", wrap: true,
+        text: `Checked in at ${(trt && (trt.full || trt.name)) || "this centre"} — ` +
+              `following up on what it needs next.` }
+    ]
+  };
+  await postToUrl(url, teamsEnvelope(card));
+  return { ok: true, vin };
+}
+
 /* The message. Three facts and nothing else: which car, where it is, and what
    to do about it. A card that has to be read twice to find the VIN would be
    worse than a text message, and this one is read on a phone in a lot. */
@@ -5572,6 +5624,7 @@ module.exports = {
   /* SV Call — its own webhook beside the VRI one, and the two messages that
      go through it. Both check before they post. */
   svCallSettings, saveSvCallWebhook, sendSvCall, sendBodyCall,
+  followUpSettings, saveFollowUpWebhook, sendFollowUp,
   postVriList, postVriControlCard, pushVri, teamsStatus, startTeamsLoop, stopTeamsLoop,
   scaVisitState, isUndelivered,
   /* Parts — the fifth tool. partsBuild is the drag, partsClose is the slider;
