@@ -1,5 +1,5 @@
 {
-  "published": "2026-08-26T18:35:42.379Z",
+  "published": "2026-08-26T18:47:59.701Z",
   "files": {
     ".gitignore": "129b11c61bf7864e38c5ed562bc3433cec1e2c36",
     "README.md": "fcae76335414becc99ef8e1e287633acafa664fa",
@@ -17,7 +17,7 @@
     "boards/compiler/Start The Compiler.cmd": "3a82c247abd460f1693fe2a70daf61ab706286e0",
     "boards/compiler/config.json": "e27a2b8e4ff409532463c7b0b24ce8fa3994794f",
     "boards/compiler/credstore.js": "0cc50ee13aff83ef7edfcd289eb406a8420df25a",
-    "boards/compiler/index.html": "a27aee0b8306bf605328e95c6bff5c8c4a2cb779",
+    "boards/compiler/index.html": "09f242e58bf74637363d2effc37a9546a1184eb6",
     "boards/compiler/inventory.js": "9d33b5410df18710cd4f061533a27948ed859940",
     "boards/compiler/lib.js": "93bedcb1ea50d644804581b5fc43eae4135d193b",
     "boards/compiler/os.js": "13558695a4d22b0ca4b237498bfe33131dc75609",

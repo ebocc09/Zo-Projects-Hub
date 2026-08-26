@@ -837,6 +837,19 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 .crow.on .qtick{opacity:1}
 .qsep{height:1px;background:var(--line-soft);margin:5px 8px}
 
+/* The containment drop-down. Anchored by JS against its chip in the modal's
+   own coordinates, so the inherited right/bottom have to be let go of or it
+   stretches across the dialog. Wider than a house menu because a containment
+   title runs to 78 characters; taller because there are 29 of them. */
+.sv-menu{right:auto;bottom:auto;min-width:0;max-width:none;max-height:340px;z-index:70}
+.sv-menu .qt{white-space:nowrap}
+/* The chip that opens it. Left-aligned and free to grow, unlike a filter chip:
+   its label is the name of the hold that is on, and a centred ellipsis in the
+   middle of a chip row reads as a bug. */
+.sv-menu-btn{display:inline-flex;align-items:center;max-width:100%;text-transform:none;
+  letter-spacing:.01em}
+.sv-menu-btn .sv-menu-lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 /* Takes the count text's place in the footer, so naming costs no extra row. */
 #selName{
   flex:1;min-width:0;margin-right:auto;
@@ -1862,6 +1875,10 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
     <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
   </div>
   <div class="modal-body" id="svFilterBody"></div>
+  <!-- The containment drop-down. A child of the modal rather than of the body
+       above it: the body is rebuilt on every pick and is overflow:auto, so a
+       menu living in there would be destroyed mid-use and clipped besides. -->
+  <div class="qmenu down sv-menu" id="svMenu" role="menu"></div>
   <div class="modal-foot">
     <span class="modal-sub" id="svFilterCount" style="margin-right:auto"></span>
     <button class="btn btn-ghost" id="svFilterClear">Clear all</button>
@@ -2996,9 +3013,6 @@ const S = {
      rows like the concerns and the locations — the campaign names are the
      vendor's and there is no list of them to copy. */
   containment:[],
-  /* What has been typed into a long group's search box, keyed by facet. Not a
-     filter: it narrows the OPTIONS on offer, never the cars. */
-  svSearch:{},
   /* VIN → {status, at, by}, straight out of the GitHub file. **null means the
      file could not be read**, which is deliberately different from `{}`
      meaning nobody has checked anything in — the first is a broken token and
@@ -6928,15 +6942,13 @@ const SV_FLAGS = [
    and never a NUL — one of those made the whole file read as binary to grep. */
 const NO_CAMP = "￿unnamed";
 
-/* Past this many options a group gets a search box and a capped, scrolling
-   list instead of a wall of chips — the same threshold and the same treatment
-   Open Inventory gives its long groups. Containment is the one that needs it:
-   29 names at Cypress, median 46 characters, so laid out as chips it would be
-   taller than the other five groups put together. The rest stay chips, and a
-   quiet centre with six holds gets chips too — the form follows the count, so
-   nothing has to be declared. */
-const SV_BIG  = 14;
-const SV_SHOW = 40;
+/* A group can render as chips or as a drop-down, and it says which. Only the
+   containment names are a menu: 29 of them at Cypress at a median of 46
+   characters, so as chips they would be taller than the other five groups put
+   together. Ed asked for a drop-down by name and a drop-down is what this is —
+   a chip that opens a menu of every hold with its count, not a search box over
+   a list. */
+const SV_MENU_W = 560;   // px — a containment title runs to 78 characters
 const SV_FLAG_LABEL = Object.fromEntries(SV_FLAGS.map(f => [f.v, f.label]));
 
 function flagsOf(r){
@@ -6983,6 +6995,7 @@ const SV_FACETS = [
      space, and untrimmed they would sit in the menu as separate holds from
      themselves the first time one comes back clean. */
   { k: "containment", label: "Containment hold", many: "containment holds",
+    form: "menu",
     of: r => new Set((r.campaigns || []).map(c => String(c.title || "").trim() || NO_CAMP)),
     lab: v => v === NO_CAMP ? "Unnamed hold" : v,
     order: (a, b) => (a[0] === NO_CAMP) - (b[0] === NO_CAMP) || svBySize(a, b) },
@@ -7025,9 +7038,8 @@ const svActive = () => SV_FACETS.filter(f => (S[f.k] || []).length).length;
    them when it shipped, which is the whole argument for this existing. */
 function svClearFilters(){
   for(const f of SV_FACETS) S[f.k] = [];
-  // The typing goes with the picks. A box still holding "reflector" over a
-  // group that no longer has one reads as a filter that failed to clear.
-  S.svSearch = {};
+  // The open menu belonged to a pick that no longer exists.
+  closeSvMenu();
 }
 
 /* What is applied, in words, for the subtitle. A screen showing 31 rows out
@@ -7068,35 +7080,39 @@ function paintSvFilters(){
     for(const v of picked) if(!tally.has(v)) opts.push([v, 0]);
     if(!opts.length) return "";
 
-    /* A long group gets a search box and a capped list. Containment is the
-       one that needs it — see SV_BIG. */
-    const big = opts.length > SV_BIG;
-    const q   = (S.svSearch[f.k] || "").trim().toLowerCase();
-    /* A picked option survives the search, always. Otherwise typing into the
-       box makes a live filter disappear from the panel while it is still
-       narrowing the list behind it — Open Inventory's rule, same reason. */
-    const hits = big
-      ? opts.filter(([v]) => picked.includes(v) || !q || String(f.lab(v)).toLowerCase().includes(q))
-      : opts;
-    // Picked first, so what is on cannot be scrolled off the bottom.
-    if(big) hits.sort((a, b) => (picked.includes(b[0]) ? 1 : 0) - (picked.includes(a[0]) ? 1 : 0));
-    const shown = big ? hits.slice(0, SV_SHOW) : hits;
+    const head = `<div class="facet-head"><span>${esc(f.label)}</span>${
+      picked.length ? `<button data-svclear="${esc(f.k)}">Clear</button>` : ""}</div>`;
+
+    /* The drop-down form. Only the chip is drawn here — the menu itself lives
+       outside this body and is filled on open, because this panel is rebuilt
+       on every pick and a menu inside it would be destroyed mid-use. */
+    if(f.form === "menu"){
+      svMenuTally[f.k] = opts;
+      const label =
+        !picked.length        ? `All ${f.many}`
+        : picked.length === 1 ? String(f.lab(picked[0]))
+                              : `${picked.length} of ${opts.length}`;
+      return `<div class="facet" data-svgroup="${esc(f.k)}">
+        ${head}
+        <div class="qwrap">
+          <button class="chip sv-menu-btn${picked.length ? " on" : ""}"
+                  data-svmenu="${esc(f.k)}" aria-haspopup="true" aria-expanded="false"
+                  title="Pick which ${esc(f.many)} to show — ${opts.length} on this scan"
+            ><span class="sv-menu-lbl">${esc(label)}</span>
+             <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor"
+                  stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+                  style="margin-left:7px;flex:none"><path d="M6 9l6 6 6-6"/></svg></button>
+        </div>
+      </div>`;
+    }
 
     return `<div class="facet" data-svgroup="${esc(f.k)}">
-      <div class="facet-head"><span>${esc(f.label)}</span>${
-        picked.length ? `<button data-svclear="${esc(f.k)}">Clear</button>` : ""}</div>
-      ${big ? `<input class="inv-search" type="search" data-svsearch="${esc(f.k)}"
-                placeholder="Search ${esc(f.label.toLowerCase())}s — ${opts.length} of them"
-                value="${esc(S.svSearch[f.k] || "")}">` : ""}
-      <div class="opts${big ? " scroll" : ""}">${shown.map(([v, n]) =>
+      ${head}
+      <div class="opts">${opts.map(([v, n]) =>
         `<button class="opt sv-opt${picked.includes(v) ? " on" : ""}"
           data-svk="${esc(f.k)}" data-svi="${esc(String(svOptId(f.k, v)))}"
           >${esc(f.lab(v))} <small>${n.toLocaleString(ZoI18n.locale())}</small></button>`
-        ).join("")}${
-        hits.length > shown.length
-          ? `<div class="inv-more">Showing ${shown.length} of ${hits.length} —
-               type above to narrow.</div>` : ""}${
-        !hits.length ? `<div class="inv-more">Nothing matches “${esc(q)}”.</div>` : ""}</div>
+        ).join("")}</div>
     </div>`;
   }).join("");
 
@@ -7109,6 +7125,12 @@ function paintSvFilters(){
   $("svFilterCtx").textContent = svActive()
     ? `${svActive()} filter${svActive() === 1 ? "" : "s"}` : "everything on screen";
   $("svFilterClear").hidden = !svActive();
+
+  /* The chip the open menu was hanging off has just been replaced, so the menu
+     has to be refilled and re-anchored to the new one. Its scroll position is
+     kept: picking the third hold of 29 and being thrown back to the top would
+     make picking a second one a hunt. */
+  if(svMenuKey) paintSvMenu(true);
 }
 
 /* Values reach the DOM by index, never as themselves: two of them are
@@ -7136,9 +7158,7 @@ $("svFilterBody").addEventListener("click", e => {
   const opt   = e.target.closest(".sv-opt");
 
   if(clear){
-    const k = clear.dataset.svclear;
-    S[k] = [];
-    delete S.svSearch[k];
+    S[clear.dataset.svclear] = [];
   }else if(opt){
     const k = opt.dataset.svk;
     const v = (svOpts[k] || [])[Number(opt.dataset.svi)];
@@ -7157,35 +7177,123 @@ $("svFilterClear").addEventListener("click", () => {
   paintList();
 });
 
-/* Typing in a long group's box. The panel is rebuilt wholesale on every
-   keystroke, so the caret has to be put back by hand afterwards — the input
-   it was in no longer exists. Same mechanics as Open Inventory's invFocus,
-   and the same bug if it is left out. */
-$("svFilterBody").addEventListener("input", e => {
-  const box = e.target.closest("[data-svsearch]");
-  if(!box) return;
-  const k = box.dataset.svsearch;
-  S.svSearch[k] = box.value;
-  paintSvFilters();
-  const back = $("svFilterBody").querySelector(`[data-svsearch="${CSS.escape(k)}"]`);
-  if(back){ back.focus(); back.setSelectionRange(back.value.length, back.value.length); }
+/* ── the containment drop-down ──
+
+   One menu element, held OUTSIDE `#svFilterBody` as a child of the modal
+   itself. Two reasons, and both were found the hard way on the chips version:
+
+   - the body is rebuilt on every pick, so a menu rendered into it would be
+     destroyed the moment somebody chose their first hold — and this menu is
+     multi-select, so being open across picks is the whole point of it;
+   - `.modal-body` is `overflow:auto`, which clips anything absolutely
+     positioned inside it. The modal is `position:fixed` with a transform, so
+     it is the containing block: a menu anchored to the modal escapes the
+     scroll box and can hang over the panel the way a menu should.
+
+   Positioned by hand against the chip, in the modal's own coordinates. */
+let svMenuKey   = null;   // which facet's menu is open, null for none
+let svMenuTally = {};     // k -> the [value, count] rows the panel last drew
+
+function svMenuAnchor(){
+  return $("svFilterBody").querySelector(`[data-svmenu="${CSS.escape(svMenuKey)}"]`);
+}
+
+function placeSvMenu(){
+  const btn = svMenuAnchor();
+  const menu = $("svMenu");
+  if(!btn){ closeSvMenu(); return; }
+  const m = $("svFilterModal").getBoundingClientRect();
+  const r = btn.getBoundingClientRect();
+  menu.style.width = SV_MENU_W + "px";
+  menu.style.left  = Math.max(8, Math.min(r.left - m.left, m.width - SV_MENU_W - 8)) + "px";
+  menu.style.top   = (r.bottom - m.top + 8) + "px";
+}
+
+/* `keepScroll` is set when the panel underneath was rebuilt by a pick — the
+   rows are the same rows and the reader is still looking at them. */
+function paintSvMenu(keepScroll){
+  const menu = $("svMenu");
+  if(!svMenuKey){ menu.classList.remove("on"); return; }
+  const f = SV_FACETS.find(x => x.k === svMenuKey);
+  const opts = svMenuTally[svMenuKey] || [];
+  if(!f || !opts.length){ closeSvMenu(); return; }
+
+  const picked = S[svMenuKey] || [];
+  const at = keepScroll ? menu.scrollTop : 0;
+  const tick = `<svg class="qtick" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
+
+  /* Indexed, never carrying the value: one of these is a sentinel for a
+     campaign with no name, and a sentinel does not belong in an attribute. */
+  menu.innerHTML =
+    `<button class="qrow crow${picked.length ? "" : " on"}" data-svmi="-1">
+       ${tick}<span class="qt">All ${esc(f.many)}</span>
+       <span class="qn">${opts.reduce((n, o) => n + o[1], 0).toLocaleString(ZoI18n.locale())}</span>
+     </button><div class="qsep"></div>` +
+    opts.map(([v, n], i) => `
+      <button class="qrow crow${picked.includes(v) ? " on" : ""}" data-svmi="${i}"
+              title="${esc(f.lab(v))}">
+        ${tick}<span class="qt">${esc(f.lab(v))}</span>
+        <span class="qn">${n.toLocaleString(ZoI18n.locale())}</span>
+      </button>`).join("");
+
+  placeSvMenu();
+  menu.classList.add("on");
+  menu.scrollTop = at;
+  const btn = svMenuAnchor();
+  if(btn) btn.setAttribute("aria-expanded", "true");
+}
+
+function closeSvMenu(){
+  const btn = svMenuKey && svMenuAnchor();
+  if(btn) btn.setAttribute("aria-expanded", "false");
+  svMenuKey = null;
+  $("svMenu").classList.remove("on");
+}
+
+/* Opening one. Delegated off the body because the chip is redrawn constantly. */
+$("svFilterBody").addEventListener("click", e => {
+  const btn = e.target.closest("[data-svmenu]");
+  if(!btn) return;
+  e.stopPropagation();
+  const k = btn.dataset.svmenu;
+  if(svMenuKey === k){ closeSvMenu(); return; }
+  svMenuKey = k;
+  paintSvMenu(false);
 });
 
-/* Escape clears the typing rather than closing the modal — the caret is in
-   the box, not in the dialog, and losing a whole panel of picks to a keypress
-   meant for one word is not the trade anybody wants. It only closes the modal
-   once the box is already empty. */
-$("svFilterBody").addEventListener("keydown", e => {
-  const box = e.target.closest("[data-svsearch]");
-  if(!box || e.key !== "Escape" || !box.value) return;
-  e.preventDefault();
+/* Stays open across a pick, like every multi-select menu on this board:
+   choosing three holds is the point, and a menu that shut on the first would
+   make that three trips to the chip. */
+$("svMenu").addEventListener("click", e => {
+  const row = e.target.closest("[data-svmi]");
+  if(!row) return;
   e.stopPropagation();
-  const k = box.dataset.svsearch;
-  S.svSearch[k] = "";
-  paintSvFilters();
-  const back = $("svFilterBody").querySelector(`[data-svsearch="${CSS.escape(k)}"]`);
-  if(back) back.focus();
+  const k = svMenuKey;
+  const i = Number(row.dataset.svmi);
+  if(i < 0){
+    S[k] = [];
+  }else{
+    const v = (svMenuTally[k] || [])[i] && svMenuTally[k][i][0];
+    if(v === undefined) return;
+    const cur = S[k] || [];
+    S[k] = cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v];
+  }
+  paintSvFilters();   // repaints the menu too, keeping its scroll
+  paintList();
 });
+
+/* Anywhere else in the modal shuts it — including the panel behind, which is
+   what somebody clicking a chip in another group means to do. */
+$("svFilterModal").addEventListener("click", e => {
+  if(svMenuKey && !e.target.closest("#svMenu")) closeSvMenu();
+});
+/* One press closes the menu and leaves the modal and the picks alone. */
+document.addEventListener("keydown", e => {
+  if(e.key === "Escape" && svMenuKey){ e.stopPropagation(); closeSvMenu(); }
+}, true);
+// Scrolling the panel moves the chip, so the menu has to follow it.
+$("svFilterBody").addEventListener("scroll", () => { if(svMenuKey) placeSvMenu(); });
 
 /* ─────────────────── switch the whole list to the Tesla contact ───────────────────
 
