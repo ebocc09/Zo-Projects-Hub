@@ -100,8 +100,15 @@ function sendErr(res, err){
     needsTrt   : Boolean(err.needsTrt),
     /* Half of a two-step write landed. Not the same as "it failed" — the page
        has to say so differently, because something in the world has changed
-       and the next action is not simply "try again". */
-    partial    : Boolean(err.partial)
+       and the next action is not simply "try again".
+
+       The ARRAY goes through when there is one. This used to flatten to a
+       boolean, and the Parts pages do `(err.partial || []).map(…)` to list
+       what landed — so `true.map` threw *inside their catch blocks*, the run
+       box sat on "Working…" for ever, and the real failure was only ever
+       visible in the log. An error path that breaks is worse than the error
+       it was reporting. */
+    partial    : Array.isArray(err.partial) ? err.partial : Boolean(err.partial)
   });
 }
 
@@ -644,6 +651,231 @@ const server = http.createServer(async (req, res) => {
       log("sca disconnected");
       return sendJson(res, 200, { ok: true,
                                   connection: L.connectionsSummary().sca });
+    }
+
+    /* ══ Parts ══
+       The fifth tool. Reads answer the node cards; the two writes are the
+       drag (build) and the slider (close). Both refuse on a delivered car
+       from inside L, against a fresh Garage read rather than anything the
+       page sent up. */
+
+    if(p === "/api/parts/settings" && req.method === "GET"){
+      /* The site is not among the settings any more — it follows the nav's
+         centre. Resolved here so Admin can show which one a run would use,
+         and say WHY when it cannot work one out rather than showing a blank
+         row that reads as "not configured". */
+      let site = null, siteWhy = "";
+      try{ site = await L.partsSite(); }
+      catch(err){ siteWhy = err.message; }
+      return sendJson(res, 200, { ...L.partsSettings(), site, siteWhy });
+    }
+
+    if(p === "/api/parts/resolve" && req.method === "GET"){
+      const vin = (url.searchParams.get("vin") || "").trim().toUpperCase();
+      if(!L.isVin(vin)) return sendJson(res, 400, { error: "A valid VIN is required" });
+      return sendJson(res, 200, await L.partsResolve(vin));
+    }
+
+    /* Symptom search is the Service Visits editor's, unchanged — the tool that
+       edits a symptom should not have a second opinion about what one is. */
+    if(p === "/api/parts/symptoms" && req.method === "GET"){
+      const term    = (url.searchParams.get("q") || "").trim();
+      const modelId = (url.searchParams.get("modelId") || "").trim();
+      if(term.length < 2) return sendJson(res, 200, { symptoms: [] });
+      return sendJson(res, 200, { symptoms: await L.scaSymptoms({ term, modelId }) });
+    }
+
+    /* One symptom, in full. Needed on its own because `cosmeticIssue` and
+       `hyperSymptom` travel with a symptom and are NOT in the search results —
+       picking off the search row alone leaves two fields describing whatever
+       symptom was there before. The GET behind it is code-then-model; the
+       other way round answers "Record not found". */
+    if(p === "/api/parts/symptom" && req.method === "GET"){
+      const code = (url.searchParams.get("code") || "").trim();
+      const mid  = (url.searchParams.get("modelId") || "").trim();
+      if(!code) return sendJson(res, 400, { error: "A symptom code is required" });
+      const d = await L.scaSymptomDetail({ symptomCode: code, modelId: mid });
+      if(!d) return sendJson(res, 404, { error: "No such symptom for this model" });
+      return sendJson(res, 200, d);
+    }
+
+    if(p === "/api/parts/corrections" && req.method === "GET"){
+      const term = (url.searchParams.get("q") || "").trim();
+      const mc   = (url.searchParams.get("modelCode") || "").trim();
+      const vin  = (url.searchParams.get("vin") || "").trim().toUpperCase();
+      if(term.length < 2) return sendJson(res, 200, { corrections: [] });
+      if(!L.isVin(vin))   return sendJson(res, 400, { error: "A valid VIN is required" });
+      return sendJson(res, 200, { corrections: await L.partsCorrectionSearch(term, mc, vin) });
+    }
+
+    if(p === "/api/parts/search" && req.method === "GET"){
+      const term    = (url.searchParams.get("q") || "").trim();
+      const modelId = (url.searchParams.get("modelId") || "").trim();
+      if(term.length < 2) return sendJson(res, 200, { parts: [] });
+      return sendJson(res, 200, { parts: await L.partsPartSearch(term, modelId) });
+    }
+
+    /* What the correction code suggests, so the common case needs no typing. */
+    if(p === "/api/parts/recommend" && req.method === "GET"){
+      const vin  = (url.searchParams.get("vin") || "").trim().toUpperCase();
+      const mid  = (url.searchParams.get("modelId") || "").trim();
+      const code = (url.searchParams.get("correctionCode") || "").trim();
+      if(!L.isVin(vin)) return sendJson(res, 400, { error: "A valid VIN is required" });
+      if(!code)         return sendJson(res, 200, { parts: [] });
+      return sendJson(res, 200, { parts: await L.partsRecommend(vin, mid, code) });
+    }
+
+    if(p === "/api/parts/stock" && req.method === "GET"){
+      const pn = (url.searchParams.get("part") || "").trim();
+      if(!pn) return sendJson(res, 400, { error: "A part number is required" });
+      return sendJson(res, 200, await L.partsStock(pn));
+    }
+
+    if(p === "/api/parts/techs" && req.method === "GET"){
+      const q2 = (url.searchParams.get("q") || "").trim();
+      if(q2.length < 2) return sendJson(res, 200, { techs: [] });
+      return sendJson(res, 200, { techs: await L.partsTechSearch(q2) });
+    }
+
+    /* ── the swipe, in the VIN dialog ──
+       Visit, contacts, activity. Everything after this happens on the page
+       against a ticket that already exists. */
+    if(p === "/api/parts/open" && req.method === "POST"){
+      const body = await readBody(req);
+      const vin  = String(body.vin || "").trim().toUpperCase();
+      if(!L.isVin(vin)) return sendJson(res, 400, { error: "A valid VIN is required" });
+
+      jobStart();
+      try{
+        const out = await L.partsOpen({ vin, narrative: body.narrative });
+        log(`parts open: ${vin} -> visit ${out.serviceVisitId} · ` +
+            `activity ${out.activityNumber || out.activityId}`);
+        return sendJson(res, 200, out);
+      }catch(err){
+        if(err.partial)
+          log(`parts open FAILED at ${err.failedAt}: ${vin} — ${err.message} ` +
+              `(landed: ${err.partial.map(s => s.name).join(", ") || "nothing"})`);
+        throw err;
+      }finally{ jobEnd(); }
+    }
+
+    /* Which pay types this activity will take, and which one the rule picks.
+       Asked from the page as soon as a correction is chosen, so the card can
+       say "defaulting to Rectification" before anything is billed. */
+    if(p === "/api/parts/paytype" && req.method === "GET"){
+      const act  = (url.searchParams.get("activityId") || "").trim();
+      const code = (url.searchParams.get("correctionCode") || "").trim();
+      if(!/^\d+$/.test(act)) return sendJson(res, 400, { error: "activityId must be numeric" });
+      if(!code)              return sendJson(res, 400, { error: "A correction code is required" });
+      return sendJson(res, 200, await L.partsPayTypeFor(Number(act), code));
+    }
+
+    /* ── the drag, on the page ──
+       Symptom, correction, part, pick — against the ticket the swipe opened.
+       Partial failures come back as themselves: `partial` names what already
+       landed so a half-filled ticket is never reported as nothing having
+       happened. */
+    if(p === "/api/parts/fill" && req.method === "POST"){
+      const body = await readBody(req);
+      const vin  = String(body.vin || "").trim().toUpperCase();
+      const num  = k => (/^\d+$/.test(String(body[k] ?? "").trim()) ? Number(body[k]) : null);
+      const svid = num("serviceVisitId"), act = num("activityId");
+      if(!L.isVin(vin)) return sendJson(res, 400, { error: "A valid VIN is required" });
+      if(svid === null) return sendJson(res, 400, { error: "serviceVisitId must be numeric" });
+      if(act  === null) return sendJson(res, 400, { error: "activityId must be numeric" });
+      if(!body.symptom || !body.symptom.symptomCode)
+        return sendJson(res, 400, { error: "A symptom is required" });
+      if(!body.correctionCode)
+        return sendJson(res, 400, { error: "A correction code is required" });
+      if(!body.part || !body.part.partNumber)
+        return sendJson(res, 400, { error: "A part is required" });
+
+      jobStart();
+      try{
+        const out = await L.partsFill({
+          vin, serviceVisitId: svid, activityId: act,
+          symptom: body.symptom, correctionCode: String(body.correctionCode),
+          part: body.part
+        });
+        log(`parts fill: ${vin} visit ${svid} · ` +
+            `${out.part ? out.part.partNumber : "no part"} · ${out.payType.name}`);
+        return sendJson(res, 200, out);
+      }catch(err){
+        if(err.partial)
+          log(`parts fill FAILED at ${err.failedAt}: ${vin} visit ${svid} — ${err.message} ` +
+              `(landed: ${err.partial.map(s => s.name).join(", ") || "nothing"})`);
+        throw err;
+      }finally{ jobEnd(); }
+    }
+
+    /* ── the lever, top right ──
+       The board's ONLY route that cancels a service visit. Part Picker alone,
+       undelivered alone, and only the visit whose id is posted — there is no
+       bulk form of this and there should not be. */
+    if(p === "/api/parts/cancel" && req.method === "POST"){
+      const body = await readBody(req);
+      const vin  = String(body.vin || "").trim().toUpperCase();
+      const svid = /^\d+$/.test(String(body.serviceVisitId ?? "").trim())
+        ? Number(body.serviceVisitId) : null;
+      if(!L.isVin(vin))  return sendJson(res, 400, { error: "A valid VIN is required" });
+      if(svid === null)  return sendJson(res, 400, { error: "serviceVisitId must be numeric" });
+
+      jobStart();
+      try{
+        const out = await L.partsCancel({ vin, serviceVisitId: svid });
+        log(`parts CANCEL: ${vin} visit ${svid} -> motion ${out.motion} · ` +
+            `Parts delays${out.openLines.length ? ` · ${out.openLines.length} line(s) left open` : ""}`);
+        return sendJson(res, 200, out);
+      }catch(err){
+        if(err.partial)
+          log(`parts cancel FAILED at ${err.failedAt}: ${vin} visit ${svid} — ${err.message}`);
+        throw err;
+      }finally{ jobEnd(); }
+    }
+
+    /* ── the slider ── */
+    if(p === "/api/parts/close" && req.method === "POST"){
+      const body = await readBody(req);
+      const vin  = String(body.vin || "").trim().toUpperCase();
+      const num  = k => (/^\d+$/.test(String(body[k] ?? "").trim()) ? Number(body[k]) : null);
+      const svid = num("serviceVisitId"), act = num("activityId");
+      if(!L.isVin(vin)) return sendJson(res, 400, { error: "A valid VIN is required" });
+      if(svid === null) return sendJson(res, 400, { error: "serviceVisitId must be numeric" });
+      if(act  === null) return sendJson(res, 400, { error: "activityId must be numeric" });
+
+      jobStart();
+      try{
+        const out = await L.partsClose({
+          vin, serviceVisitId: svid, activityId: act,
+          activityCorrectionId: num("activityCorrectionId"),
+          technicianId: num("technicianId")
+        });
+        log(`parts close: ${vin} visit ${svid} -> motion ${out.motion}` +
+            (out.closed ? " (Delivered)" : " !! DID NOT REACH DELIVERED"));
+        return sendJson(res, 200, out);
+      }catch(err){
+        if(err.partial)
+          log(`parts close FAILED at ${err.failedAt}: ${vin} visit ${svid} — ${err.message} ` +
+              `(landed: ${err.partial.map(s => s.name).join(", ") || "nothing"})`);
+        throw err;
+      }finally{ jobEnd(); }
+    }
+
+    /* Admin › Part Picker — the technician, the note and the narrative. NOT
+       the site: SCA's search really does return nothing for "17589", but the
+       board holds the centre's NAME too, so the site is derived from the nav
+       rather than picked here. */
+    if(p === "/api/admin/parts-defaults" && req.method === "POST"){
+      const body = await readBody(req);
+      if(!authed(body)) return sendJson(res, 401, { error: "Wrong password" });
+      const out = L.savePartsSettings(body.settings || {});
+      log(`parts settings: tech ${out.tech.name} · symptom ${out.symptom.description}`);
+      /* Echoed back with the derived site attached, because the page paints
+         the whole panel from this reply and the site row is part of it. */
+      let site = null, siteWhy = "";
+      try{ site = await L.partsSite(); }
+      catch(err){ siteWhy = err.message; }
+      return sendJson(res, 200, { ...out, site, siteWhy });
     }
 
     /* ── the scan ── */

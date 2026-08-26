@@ -30,6 +30,10 @@ const invx      = require("./inventory");
    file. Required here rather than requiring lib.js from there, because that
    direction is a cycle. */
 const trk       = require("./tracker");
+/* The Parts tool's Service App calls, one function per captured endpoint and
+   no policy in any of them — the gates and the ordering are down at the foot
+   of this file. Split for the same reason sca.js is split from here. */
+const parts     = require("./parts");
 
 const HERE = __dirname;
 
@@ -4475,6 +4479,1079 @@ function connectionsSummary(){
   };
 }
 
+/* ══════════════════════════════ Parts ══════════════════════════════════
+
+   Bills a part onto an undelivered car and closes the ticket behind it —
+   about twenty writes across five Service App services for one missing key
+   card, which is the reason the tool exists.
+
+   The endpoints are in parts.js and every one of them was captured off Ed's
+   own clicks; what lives HERE is everything parts.js deliberately refuses to
+   know: which cars may be written to, what order the writes go in, and what
+   counts as proof that one landed.
+
+   ── this tool closes tickets for real ──
+
+   The Service Visits tool cancels a TSS *booking* and never touches a ticket,
+   because a cancelled ticket disturbs billing. This one genuinely closes the
+   activity and walks the visit to Delivered. That is the ask, and it is why
+   every gate below fails closed and why the run is split in two at the point
+   the user's own gesture splits it.
+
+   ── the ordering is not stylistic ──
+
+   Three steps in the captured run returned HTTP 200 while refusing, and each
+   one is a precondition encoded below rather than a defensive guess:
+
+     · the estimated completion time cannot be set before motion 29 Prepared
+     · a technician cannot be saved against a correction that was removed
+     · an activity cannot be updated after it has been removed
+
+   Any of them would look like success to code that trusted the status line. */
+
+/* ── the marker ──
+
+   Every activity this tool creates carries `ZO004` in its narrative, and that
+   is not decoration: it is how a ticket is recognised as ours on the way back
+   in. Reload the page, close the tab, come back tomorrow — looking the VIN up
+   finds the open visit, reads its lines, and resumes the one marked with this
+   instead of opening a second ticket beside it. Ed's, and it is what makes
+   the tool survive a refresh.
+
+   Enforced rather than merely defaulted. The narrative is editable in Admin,
+   and a run whose marker had been typed away would be invisible to the resume
+   — so `markNarrative()` puts it back on if it is missing. */
+const ZO_MARK = "ZO004";
+const PARTS_NARRATIVE = `${ZO_MARK} - Missing Part`;
+
+const markNarrative = t => {
+  const s = String(t || "").trim() || "Missing Part";
+  return s.toUpperCase().includes(ZO_MARK) ? s : `${ZO_MARK} - ${s}`;
+};
+/* The missing-key-card job this tool was built around, and the starting point
+   for every run rather than a rule. Ed's words: it should default, and it
+   should be editable exactly the way the Service Visits editor edits one. */
+const PARTS_CORRECTION = { code: "17450306",
+                           name: "Replacement Keys - Program (No Keys Present)" };
+/* Ed's ask: some tickets refuse to close without customer repair notes and
+   some do not care. This is what goes in when one is wanted. */
+/* Written on EVERY run, not only when SCA asks for it. Some cars require a
+   customer repair note and some do not, and the check that tells them apart
+   is the one thing here whose answer flickered in the capture — so the tool
+   stopped asking. Always writing one note is simpler than branching on an
+   unreliable question, and an extra note is harmless where a missing one
+   blocks the close. Ed's call and Ed's words, 2026-08-25. */
+const PARTS_NOTE      = "parts added and billed out";
+
+/* ── settings ──
+   Admin › Part Picker. The site is the only one with no sensible default: SCA's
+   trtbyterm search is name-only — it returns nothing for "17589" — so the
+   board's saved TRT cannot be turned into an scaLocationID without somebody
+   naming the centre once. Everything else defaults to the captured run and
+   is editable. */
+function partsSettings(){
+  const c = loadConnections().parts || {};
+  /* No `site` — it is not a setting. partsSite() derives it from the centre
+     the board is pointed at; the Admin row that shows it is a readout the
+     route resolves. A stale `c.site` left in the file by an older build is
+     ignored rather than migrated: nothing reads it. */
+  return {
+    tech        : c.tech || { ...parts.DEFAULT_TECH },
+    symptom     : c.symptom || { ...parts.DEFAULT_SYMPTOM },
+    correction  : c.correction || { ...PARTS_CORRECTION },
+    narrative   : c.narrative || PARTS_NARRATIVE,
+    customerNote: c.customerNote || PARTS_NOTE
+  };
+}
+
+function savePartsSettings(patch){
+  const now = partsSettings();
+  const next = { ...now };
+  /* No `site` branch. It is derived from the nav's TRT now, and storing it was
+     a live bug as well as a duplicate: this wrote `site: null` whenever Admin
+     saved with the picker box empty, so editing the note text disarmed the
+     whole tool without saying anything. */
+  if(patch.tech !== undefined){
+    next.tech = patch.tech && patch.tech.userId
+      ? { userId: Number(patch.tech.userId), name: String(patch.tech.name || "").slice(0, 80) }
+      : { ...parts.DEFAULT_TECH };
+  }
+  if(patch.symptom !== undefined && patch.symptom && patch.symptom.symptomCode){
+    next.symptom = {
+      symptomId  : patch.symptom.symptomId ?? null,
+      symptomCode: String(patch.symptom.symptomCode),
+      description: String(patch.symptom.description || "").slice(0, 200),
+      hyper      : String(patch.symptom.hyper || ""),
+      cosmetic   : String(patch.symptom.cosmetic || "")
+    };
+  }
+  if(patch.correction !== undefined && patch.correction && patch.correction.code){
+    next.correction = { code: String(patch.correction.code),
+                        name: String(patch.correction.name || "").slice(0, 200) };
+  }
+  if(patch.narrative    !== undefined)
+    next.narrative = String(patch.narrative || "").trim().slice(0, 200) || PARTS_NARRATIVE;
+  if(patch.customerNote !== undefined)
+    next.customerNote = String(patch.customerNote || "").trim().slice(0, 500) || PARTS_NOTE;
+
+  saveConnections({ parts: next });
+  return partsSettings();
+}
+
+/* Throws rather than defaulting. A Parts run against the wrong centre would
+   open a ticket at somebody else's site, and "we guessed" is not a thing this
+   should ever be able to say. */
+/* ── the site follows the centre the board is set to ──
+
+   Ed's: Part Picker works on whatever centre the Compiler is pointed at, so
+   there is nothing to configure and nothing that can disagree with the nav.
+
+   This used to be picked by hand in Admin, on the reasoning that SCA's site
+   search is by NAME and so a TRT number could not be turned into an
+   scaLocationID. Half right — `trtbyterm` really does return nothing for
+   "17589" — but the board holds the NAME as well as the number, out of
+   Intrepid's directory, and a name search returns rows carrying `trtid` to
+   match on. Measured: "Tesla Service Houston-Cypress" → exactly one row,
+   trtid 17589, and it carries scaLocationID, inventoryLocationID,
+   scaLocationTypeID and functionID together.
+
+   Matched on the trtid, never on the name: the name is only the search term.
+   "Cypress" alone returns two centres, and picking the first would be a coin
+   toss between them.
+
+   Storing it was also a live bug — `savePartsSettings` wrote `site: null`
+   whenever Admin saved with the picker empty, so editing the note text
+   silently disarmed the whole tool.
+
+   Cached per TRT for the run: partsSite() is called five or six times in one
+   open-fill-close and the answer cannot change underneath it. Keyed by trtId,
+   so moving the nav to another centre simply misses the cache. */
+const PARTS_SITE_CACHE = new Map();
+
+async function partsSite(){
+  const trtId = Number(loadConnections().trtId || 0);
+  if(!trtId){
+    const e = new Error("No service centre chosen — pick one in the nav before running Part Picker");
+    e.needsTrt = true; throw e;
+  }
+  if(PARTS_SITE_CACHE.has(trtId)) return PARTS_SITE_CACHE.get(trtId);
+
+  const info = await trtInfo(trtId);
+  const term = (info && (info.full || info.name)) || "";
+  if(!term)
+    throw new Error(`TRT ${trtId} is not in the site directory, so the Service App ` +
+                    `cannot be asked for it by name. Intrepid may be disconnected.`);
+
+  const rows = await scaSites(term);
+  const hit  = (rows || []).find(r => Number(r.trtId) === trtId);
+  if(!hit)
+    throw new Error(`The Service App has no site for TRT ${trtId} (${term}). ` +
+                    `Part Picker cannot run at this centre.`);
+
+  const site = {
+    scaLocationId      : Number(hit.scaLocationId),
+    trtId              : trtId,
+    locationId         : Number(hit.inventoryLocationId),
+    inventoryLocationId: Number(hit.inventoryLocationId),
+    scaLocationTypeId  : Number(hit.typeId ?? 1),
+    functionId         : hit.functionId ?? null,
+    name               : hit.name || term
+  };
+  PARTS_SITE_CACHE.set(trtId, site);
+  return site;
+}
+
+/* ── the gate ──
+
+   Fresh Garage read every time, exactly like the contact switch and the
+   appointment cancel, and for the same reason: a stale tab's `delivered:false`
+   is precisely the input that would do the damage. Fails closed on an index
+   miss, a multi-match or an error. */
+async function partsGate(vin){
+  const und = await isUndelivered(vin);
+  if(!und.ok)
+    throw new Error(`Refusing to open a ticket: ${vin} ${und.why}. ` +
+      `Parts is a pre-delivery tool only — nothing was changed.`);
+  return true;
+}
+
+/* ── resolve a VIN into everything the tree needs ──
+
+   Two Service App reads and one Garage read, no writes. Answers the VIN card
+   and seeds the node defaults.
+
+   The model id trap lives here: customerinformation/search reports
+   `modelId: 17` for this car — the generic "Model Y" — while every downstream
+   call means **36**, the "2025+ Model Y" generation, which is what
+   correctiondetails lists as a separate model entirely. Symptom search,
+   correction search, part search and both create bodies all want 36. It comes
+   off the PROFILE read, never off the search. */
+async function partsResolve(vin){
+  const token = scaToken();
+  const site  = await partsSite();
+
+  await partsGate(vin);
+
+  const found = await parts.findByVin(token, vin, site.scaLocationId);
+  if(!found)
+    throw new Error(`The Service App does not know ${vin} at ${site.name || "this centre"}. ` +
+                    `A car it has never heard of has not been built yet.`);
+
+  const prof = await parts.profileOf(token, found.userID, vin);
+  const modelCode = prof && (prof.modelCode ?? (prof.vehicleDetails || {}).modelCode);
+  if(!modelCode)
+    throw new Error("The Service App gave no model code for this car, so nothing " +
+                    "downstream can be searched for it");
+
+  /* ── is one of ours already open on this car? ──
+
+     Not a warning. An open visit is the ordinary case here — this tool clicks
+     Create service visit, not Check in for immediate service — and the read
+     was dropped for exactly that reason. It is back for the opposite purpose:
+     to find a ticket THIS BOARD opened and hand it back so the run can carry
+     on, instead of opening a second one beside it. Reload the page mid-run and
+     the VIN box picks up where it left off.
+
+     Recognised by the `ZO004` marker in the activity narrative, which
+     `markNarrative` guarantees is there. A visit with open lines that are all
+     somebody else's is not a resume and is not mentioned — it is simply not
+     this tool's business. */
+  let resume = null;
+  try{
+    const open = (await sca.visitsByVin(token, vin)).filter(v => sca.isOpenVisit(v));
+    for(const v of open){
+      const svid = v.serviceVisitID;
+      const rows = await parts.visitActivities(token, svid, site).catch(() => []);
+      const mine = (rows || []).find(w => {
+        const a = w && w.activityDTO;
+        return a && Number(a.activityStatusID) === 1 &&
+               String(a.narrative || "").toUpperCase().includes(ZO_MARK);
+      });
+      if(!mine) continue;
+
+      const a = mine.activityDTO;
+      /* The correction id only exists once a part has been billed. Carried
+         when it is there so a resumed run can still close; absent is simply a
+         ticket that got as far as the tree and no further. */
+      const corr = [].concat(mine.correctionPartDTO || [])[0];
+      resume = {
+        serviceVisitId: svid,
+        serviceVisitNumber: v.serviceVisitNumber || "",
+        activityId: a.activityID,
+        activityNumber: a.activityNumber || "",
+        activityCorrectionId: corr ? corr.activityCorrectionID : null,
+        billed: Boolean(corr && [].concat(corr.partIns || []).length),
+        narrative: a.narrative || ""
+      };
+      break;
+    }
+  }catch{ /* a lookup that cannot check is a lookup, not a failure */ }
+
+  const set = partsSettings();
+  return {
+    vin,
+    userId   : found.userID,
+    modelCode: String(modelCode),
+    modelId  : Number(prof.modelId ?? modelCode),
+    owner    : `${found.firstName || ""} ${found.lastName || ""}`.trim(),
+    model    : found.model || "",
+    colour   : found.color || "",
+    rn       : found.refereneceNumber || "",   // SCA's spelling
+    site, resume,
+    defaults : { symptom: set.symptom, correction: set.correction, tech: set.tech,
+                 narrative: set.narrative, customerNote: set.customerNote }
+  };
+}
+
+/* ── the searches behind the node cards ── */
+
+const partsCorrectionSearch = (term, modelCode, vin) =>
+  parts.correctionSearch(scaToken(), { term, modelCode, vin });
+
+/* Search results carry their own stock figure. Ed's ask, and the reason it is
+   affordable is that both count endpoints take a batch: one extra call each
+   for the whole page rather than one per row. Price is left off here — it is
+   a third round trip and the row is a choice, not a quote. */
+async function partsPartSearch(term, modelId){
+  const token = scaToken(), site = await partsSite();
+  const found = await parts.partSearch(token, { term, modelId, site });
+  return withStock(token, site, found);
+}
+
+/* Attaches free/on-hand/allocated to a list of {partNumber,…} rows.
+   Stock must never take a search down: a row with an unknown count is
+   honest, a search that failed because a count did is not. */
+async function withStock(token, site, rows){
+  const list = (rows || []).filter(r => r && r.partNumber);
+  if(!list.length) return rows || [];
+  const nums = [...new Set(list.map(r => r.partNumber))];
+  const [details, alloc, reqs] = await Promise.all([
+    parts.partDetails(token, site, nums).catch(() => []),
+    parts.partAllocation(token, site, nums).catch(() => []),
+    parts.partRequests(token, site, nums).catch(() => [])
+  ]);
+  const by = rows2 => {
+    const m = new Map();
+    for(const x of (Array.isArray(rows2) ? rows2 : []))
+      m.set(String(x.partNumber || "").toUpperCase(), x);
+    return m;
+  };
+  const D = by(details), A = by(alloc), R = by(reqs);
+  return list.map(r => {
+    const k = String(r.partNumber).toUpperCase();
+    const d = D.get(k) || {}, a = A.get(k) || {}, q = R.get(k) || {};
+    const onHand = d.quantity ?? null;
+    const allocated = a.quantity ?? 0;
+    return { ...r, onHand, allocated, requests: q.quantity ?? 0,
+             free: onHand == null ? null : Math.max(0, onHand - allocated),
+             binLocation: d.binLocation || null };
+  });
+}
+
+const partsTechSearch = term => parts.userSearch(scaToken(), term);
+
+/* sca.js's, unwrapped for the Parts node editor. The Service Visits editor
+   reaches the same function through scaSetSymptom; both tools have to agree
+   about what a symptom is, so neither gets its own copy. */
+const scaSymptomDetail = args => sca.symptomDetail(scaToken(), args);
+
+/* Keyed on the CORRECTION CODE, which is what makes the part propose itself
+   rather than being typed. Flattened out of SCA's {role, variance, parts[]}
+   grouping — the role rides along on each row because "Required" and
+   "Vinspecific" are worth showing next to a part somebody did not choose.
+
+   It is a suggestion and stays one: the key card is right often enough to
+   offer and wrong often enough that the card carries a Remove and Replace
+   beside it. */
+async function partsRecommend(vin, modelId, correctionCode){
+  const token = scaToken(), site = await partsSite();
+  const groups = await parts.partsRecommended(token, { vin, modelId, correctionCode, site });
+  const flat = [];
+  for(const g of (Array.isArray(groups) ? groups : []))
+    for(const p of (g.parts || []))
+      flat.push({ partNumber: p.partNumber, name: p.name || "",
+                  status: p.partStatus || "", isSerialized: Boolean(p.isSerialized),
+                  procurement: p.partProcurementType || "Allowed",
+                  role: g.role || "", variance: g.variance || "" });
+  return withStock(token, site, flat);
+}
+
+/* ── how many can I actually have ──
+
+   Ed's correction, and it matters more than it looks. Swift's on-hand figure
+   for a key card at Cypress is 2 and the answer on his screen is **nought**,
+   because both are allocated to other jobs. On hand is not availability.
+
+       free = onHand − allocated
+
+   Measured live on three parts: key card 2 − 2 = 0 (matches his screen),
+   mobile connector 17 − 0 = 17, superseded key card 0 − 0 = 0.
+
+   Requests are a third number and are NOT subtracted — 13 outstanding
+   requests against 2 cards is a backlog, not a claim on the shelf. Shown
+   beside the count because it answers "and is more coming", never folded
+   into it.
+
+   The write is the exception: SCA's own createparts sends the ON-HAND figure
+   as availableQuantity (18 when Swift said 18), so partsBuild echoes that and
+   only the display uses `free`. Two numbers, two jobs. */
+async function partsStock(partNumber){
+  const token = scaToken(), site = await partsSite();
+  const [details, prices, alloc, reqs] = await Promise.all([
+    parts.partDetails(token, site, [partNumber]).catch(() => []),
+    parts.partPrice(token, site, [partNumber]).catch(() => []),
+    parts.partAllocation(token, site, [partNumber]).catch(() => []),
+    parts.partRequests(token, site, [partNumber]).catch(() => [])
+  ]);
+  const pick = (rows, pn) => (Array.isArray(rows) ? rows : []).find(x =>
+    String(x.partNumber || "").toUpperCase() === String(pn).toUpperCase()) || {};
+  const d = pick(details, partNumber);
+  const p = pick(prices,  partNumber);
+  const a = pick(alloc,   partNumber);
+  const q = pick(reqs,    partNumber);
+  const onHand    = d.quantity ?? d.availableQuantity ?? null;
+  const allocated = a.quantity ?? 0;
+  return {
+    onHand, allocated, requests: q.quantity ?? 0,
+    free: onHand == null ? null : Math.max(0, onHand - allocated),
+    partNumber,
+    binLocation  : d.binLocation || null,
+    description  : p.partDescription || d.partDescription || "",
+    commodityCode: p.commodityCode || null,
+    price        : p.unitPrice ?? p.adjustedUnitPrice ?? null,
+    currency     : p.currencyCode || "USD"
+  };
+}
+
+/* ── the pay-type rule ──
+
+   Ed's rule, and the one place the tool is opinionated: always Transportation
+   Damage; when it is not available, Rectification, and say so.
+
+   It has to be asked of the ACTIVITY, not of the code and not of the
+   vocabulary. `lookup/paytypes` is 25 entries and always contains both, so a
+   check against it could never fail and the fallback could never fire.
+   `correctiondetails` is better but still code-level — it listed 14 for this
+   code. The per-activity call narrowed the same code to four. That is the
+   only list that can decide this. */
+async function partsChoosePayType(token, { activityId, correctionCode }){
+  const allowed = await parts.payTypesFor(token, { activityId, correctionCode });
+  const has = id => allowed.some(p => Number(p.id) === id);
+  const nameOf = id => (allowed.find(p => Number(p.id) === id) || {}).name || "";
+
+  if(has(parts.PAYTYPE_PREFERRED))
+    return { id: parts.PAYTYPE_PREFERRED, name: nameOf(parts.PAYTYPE_PREFERRED), note: "" };
+
+  if(has(parts.PAYTYPE_FALLBACK))
+    return { id: parts.PAYTYPE_FALLBACK, name: nameOf(parts.PAYTYPE_FALLBACK),
+             note: "Transport Damage not an option on this VIN, defaulting to Rectification" };
+
+  throw new Error("Neither Transportation Damage nor Rectification is available on this " +
+    "activity — the Service App offers only: " +
+    (allowed.map(p => p.name).join(", ") || "nothing") + ". Nothing was billed.");
+}
+
+/* Finds one activity's wrapper in a visit-activities read. The read returns
+   `{data:[{vin,userID,activityDTO,correctionPartDTO,…}]}` and the wrapper is
+   what both update PUTs send back, whole. */
+const wrapperFor = (rows, activityId) =>
+  (rows || []).find(w => w && w.activityDTO &&
+    Number(w.activityDTO.activityID) === Number(activityId)) || null;
+
+/* ══ Step 1 — open the ticket ══  (the swipe, in the VIN dialog)
+
+   Visit, contacts, activity. Split from the rest at Ed's line: the popup holds
+   the VIN and one slide, and everything after happens on the page against a
+   ticket that already exists.
+
+   The split is not only a layout choice — it makes the pay type honest. Which
+   pay types are legal is a question about an ACTIVITY, so while the activity
+   was still hypothetical the tree could only promise Transportation Damage and
+   find out afterwards. With the activity open before the tree is drawn, the
+   Pay Type card reads the real answer and the Rectification fallback shows up
+   before anything is billed rather than in the receipt. */
+async function partsOpen({ vin, narrative }){
+  const token = scaToken();
+  const site  = await partsSite();
+  const done  = [];
+  const step  = (name, detail) => { done.push({ name, detail: detail || "" }); };
+
+  /* Re-gated here and not trusted from the resolve: the dialog may have been
+     on screen a while, and this is the last moment before a real write. */
+  await partsGate(vin);
+
+  const info = await parts.findByVin(token, vin, site.scaLocationId);
+  if(!info) throw new Error(`The Service App no longer finds ${vin} — nothing was changed`);
+  const prof = await parts.profileOf(token, info.userID, vin);
+  const modelCode = String(prof.modelCode ?? (prof.vehicleDetails || {}).modelCode);
+  const modelId   = Number(prof.modelId ?? modelCode);
+
+  const fail = (whereAt, msg) => {
+    const e = new Error(msg); e.partial = done.slice(); e.failedAt = whereAt; throw e;
+  };
+
+  /* 1 — the visit */
+  const { serviceVisitId, caseId } =
+    await parts.createVisit(token, { userId: info.userID, vin, modelCode, site });
+  step("Ticket opened", `visit ${serviceVisitId}`);
+
+  /* 2 — contacts to Tesla Motors Inventory.
+     The board's own switch, not the captured savecontacts call: it does main
+     AND billing AND the billing address, reads each one back, and reads the
+     Tesla record off the car so a board at any centre writes the right one.
+     The captured call hardcoded North America's. */
+  try{
+    const c = await scaSwitchContactToTesla({ vin, serviceVisitId });
+    step("Contacts switched", c.now + (c.addressSet ? " · billing address set" : ""));
+  }catch(err){
+    fail("contacts", `The ticket opened as visit ${serviceVisitId}, but the contacts ` +
+                     `could not be switched to Tesla: ${err.message}`);
+  }
+
+  /* 3 — the activity */
+  let activityId = null, activityNumber = "";
+  try{
+    const a = await parts.createActivity(token, {
+      userId: info.userID, vin, modelCode, site,
+      // Marked here, at the one place an activity is created, so no caller can
+      // produce a ticket this board will not recognise later.
+      narrative: markNarrative(narrative || partsSettings().narrative) });
+    activityId = a.activityId; activityNumber = a.activityNumber;
+    await parts.attachActivity(token, serviceVisitId, activityId);
+    step("Activity added", activityNumber || String(activityId));
+  }catch(err){ fail("activity", err.message); }
+
+  return { ok: true, vin, serviceVisitId, caseId, activityId, activityNumber,
+           userId: info.userID, modelCode, modelId, site, steps: done };
+}
+
+/* Which pay types this activity will actually take, and which one the rule
+   picks. Called from the page the moment a correction code is chosen, so the
+   card can say "defaulting to Rectification" before the drag rather than
+   after the bill. */
+async function partsPayTypeFor(activityId, correctionCode){
+  return partsChoosePayType(scaToken(), { activityId, correctionCode });
+}
+
+/* ══ Step 2 — fill it in and bill the part ══  (the drag, on the page)
+
+   Symptom, correction, part, pick. Runs against a ticket that already exists,
+   so `serviceVisitId` and `activityId` come in rather than being made here.
+   Stops at the first step that cannot be proved and reports what already
+   landed: these writes cannot be atomic, and a half-filled ticket must be
+   reported as itself rather than as a failure that did nothing. */
+async function partsFill({ vin, serviceVisitId, activityId, symptom, correctionCode, part }){
+  const token = scaToken();
+  const site  = await partsSite();
+  const done  = [];
+  const step  = (name, detail) => { done.push({ name, detail: detail || "" }); };
+
+  await partsGate(vin);
+
+  /* The ticket must still be the one the page thinks it is, on the car it
+     thinks it is. A tab left open through a shift is exactly the input this
+     is here for. */
+  const visit = await sca.visitById(token, serviceVisitId);
+  if(!visit || String(visit.vin || "").toUpperCase() !== String(vin).toUpperCase())
+    throw new Error(`Visit ${serviceVisitId} is not on ${vin} — nothing was changed`);
+
+  const prof = await parts.profileOf(token, visit.userId ?? visit.userID, vin)
+    .catch(() => null);
+  const modelCode = String((prof && (prof.modelCode ?? (prof.vehicleDetails || {}).modelCode))
+                            ?? visit.modelCode);
+  const modelId   = Number((prof && prof.modelId) ?? modelCode);
+
+  const fail = (whereAt, msg) => {
+    const e = new Error(msg); e.partial = done.slice(); e.failedAt = whereAt; throw e;
+  };
+
+  /* 1 — the symptom, onto the wrapper the visit read gives back.
+     cosmeticIssue and hyperSymptom travel with the symptom and are not in the
+     search results, so they come from the caller's resolved symptom (which the
+     UI fills from the single-symptom GET) rather than being left behind. */
+  try{
+    const rows = await parts.visitActivities(token, serviceVisitId, site);
+    const w = wrapperFor(rows, activityId);
+    if(!w) fail("symptom", "The activity was added but the Service App did not list it back");
+    w.activityDTO.symptomID          = symptom.symptomId ?? w.activityDTO.symptomID;
+    w.activityDTO.symptomCode        = String(symptom.symptomCode);
+    w.activityDTO.symptomDescription = symptom.description || "";
+    w.activityDTO.hyperSymptom       = symptom.hyper || "";
+    w.activityDTO.cosmeticIssue      = symptom.cosmetic || "";
+    const up = await parts.updateActivity(token, w, { preventOverride: false });
+    if(!up.ok) fail("symptom", `The symptom would not save — ${up.why}`);
+    step("Symptom set", symptom.description || String(symptom.symptomCode));
+  }catch(err){ if(err.partial) throw err; fail("symptom", err.message); }
+
+  /* 2 — the correction code, with the pay type decided against THIS activity */
+  let activityCorrectionId = null, payType = null;
+  try{
+    const det = await parts.correctionDetails(token, { correctionCode, modelCode, site });
+    const val = await parts.validateCorrection(token, { correctionCode, site, modelId });
+    if(!val.ok) fail("correction", `The Service App rejected that correction code — ${val.why}`);
+
+    payType = await partsChoosePayType(token, { activityId, correctionCode });
+
+    const rows = await parts.visitActivities(token, serviceVisitId, site);
+    const w = wrapperFor(rows, activityId);
+    if(!w) fail("correction", "Could not read the activity back to add the correction to it");
+    w.correctionPartDTO = [parts.correctionLine(det, payType.id)];
+    const res = await parts.updateCorrection(token, w);
+    if(!res.ok) fail("correction", `The correction would not save — ${res.why}`);
+
+    /* The id the rest of the run hangs off — the part is billed to it and the
+       technician is saved against it. Read from the record, never assumed. */
+    const back = await parts.visitActivities(token, serviceVisitId, site);
+    const bw = wrapperFor(back, activityId);
+    const line = ((bw && bw.correctionPartDTO) || [])
+      .find(c => String(c.correctionCode) === String(correctionCode));
+    activityCorrectionId = line && line.activityCorrectionID;
+    if(!activityCorrectionId)
+      fail("correction", "The correction saved but the Service App did not give it an id, " +
+                         "so nothing can be billed to it");
+    step("Correction set", `${det.name} · ${payType.name}` +
+                           (payType.note ? ` — ${payType.note}` : ""));
+  }catch(err){ if(err.partial) throw err; fail("correction", err.message); }
+
+  /* 6 — the part */
+  let partLine = null;
+  try{
+    const stock = await partsStock(part.partNumber);
+
+    /* ── nothing free, nothing billed ──
+
+       Ed's rule, and it is enforced here as well as on the page for the usual
+       reason: the page checked when the part was chosen, and the shelf can
+       move between choosing and dragging. Free is on-hand minus allocated —
+       Cypress's two key cards are both spoken for, so the answer is nought and
+       this refuses.
+
+       It refuses BEFORE createparts, so a blocked part leaves a ticket with a
+       correction and no line rather than a bad line to unpick. */
+    if(stock.free != null && stock.free <= 0)
+      fail("part", `${part.partNumber} is not in stock at ` +
+        `${site.name || "this centre"} — ${stock.onHand ?? 0} on hand, ` +
+        `${stock.allocated ?? 0} already allocated. Nothing was billed.`);
+
+    const made = await parts.createParts(token, {
+      activityCorrectionPartID: 0,
+      partNumber: part.partNumber, allocatedPartNumber: part.partNumber,
+      name: part.name || "", quantity: Number(part.quantity || 1),
+      /* ON HAND here, not `free`. SCA's own createparts sends the shelf
+         figure, and the display's availability calculation is a different
+         question from what the line records. */
+      availableQuantity: stock.onHand ?? 0, allocatedQuantity: 0,
+      enabled: true, price: stock.price ?? 0,
+      commodityCode: stock.commodityCode || "",
+      isSerialized: Boolean(part.isSerialized), serialNumbers: [],
+      isPhantom: false, quantityPicked: 0,
+      partProcurementType: part.procurement || "Allowed",
+      isDraftPart: false, isAutoAllocatePart: true, isApprovalRequired: false,
+      partDiscount: 0, partDiscountType: 0, partSourceType: 1,
+      servicevisitId: serviceVisitId, serviceVisitID: serviceVisitId,
+      correctionCode: String(correctionCode), vin,
+      activityId: String(activityId), locationId: site.locationId,
+      carWontDrive: false, timeOffset: new Date().getTimezoneOffset(),
+      activityCorrectionID: activityCorrectionId,
+      isBatteryPack: false, modelCode,
+      payTypeID: payType.id, userConfirmedDuplicateHVBOrder: false
+    });
+    partLine = made;
+    step("Part billed", `${part.partNumber} · ${part.name || ""}`.trim());
+
+    /* ── picking it, judged from the record ──
+
+       The line is `isDraftPart: true` the moment createparts makes it, and a
+       pick fired straight afterwards does not always take. SCA's own run left
+       ~110 calls between the two. So: pick, read the line back, and if it is
+       still unpicked wait and pick once more.
+
+       The read-back is the point. A pick that answered ok and did not take is
+       what put 48193134 three steps up the ladder before the close refused
+       with "Please pick parts before closing the activity" — a message a long
+       way from the thing that went wrong. */
+    let pid = made && made.activityCorrectionPartID;
+    const lineNow = async () => {
+      const lines = await parts.partLinesOn(token, activityId, site).catch(() => []);
+      return lines.find(p => pid
+        ? Number(p.activityCorrectionPartID) === Number(pid)
+        : String(p.partNumber) === String(part.partNumber)) || null;
+    };
+
+    // createparts normally returns the id; the record has it either way.
+    if(!pid){
+      const found = await lineNow();
+      pid = found && found.activityCorrectionPartID;
+    }
+
+    if(!pid){
+      step("Part NOT picked", "the Service App did not give the line an id to pick");
+    }else{
+      const attempt = async () => {
+        await parts.prnDetail(token, serviceVisitId, [pid]).catch(() => null);
+        return parts.pick(token, {
+          serviceVisitId, activityId, activityCorrectionId,
+          activityCorrectionPartId: pid,
+          binLocation: stock.binLocation, isSerialized: Boolean(part.isSerialized)
+        });
+      };
+      const isPicked = l => Boolean(l && Number(l.quantityPicked) >= Number(l.quantity || 1));
+
+      let said = await attempt();
+      let line = await lineNow();
+      if(!isPicked(line)){
+        await new Promise(r => setTimeout(r, 2500));
+        said = await attempt();
+        line = await lineNow();
+      }
+
+      /* Not fatal. The part is on the ticket either way, and an unpicked line
+         is something to finish by hand — but it IS said plainly, because the
+         close will refuse on it. */
+      step(isPicked(line) ? "Part picked" : "Part NOT picked",
+           isPicked(line)
+             ? (stock.binLocation || "")
+             : (said.why || "the line reads back unpicked") +
+               " — the close will refuse until it is picked");
+    }
+  }catch(err){ if(err.partial) throw err; fail("part", err.message); }
+
+  /* The customer repair note, written every time and never asked about.
+
+     Some tickets refuse to close without one and some do not care, and the
+     endpoint that tells them apart is the one call in the whole capture whose
+     envelope `success` came back true on one request and false on the next
+     identical one. Ed's call: stop asking. An extra note on a ticket that did
+     not need one is harmless; a missing one blocks the close.
+
+     Not fatal, and the same argument as the unpicked part above: the part is
+     billed either way, and a note that failed to write is something to add by
+     hand, not a reason to report a built ticket as a failure. It reads back
+     off the record rather than trusting the 200 — this is SCA. */
+  const noteText = partsSettings().customerNote;
+  try{
+    /* `/case/api/note/<activityId>` CREATES; it does not upsert. On an
+       activity that already carries one it answers **HTTP 200 with
+       success:false, "External notes exists for activity."** — proven live on
+       125807826, which already had Ed's. That refusal is not a failure: what
+       the close needs is A note, and there is one. So the answer comes from
+       reading the activity back, never from the response to the write. */
+    const wrote = await parts.addCustomerNote(token, activityId, noteText);
+
+    /* The second half of SCA's own save, and only after a create that landed:
+       firing it behind a refused write would record a generated/edited pair
+       that does not match the note actually on the ticket. */
+    if(wrote.ok)
+      await parts.saveGeneratedNotes(token, activityId, noteText).catch(() => null);
+
+    const back  = await parts.customerNoteOn(token, activityId).catch(() => null);
+    const notes = Array.isArray(back) ? back : [];
+    const mine  = notes.some(n => String(n.description || "").trim() === noteText.trim());
+
+    if(mine)
+      step("Customer note written", noteText);
+    else if(notes.length)
+      /* Somebody else's note, and it counts. Its text is printed rather than
+         ours, because ours is not what is on the car. */
+      step("Customer note already on the ticket",
+           String(notes[0].description || "").slice(0, 120));
+    else
+      /* Worded with a NOT on purpose: `looksSkipped` on the page greys
+         anything containing one, and a note SCA claimed to take but will not
+         read back must not carry the same tick as one that is provably
+         on the activity. */
+      step("Customer note NOT confirmed",
+           (wrote.why || "SCA accepted it") + " — but no note reads back; add one before closing");
+  }catch(err){
+    step("Customer note NOT written", `${err.message} — add it by hand before closing`);
+  }
+
+  return {
+    ok: true, vin, serviceVisitId, activityId,
+    activityCorrectionId, payType, part: partLine, steps: done,
+    noteText
+  };
+}
+
+/* ══ Cancel it ══  (the lever, top right)
+
+   The undo for a ticket that should never have been opened. **This is the one
+   tool on the board allowed to cancel a service visit**, and it is allowed
+   because of what a Part Picker ticket is: something this board created
+   minutes ago on an undelivered inventory car, with the contacts already
+   switched off the customer. Nowhere else may do this — Service Visits
+   cancels the TSS *booking* and leaves the visit alone, which is a different
+   act with a different blast radius.
+
+   It is still NOT `cancelServiceVisits`. That call answers 200 while flipping
+   tickets to status 3 behind your back and is deleted from this board. SCA's
+   own cancel is the ordinary motion PUT to 10 plus a reason record, and that
+   is what this sends. See parts.js.
+
+   Reason is fixed at **Parts delays** (feedbackCategoryID 30), Ed's call: a
+   parts ticket cancelled from here is cancelled because the part did not
+   happen. */
+async function partsCancel({ vin, serviceVisitId }){
+  const token = scaToken();
+  const site  = await partsSite();
+  const done  = [];
+  const step  = (name, detail, skip) =>
+    done.push({ name, detail: detail || "", ...(skip ? { skip: true } : {}) });
+
+  /* Same gate as every other write here, and for the same reason: a stale tab
+     is exactly the input that would cancel something real. */
+  await partsGate(vin);
+
+  const visit = await sca.visitById(token, serviceVisitId);
+  if(!visit || String(visit.vin || "").toUpperCase() !== String(vin).toUpperCase())
+    throw new Error(`Visit ${serviceVisitId} is not on ${vin} — nothing was changed`);
+
+  if(Number(visit.serviceVisitMotionStatusID) === parts.MOTION_CANCELLED){
+    step("Already cancelled", `visit ${serviceVisitId} was cancelled before this`, true);
+    return { ok: true, vin, serviceVisitId, cancelled: true, steps: done };
+  }
+
+  const fail = (whereAt, msg) => {
+    const e = new Error(msg); e.partial = done.slice(); e.failedAt = whereAt; throw e;
+  };
+
+  /* Straight to 10 first. SCA's own run went back to Preparation and then
+     cancelled, but that visit was partway up the ladder; a ticket opened by
+     mistake is still at 25 and the extra write is noise. The fallback is the
+     captured order, used only when the direct move is refused. */
+  let r = await parts.setMotion(token,
+    { serviceVisitId, motion: parts.MOTION_CANCELLED, serviceVisitDateTime: null });
+  if(!r.ok){
+    const back = await parts.setMotion(token,
+      { serviceVisitId, motion: 25, serviceVisitDateTime: null });
+    if(back.ok) step("Returned to Preparation", "the direct cancel was refused");
+    r = await parts.setMotion(token,
+      { serviceVisitId, motion: parts.MOTION_CANCELLED, serviceVisitDateTime: null });
+  }
+  if(!r.ok) fail("motion:10", `The Service App would not cancel the visit — ${r.why}`);
+  step("Visit cancelled", `visit ${serviceVisitId}`);
+
+  /* The reason, and not fatal: a cancelled visit with no reason recorded is
+     untidy, a visit left open because the reason failed is worse. */
+  const fb = await parts.addFeedback(token, {
+    serviceVisitId, category: parts.FEEDBACK.PARTS_DELAY,
+    serviceVisitDateTime: visit.serviceVisitDateTime || null
+  }).catch(err => ({ ok: false, why: err.message }));
+  step(fb.ok ? "Reason recorded" : "Reason NOT recorded",
+       fb.ok ? parts.FEEDBACK.PARTS_DELAY.text : fb.why);
+
+  /* What actually happened, off the record. Cancelling a visit does NOT
+     always cancel what is on it — measured on 48192893, where the courtesy
+     line went to status 3 and the parts activity stayed at status 1 — so the
+     lines are named individually rather than assumed away. */
+  const after = await sca.visitById(token, serviceVisitId).catch(() => null);
+  const cancelled = after
+    ? Number(after.serviceVisitMotionStatusID) === parts.MOTION_CANCELLED
+    : false;
+
+  let openLines = [];
+  try{
+    const rows = await parts.visitActivities(token, serviceVisitId, site);
+    openLines = (rows || []).map(w => w.activityDTO)
+      .filter(a => a && Number(a.activityStatusID) === 1);
+  }catch{ /* the visit is cancelled either way */ }
+
+  if(openLines.length)
+    step("Lines left open", openLines.map(a => a.narrative || a.activityNumber).join(", ") +
+         " — back in outstanding work, not cancelled");
+  else
+    step("No lines left open", "nothing of this visit is still outstanding", true);
+
+  return {
+    ok: true, vin, serviceVisitId, cancelled,
+    motion: after ? after.serviceVisitMotionStatusID : null,
+    status: after ? after.serviceVisitStatusID : null,
+    openLines: openLines.map(a => ({ activityId: a.activityID,
+                                     number: a.activityNumber || "",
+                                     narrative: a.narrative || "" })),
+    steps: done
+  };
+}
+
+/* ══ Step 3 — close it out ══
+   The slider. Walks the ladder, drops the courtesy line, sets the technician,
+   closes the activity and takes the visit to Delivered.
+
+   The order below is the captured order and the three refusals in it are the
+   reason it is not the obvious one: Prepared has to precede the estimated
+   completion time, and the technician has to follow the removal rather than
+   precede it. */
+async function partsClose({ vin, serviceVisitId, activityId, activityCorrectionId,
+                            technicianId }){
+  const token = scaToken();
+  const site  = await partsSite();
+  const done  = [];
+  /* The third argument marks a step the run deliberately did not take, so
+     the page can grey it without having to read the wording. */
+  const step  = (name, detail, skip) =>
+    done.push({ name, detail: detail || "", ...(skip ? { skip: true } : {}) });
+
+  await partsGate(vin);
+
+  /* The visit must still be the one we built, on the car we think it is. */
+  const visit = await sca.visitById(token, serviceVisitId);
+  if(!visit || String(visit.vin || "").toUpperCase() !== String(vin).toUpperCase())
+    throw new Error(`Visit ${serviceVisitId} is not on ${vin} — nothing was changed`);
+
+  const fail = (whereAt, msg) => {
+    const e = new Error(msg); e.partial = done.slice(); e.failedAt = whereAt; throw e;
+  };
+
+  /* ── the date the ladder has to carry ──
+
+     There is nothing to echo. A Parts ticket is never booked, so the visit's
+     `serviceVisitDateTime` is null and STAYS null: proven on 48193134, which
+     sat at Prepared with a completion time already set and still refused
+     Arrived for "The service visit date has to be provided". The first cut
+     read the date off the record and carried it forward, which works for a
+     booked visit and can only ever carry null here.
+
+     SCA's own UI sends a value it makes up, and in the capture Ed typed it.
+     **Ed's rule for every run from here: the last day of the current month.**
+     That also corrects a number this file had guessed at — the captured
+     completion time was 8/31 on a run made on 8/25, which read as "six days
+     out" and would have been wrong on any other date of the month.
+
+     One instant, TWO renderings, both copied rather than normalised: Arrived
+     took `2026/8/25 19:45:00` and every step after it took
+     `8/25/2026 7:45:00 PM`. Which of the two each step will accept is not
+     knowable without spending another live ticket to find out. */
+  const pad  = n => String(n).padStart(2, "0");
+  const slashDate = d =>
+    `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const usDate = d => {
+    const h = d.getHours() % 12 || 12;
+    return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()} ` +
+           `${h}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ` +
+           `${d.getHours() < 12 ? "AM" : "PM"}`;
+  };
+
+  const now = new Date();
+  // Day 0 of next month is the last day of this one, and it handles February.
+  const stamp = new Date(now.getFullYear(), now.getMonth() + 1, 0,
+                         now.getHours(), now.getMinutes(), 0, 0);
+
+  /* A visit that DOES carry a date still wins — echoing a real booking beats
+     overwriting it with the end of the month. */
+  const booked    = visit.serviceVisitDateTime || null;
+  const whenSlash = booked || slashDate(stamp);
+  const whenUs    = booked || usDate(stamp);
+
+  /* ── the ladder is resumable ──
+
+     It used to start at Prepared every time, so a run that stopped halfway
+     could not be finished: re-closing 48193134 from Service answered "Current
+     motion status is Service, cannot change to Prepared" and the ticket was
+     stranded where no button could reach it. A rung the visit is already past
+     is skipped and said so, rather than re-sent and refused.
+
+     A motion that is not on this ladder at all — a fresh visit sits at 25 —
+     is not "past" anything, so the climb starts from the bottom. */
+  const RUNGS = [29, 2, 8, 39, 7, 9];
+  let atMotion = Number(visit.serviceVisitMotionStatusID);
+
+  const climb = async (motion, name, withActivities, when) => {
+    const here = RUNGS.indexOf(atMotion), target = RUNGS.indexOf(motion);
+    if(here >= 0 && target >= 0 && target <= here){
+      step(name, "already past this rung", true);
+      return;
+    }
+    let r = await parts.setMotion(token,
+      { serviceVisitId, motion, serviceVisitDateTime: when, withActivities });
+
+    /* Delivered refuses until SCA has generated the final invoice, and the
+       invoice is a side effect of the rungs below it rather than anything the
+       board can ask for — there is no invoice WRITE anywhere in the capture,
+       only reads. Measured on 48193134: refused at 02:56:0x, invoice
+       3000S0018131692 existed at 02:56:19. So the answer is to wait for it,
+       once, rather than to invent a call that generates it. */
+    if(!r.ok && /invoice/i.test(r.why || "")){
+      await new Promise(z => setTimeout(z, 6000));
+      r = await parts.setMotion(token,
+        { serviceVisitId, motion, serviceVisitDateTime: when, withActivities });
+    }
+
+    if(!r.ok) fail("motion:" + motion, `Could not set the ticket to ${name} — ${r.why}`);
+    atMotion = motion;
+    step(name, "");
+  };
+
+  /* 1 — Prepared, and only then the completion time. Prepared is the one step
+     the capture sent with a null date, and the completion time is refused
+     before it: "cannot be set before the Prepared Motion Status". */
+  await climb(29, "Prepared", false, null);
+
+  const etcText = usDate(stamp);
+  const e1 = await parts.setEtc(token, serviceVisitId, etcText);
+  step(e1.ok ? "Completion time set" : "Completion time NOT set", e1.ok ? etcText : e1.why);
+
+  await climb(2, "Arrived", false, whenSlash);
+  await climb(8, "Service", false, whenUs);
+
+  /* 2 — every OTHER line on the ticket, whatever it is.
+
+     Ed's rule, and the reason is what this tool is for: a Parts ticket exists
+     to bill one part, so the only activity left on it should be the one the
+     board put there. SCA's automation adds more than the courtesy inspection
+     — 7SAYGDEE2TA680399 came up with a demo inspection as well — so "the
+     courtesy line" was never the right name for this step even back when it
+     did already remove them all.
+
+     Safe to do unconditionally because `removeactivities` is not a cancel: it
+     returns the line to OUTSTANDING WORK (SCA's own label for it,
+     `activity_remove_and_return_to_outstanding_work`). The activity survives,
+     detached from this visit, and can be picked up on another one.
+
+     Removal comes BEFORE the technician: a correction on a removed activity
+     refuses the owner save, and an update to a removed activity does not
+     exist. */
+  try{
+    const others = async () => {
+      const rows = await parts.visitActivities(token, serviceVisitId, site);
+      return (rows || [])
+        .map(w => w.activityDTO)
+        .filter(a => a && Number(a.activityID) !== Number(activityId));
+    };
+    const name = a => a.narrative || a.activityNumber || String(a.activityID);
+
+    const extra = await others();
+    if(!extra.length){
+      step("No other lines", "the ticket carries only the part line", true);
+    }else{
+      const named = extra.map(name).join(", ");
+      await parts.removeActivities(token, serviceVisitId, extra.map(a => a.activityID))
+        .catch(() => null);
+
+      /* One stubborn line takes a whole batch with it, so whatever survived
+         the batch is asked for on its own. Judged by re-reading the visit
+         either way — this is SCA, and a 200 is not an answer. */
+      let left = await others();
+      if(left.length){
+        for(const a of left)
+          await parts.removeActivities(token, serviceVisitId, [a.activityID])
+            .catch(() => null);
+        left = await others();
+      }
+
+      step(left.length ? "Other lines NOT all removed" : "Other lines removed",
+           left.length
+             ? left.map(name).join(", ") + " — still on the ticket"
+             : named);
+    }
+  }catch(err){ step("Other lines NOT removed", err.message); }
+
+  /* 3 — the technician, against the correction that is still there */
+  if(technicianId){
+    const r = await parts.setOwner(token, activityCorrectionId, technicianId);
+    if(r.ok){
+      const owners = await parts.ownersOf(token, activityCorrectionId).catch(() => []);
+      const got = owners.find(o => Number(o.ownerID) === Number(technicianId));
+      step(got ? "Technician set" : "Technician NOT confirmed",
+           got ? (got.ownerName || "") : "the Service App did not list them back");
+    }else{
+      step("Technician NOT set", r.why);
+    }
+  }
+
+  /* 4 — close the activity, then the visit */
+  const ca = await parts.closeActivity(token, activityId);
+  if(ca.ok){
+    step("Activity closed", "");
+  }else{
+    /* "Activity already closed" is a repeat, not a failure — the same
+       resumability point as the ladder above, one level down. Judged from the
+       record rather than the message: activityStatusID 2 is closed. */
+    const w  = await parts.activityDetail(token, activityId, site).catch(() => null);
+    const st = w && w.activityDTO ? Number(w.activityDTO.activityStatusID) : null;
+    if(st === parts.ACTIVITY_CLOSED) step("Activity closed", "already closed", true);
+    else fail("close-activity", `The activity would not close — ${ca.why}`);
+  }
+
+  await climb(39, "Service Complete", true, whenUs);
+  await climb(7,  "Ready for Pick Up", false, whenUs);
+
+  const ack = await parts.ackUnpaidBalance(token, serviceVisitId);
+  if(ack.ok) step("Balance acknowledged", "");
+
+  await climb(9, "Delivered", false, whenUs);
+
+  /* The record, not the responses. Every write above judged on `success`; this
+     is the only thing that proves the ticket is actually where it says. */
+  const final = await sca.visitById(token, serviceVisitId).catch(() => null);
+  return {
+    ok: true, vin, serviceVisitId, steps: done,
+    motion: final ? final.serviceVisitMotionStatusID : null,
+    status: final ? final.serviceVisitStatusID : null,
+    closed: Boolean(final && Number(final.serviceVisitMotionStatusID) === 9)
+  };
+}
+
 module.exports = {
   CONFIG, loadConnections, saveConnections, adminPassword, savedTrtId, savedOffsiteTrtId,
   intrepidCookie, intrepidGet, intrepidPost, appointmentsOn,
@@ -4497,6 +5574,12 @@ module.exports = {
   svCallSettings, saveSvCallWebhook, sendSvCall, sendBodyCall,
   postVriList, postVriControlCard, pushVri, teamsStatus, startTeamsLoop, stopTeamsLoop,
   scaVisitState, isUndelivered,
+  /* Parts — the fifth tool. partsBuild is the drag, partsClose is the slider;
+     everything else feeds the node cards. */
+  partsSettings, savePartsSettings, partsSite, partsResolve,
+  partsCorrectionSearch, partsPartSearch, partsTechSearch, partsRecommend, partsStock,
+  scaSymptomDetail,
+  partsOpen, partsFill, partsClose, partsCancel, partsPayTypeFor,
   scaPhotoStream: sca.photoStream,
   scaSignInStatus: sca.signInStatus, scaCancelSignIn: sca.cancelSignIn,
   scaBrowserStatus: sca.browserStatus,

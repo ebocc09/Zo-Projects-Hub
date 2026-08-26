@@ -36,9 +36,9 @@ vin,delivery_date,fsd_miles_post_delivery
 
 |  | basic *(default)* | advanced |
 |---|---|---|
-| sources | Garage alone | Garage + Intrepid |
-| credential | none | `cogs-authorization` cookie |
-| gives | VIN, delivery date and time, model, FSD miles | the same, plus reference number, **delivery host**, and per-host filtering and stats |
+| sources | Garage alone | Garage + Intrepid + Tesla OS |
+| credential | none | `cogs-authorization` cookie; Tesla OS signs itself in |
+| gives | VIN, delivery date and time, model, FSD miles | the same, plus reference number, **delivery host**, **FSD Sub-Intent**, and per-host filtering and stats |
 | a day's run | under a minute | the same, plus a lookup per car |
 
 **Advanced adds columns and nothing else.** The mileage is measured identically
@@ -318,6 +318,38 @@ delivery timestamp** — not the latest value (one car sat at `15952` through
 handoff and moved to `9059` five hours later), and not the value near the
 `delivered` flag, which lags the real handoff by five to seven hours and reads
 `yes` all window on used inventory.
+
+#### A delivery date is not proof of a delivery
+
+`delivery_date_epoch` gets stamped on cars nobody has been handed: an
+appointment moved, a car pulled into repair, an order edited. They arrive
+through VRL enumeration looking exactly like real deliveries.
+
+The tell is `delivery_details`. It is **wiped at handover** — the same property
+that made VRL enumeration possible in the first place — so a car still carrying
+one, with `scheduled_delivery_date` in the future, demonstrably has not gone
+out. Those are dropped from the day before anything is measured, and counted in
+a notice so the total never moves without saying why.
+
+Read off **Garage alone**, deliberately. "It has no Intrepid appointment" is
+the easier test and is wrong twice: it is unavailable in basic mode, where it
+would empty the whole report, and in advanced mode it would also discard
+genuine deliveries Intrepid has no record of — which the join goes out of its
+way to keep.
+
+Leaving them in cost twice over: a guaranteed 0.0 dragging the engagement
+percentage down, and an unanswerable Sub-Intent inflating the "could not be
+checked" count on the morning brief — which is the alarm for a broken Tesla OS
+session and must not ring for a car that was never delivered.
+
+Verified 2026-08-25: a week at TRT 17589, all 337 delivered cars had
+`delivery_details: null`; the single exception was scheduled six days out and
+in repair. Today's report went 44 → 43 with the unknown count to zero;
+2026-08-24 stayed at 48 with nothing dropped.
+
+A **VIN search** is the exception — it explains instead of dropping. Someone
+who typed that VIN wants to hear about that car, and "no such delivery" for a
+car plainly on the schedule is the worse answer.
 
 #### The 14-day ceiling
 
@@ -603,6 +635,120 @@ returns is passed on.
 
 This board's old `.tokens.json` and `.client.json` are deleted on first run.
 They were registered against a redirect URI nothing serves now.
+
+---
+
+## FSD Sub-Intent
+
+Whether the customer has said they want FSD. Advanced mode only, shown as a
+badge on the row.
+
+**It is not in Intrepid.** That was checked properly before this was built:
+both Intrepid front-ends — the root SPA and the `/cogs/` app, all twenty-nine
+lazy chunks — contain zero occurrences of `fsd`, `autopilot` or `intended`, and
+`getDeliveryAppointmentDetails` returns staff and nothing else. It lives on the
+**order**, in Tesla OS:
+
+```
+GET  {os}/v1/overview/{RN}/overview   →  order.fsdLabel
+```
+
+Keyed by reference number, which is why it is advanced-only — a basic run has
+no RN to ask about.
+
+### Four states, and the difference between two of them matters
+
+| badge | meaning | in the morning brief |
+|---|---|---|
+| **Sub-Intent** | intends to subscribe, or is transferring FSD from another car | not listed |
+| **Has FSD** | already owns it — bought, subscribed, complimentary, Luxe Package | not listed |
+| *(none)* | a bare trial, or nothing on the order | **listed** |
+| *(none)* | **not asked** — no RN, no session, order not visible | not listed, counted |
+
+The last two rows look identical on screen and are opposite in meaning. A
+customer who said nothing is someone to talk to; a customer we failed to look
+up is not, and naming them would be telling their advisor something untrue.
+Unknown rows are counted in the run notices instead.
+
+### Two traps, both measured
+
+**`isFsdSubscribed` is not the signal.** The order carries a boolean of that
+name and on a seven-order sample it agreed perfectly with "Subscription
+Intended". It does not hold: `RN128978811` and `RN129032768`, delivered
+2026-08-24, both carry `fsd.trial` — no intent at all — with
+`isFsdSubscribed:true`. Classification is from the `fsdLabel` message key only.
+
+**`fsdLabel` has two shapes** — a bare string, or `{message, messageParams}`
+with the trial expiry in it. Both occur in a single day. Anything reading it
+must branch on `typeof`, as Tesla OS's own renderer does.
+
+### Connect once; it renews itself after that
+
+Admin › Alerts › **Tesla OS session** › Connect. One time, by hand.
+
+After that it keeps itself signed in. The token lasts about eighty minutes and
+Chrome *deletes* it at expiry, so by the time a run needs it, it is usually
+gone entirely — and the morning brief fires before anyone is at a desk. A run
+whose stored session has lapsed opens a Tesla OS tab, lets Entra re-issue
+silently, takes the token and closes the tab behind itself. Nothing is said
+about it; that is the normal case.
+
+**The first connect is deliberately not automatic.** A board that has never
+been connected has no business opening a browser window on its own, on a
+machine that may not be set up for it, for an optional column — and the first
+sign-in is the one that may genuinely need a person, since Entra only re-issues
+silently once a profile has been through it. So a cold board says "connect this
+once" and waits. Only a session that has worked before is repaired unasked.
+
+A failed renewal stops trying for ten minutes rather than making every run
+wait. Pressing Connect clears that and retries immediately.
+
+None of this is required. Without Tesla OS every mileage figure is still
+correct and only the badge is missing, which is why that row is amber rather
+than red.
+
+---
+
+## Morning brief
+
+Admin › Alerts › **Morning brief**. A separate card from the hourly digest,
+meant to go out an hour before the doors open. It says where **yesterday**
+finished — the percentage alone, not the list — and then names today's
+customers who have **not** stated Sub-Intent, addressed to the advisor who owns
+each one. Always those two dates, whatever the dashboard is showing.
+
+**This is the one card that carries customer names, and that is deliberate.**
+The hourly digest is VIN-only and stays that way: it fires up to nine times a
+day about cars that are merely mid-window, and a name repeated that often is
+exposure with nothing gained. The brief fires once, is addressed to a named
+advisor about their own customer, and does not survive being reduced to a VIN.
+That split is enforced by `assertNoPii`, which `digestCard` calls and which
+throws if a customer name or reference number reaches the hourly card.
+
+### An empty list has three meanings
+
+The headline is the only line most people read, so it has to distinguish them.
+`briefCard` takes `total` as well as `unknown` for exactly this:
+
+| state | headline |
+|---|---|
+| nobody to chase, all checked | "Every one of today's customers…  Nothing to chase." |
+| some unknown, rest clean | "Nothing to chase among the *38* we could check." |
+| **`unknown >= total`** | "Sub-Intent could not be read for **any** of today's *44* cars…" — bold, `Warning` coloured |
+| no deliveries at all | "No deliveries on the board today." |
+
+The third row is the one that matters, and it was wrong until 2026-08-25: a
+board that could not reach Tesla OS opened the morning with *"Nothing to
+chase"*, with the truth demoted to a small grey footnote underneath. That is
+the null ≠ "none" invariant surviving all the way through the
+data layer and then being thrown away by the presentation layer (see [Four
+states, and the difference between two of them matters](#four-states-and-the-difference-between-two-of-them-matters))
+— the rows were
+correctly `null`, and the card still said the reassuring thing. A never-connected
+board is now a routine state rather than an exotic one, so it would have been
+seen. When `unchecked` holds the footnote is suppressed, because the headline
+has already said it louder. `unchecked` is also on the flat payload, so a flow
+branching on `noIntent: 0` can tell a clean morning from a blind one.
 
 ---
 

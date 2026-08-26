@@ -1,5 +1,7 @@
 # Credentials and machine state — never committed.
 .connections.json
+.connections.*.json
+.connections.bak*
 .admin.json
 
 # Where the Tracker's sweep writes. Not a cache — it is the only copy of every

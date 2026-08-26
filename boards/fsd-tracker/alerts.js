@@ -276,9 +276,35 @@ function missingCars(rows, bar){
    wrong. */
 const DIGEST_MAX = 12;
 
-/* NEVER put `customer` or `rn` on this card. Both identify the person who
-   took delivery, and this goes to a channel. The card carries VINs, which
-   are what the team works from. There is an assertion for this. */
+/* ── the naming rule, and where it does and does not apply ──
+
+   The HOURLY DIGEST carries VINs and never a customer name or a reference
+   number. It fires up to nine times a day into a channel, about cars that are
+   simply mid-window, and a person's name repeated that often in that context
+   is exposure with no purpose behind it. The team works from VINs anyway.
+
+   The MORNING BRIEF is the deliberate exception, added 2026-08-25. It fires
+   once, addresses a named advisor about their own customer, and the whole
+   point of it is "go and talk to this person" — which does not survive being
+   reduced to a VIN. Ed asked for the name and the name is the actionable part.
+
+   That split is now ENFORCED rather than described. The previous version of
+   this comment claimed "there is an assertion for this" and there was not one
+   anywhere in the estate, which is how a rule quietly becomes a suggestion.
+   assertNoPii below is that assertion, and digestCard calls it. */
+
+const PII_KEYS = ["customer", "rn", "referenceNumber", "email"];
+
+function assertNoPii(cars, where){
+  for(const c of cars || []){
+    for(const k of PII_KEYS){
+      if(c && c[k]) throw new Error(
+        `${where} was given ${k}="${c[k]}" — the hourly digest is VIN-only. ` +
+        `If a card is meant to name customers it must be built by briefCard, not this one.`);
+    }
+  }
+}
+
 function carLine(c){
   const right = c.unreadable ? "no reading" : `${c.miles.toFixed(1)} mi`;
 
@@ -309,6 +335,7 @@ function carLine(c){
 
 function digestCard({ site, trtId, date, bar, mode, total, cars, now, summary }){
   const list   = cars || [];
+  assertNoPii(list, "digestCard");
   const shown  = list.slice(0, DIGEST_MAX);
   const hidden = list.length - shown.length;
   const unread = list.filter(c => c.unreadable).length;
@@ -394,6 +421,218 @@ function digestCard({ site, trtId, date, bar, mode, total, cars, now, summary })
     missing: list.length,
     vins : list.slice(0, 50).map(c => c.vin)
   };
+}
+
+/* ═══════════════════════ the morning brief ═══════════════════════════════
+
+   A different card with a different job. The hourly digest asks "who has not
+   driven yet today"; this asks "who should you talk to before they leave".
+
+   It goes out once, an hour before the doors open, and it says two things:
+   where yesterday finished, and which of today's customers have never said
+   they want FSD. An advisor reading it knows who to spend the day on and,
+   just as usefully, who they can leave alone.
+
+   Only the PERCENTAGE of yesterday travels, not the card — Ed was explicit
+   about that. Yesterday's list is yesterday's problem and reprinting it every
+   morning would bury the part that is actionable. */
+
+/* Customers worth a conversation: intent stated nowhere on the order.
+
+   `state === "none"` and nothing else. A row whose intent is null was never
+   successfully asked — no reference number, no Tesla OS session, or an order
+   the account cannot see — and naming that customer as uninterested would be
+   a lie told to their advisor. Those rows are counted separately and reported
+   as a caveat, never as people. */
+function noIntentCustomers(rows){
+  const out = [];
+  for(const r of rows || []){
+    if(!r || r.fsdIntent !== "none") continue;
+    out.push({
+      vin     : r.vin || "",
+      model   : modelLabel(r.model || ""),
+      customer: r.customer || "",
+      advisor : r.advisor || r.host || r.hostUser || "",
+      at      : r.deliveredAt || null
+    });
+  }
+  /* In the order the day happens, so the brief reads like a schedule. A car
+     with no handover time yet sorts last rather than first: it is the least
+     urgent thing on the list, not the most. */
+  out.sort((a, b) => (a.at ? Date.parse(a.at) : Infinity) - (b.at ? Date.parse(b.at) : Infinity)
+                  || a.vin.localeCompare(b.vin));
+  return out;
+}
+
+const DAY_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+/* One line per customer, addressed to the advisor who owns them. The VIN
+   rides along in the subtle line because it is still what the team looks a
+   car up by, and the handover time because "before 10:00" changes the plan. */
+function customerLine(c){
+  const who = c.advisor || "Unassigned";
+  const sub = [c.model, c.vin, c.at ? "handover " + hhmm(c.at) : null]
+              .filter(Boolean).join(" · ");
+
+  /* A name is not always resolvable — the order may not have reached Garage
+     yet, or the lookup may have come back empty. The line is REWORDED rather
+     than padded with a placeholder: "your customer this customer" is what
+     a fallback string produces and it reads like a broken mail merge. The
+     handover time identifies the person perfectly well to the one advisor
+     this line is addressed to. */
+  const subject = c.customer
+    ? `your customer **${c.customer}**`
+    : (c.at ? `your **${hhmm(c.at)}** handover` : "one of your handovers");
+
+  return {
+    type: "ColumnSet", separator: true, spacing: "Small",
+    columns: [{ type: "Column", width: "stretch", items: [
+      { type: "TextBlock", wrap: true, spacing: "None",
+        text: `**${who}** — ${subject} does NOT have FSD Sub-Intent` },
+      ...(sub ? [{ type: "TextBlock", text: sub, isSubtle: true, size: "Small",
+                   wrap: true, spacing: "None" }] : [])
+    ]}]
+  };
+}
+
+/* Deliberately higher than the digest's twelve. This list is the reason the
+   card exists rather than a supporting detail, and a centre with twenty
+   deliveries wants all twenty names. Teams still collapses a tall card behind
+   "Show more", which is an acceptable trade for not truncating the point. */
+const BRIEF_MAX = 25;
+
+function briefCard({ site, trtId, date, yesterday, cars, unknown, total, now, mode }){
+  const list   = cars || [];
+  const shown  = list.slice(0, BRIEF_MAX);
+  const hidden = list.length - shown.length;
+  const day    = DAY_FULL[(now || new Date()).getDay()];
+
+  const y   = yesterday || {};
+  const pct = Number(y.adoption) || 0;
+
+  /* An empty list has three meanings and they are not interchangeable: nobody
+     to chase, nobody delivering, or nobody checked. Reading them as the first
+     is the failure this whole feature is built to avoid — a board that cannot
+     reach Tesla OS would otherwise open the morning with "nothing to chase",
+     which is the exact opposite of what is true. Ninety seconds after Tesla OS
+     changes an endpoint, that sentence is a lie every advisor believes.
+
+     `unchecked` is the honest form of it, and when it holds the footnote below
+     is suppressed because this line has already said it, louder. */
+  const cars_       = Number(total) || 0;
+  const unknown_    = Number(unknown) || 0;
+  const unchecked   = cars_ > 0 && unknown_ >= cars_;
+  const checked     = Math.max(cars_ - unknown_, 0);
+
+  const headline =
+    list.length
+      ? `**${list.length}** of today's ${list.length === 1 ? "customers has" : "customers have"} `
+        + "not stated FSD Sub-Intent. These are the ones worth your time:"
+    : unchecked
+      ? `Sub-Intent could not be read for **any** of today's ${cars_} `
+        + `${cars_ === 1 ? "car" : "cars"}, so this morning has no list — `
+        + "assume nothing until the dashboard can reach Tesla OS again."
+    : cars_ === 0
+      ? "No deliveries on the board today."
+    : unknown_
+      ? `Nothing to chase among the ${checked} we could check.`
+      : "Every one of today's customers already has FSD or has said they intend to subscribe. "
+        + "Nothing to chase.";
+
+  const body = [
+    { type: "ColumnSet", columns: [
+      { type: "Column", width: "auto", items: [
+        { type: "TextBlock", text: "☀️", size: "ExtraLarge", spacing: "None" }]},
+      { type: "Column", width: "stretch", items: [
+        { type: "TextBlock", text: `Happy ${day}, team!`, weight: "Bolder",
+          size: "Medium", spacing: "None" },
+        { type: "TextBlock", text: "FSD Tracker | Powered by Zo' Projects",
+          isSubtle: true, size: "Small", spacing: "None", wrap: true }]}
+    ]},
+
+    { type: "TextBlock", wrap: true, spacing: "Medium",
+      text: `**${site || "TRT " + (trtId == null ? "—" : trtId)}** · ${date}` },
+
+    /* Yesterday in one number and nothing else. `resolved` is carried with it
+       for the same reason the digest carries it: a bare percentage hides
+       whether the day was forty cars or three. */
+    { type: "TextBlock", wrap: true, spacing: "Medium", size: "Medium",
+      weight: "Bolder", color: pct >= 100 ? "Good" : "Default",
+      text: y.resolved
+        ? `We ended yesterday with ${pct}% FSD engagement`
+        : "No measurable deliveries yesterday" },
+
+    { type: "TextBlock", wrap: true, spacing: "Small",
+      /* Not subtle, and coloured when it is a warning: the one line an advisor
+         reads on a phone must carry the caveat, not sit above it. */
+      ...(unchecked ? { color: "Warning", weight: "Bolder" } : {}),
+      text: headline },
+
+    ...shown.map(customerLine),
+
+    ...(hidden ? [{ type: "TextBlock", isSubtle: true, wrap: true, spacing: "Small",
+                    text: `…and ${hidden} more. Open the dashboard for the full list.` }] : []),
+
+    /* Said out loud rather than folded into the count. A morning where the
+       order service could not be reached must not read as a morning where
+       everybody was already interested. */
+    ...(unknown_ && !unchecked
+        ? [{ type: "TextBlock", isSubtle: true, size: "Small", wrap: true,
+             spacing: "Small",
+             text: `${unknown_} of today's cars could not be checked for Sub-Intent, `
+                 + "so they are not listed either way." }] : []),
+
+    { type: "TextBlock", isSubtle: true, size: "Small", wrap: true, spacing: "Medium",
+      text: mode === "advanced" ? "Have a great day."
+          : "Advisor and customer names are unavailable — this ran in basic mode." }
+  ];
+
+  return {
+    type: "message",
+    attachments: [{
+      contentType: "application/vnd.microsoft.card.adaptive",
+      content: { type: "AdaptiveCard",
+                 $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+                 version: "1.4", body }
+    }],
+    /* Flat copies alongside the card, as the digest does. VINs only out here —
+       the names are in the card because that is what a person reads, but a
+       flow branching on this data has no need of them. */
+    event: "fsd_morning_brief",
+    trtId: trtId == null ? null : trtId,
+    site : site || null,
+    date, mode,
+    yesterdayDone: pct,
+    yesterdayDrove: Number(y.drove) || 0,
+    yesterdayResolved: Number(y.resolved) || 0,
+    noIntent: list.length,
+    unknown : unknown_,
+    total   : cars_,
+    /* Carried out here too, so a Power Automate flow branching on noIntent: 0
+       can tell "clean morning" from "blind morning" without re-deriving it. */
+    unchecked,
+    vins: list.slice(0, 50).map(c => c.vin)
+  };
+}
+
+function sampleBriefCard(summary){
+  const now = new Date();
+  return briefCard({
+    site : "Sample — this is a test",
+    trtId: summary && summary.trtId,
+    date : now.toISOString().slice(0, 10),
+    mode : "advanced",
+    now,
+    yesterday: { adoption: 90, drove: 27, resolved: 30 },
+    unknown  : 1,
+    total    : 3,
+    cars: [
+      { vin: "7SAYGDEE0PA000001", model: "Model Y", customer: "Sample Customer",
+        advisor: "Sample Advisor", at: now.toISOString() },
+      { vin: "5YJ3E1EA7KF000002", model: "Model 3", customer: "Another Customer",
+        advisor: "Sample Advisor", at: now.toISOString() }
+    ]
+  });
 }
 
 /* The test button sends a real digest of invented cars rather than a "hello".
@@ -487,5 +726,6 @@ module.exports = {
   validateSettings, cleanSettings, dayLabel,
   hourKey, shouldFire,
   modelLabel, missingCars, digestCard, sampleDigestCard,
+  BRIEF_MAX, assertNoPii, noIntentCustomers, briefCard, sampleBriefCard,
   postToTeams, postWithOneRetry
 };

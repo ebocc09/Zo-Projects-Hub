@@ -27,6 +27,10 @@ const credstore = require("./credstore");
    state, and the timer that actually posts lives in server.js. That split is
    what keeps a CLI run incapable of writing to a Teams channel. */
 const A = require("./alerts");
+/* Tesla OS — the order behind each car, and whether the customer wants FSD.
+   Same rule as alerts.js: no import-time side effects, no timers, and it
+   stores nothing. This file owns where the session is kept. */
+const osx = require("./os");
 
 const HERE = __dirname;
 
@@ -71,11 +75,16 @@ const CONN_FILE = path.join(HERE, ".connections.json");
    `alertsOn` defaults to FALSE. A setting that defaults on is one that starts
    posting into a shared channel the moment somebody pastes a URL to see
    whether the field works. See alerts.js for what each of these means. */
+/* `os` is the Tesla OS session — an object, `{token, user, name, title,
+   capturedAt}`, or null. It is board-local rather than a Hub credential for
+   the reason written at the top of os.js: it expires every eighty minutes, and
+   the Hub's health sweep would spend all day reconnecting it. */
 const CONN_DEFAULTS = { intrepidCookie: "", garageCookie: "", mode: "basic", trtId: null,
                         droveThreshold: null,
                         alertsOn: false, alertWebhook: "",
                         alertStart: "09:00", alertEnd: "17:00",
-                        alertDays: [1, 2, 3, 4, 5] };
+                        alertDays: [1, 2, 3, 4, 5],
+                        os: null };
 
 /* Stored as a number or null, never a string, so callers can compare without
    worrying which layer they got it from. */
@@ -208,6 +217,166 @@ async function intrepidGet(pathAndQuery, base = INTREPID){
   }
   try { return JSON.parse(res.body); }
   catch { throw new Error("Intrepid did not return JSON — the cookie may be a sign-in redirect"); }
+}
+
+/* ─────────────────────────── the Tesla OS session ───────────────────────
+   Board-local, in .connections.json, for the reasons at the top of os.js. The
+   shape is `{token, user, name, title, capturedAt}` or null.
+
+   Unlike the Intrepid cookie there is no Hub fallback to try: nothing else on
+   the estate holds one of these. */
+
+function osSaved(){
+  const s = loadConnections().os;
+  return s && s.token ? s : null;
+}
+
+function osToken(){
+  const s = osSaved();
+  if(!s){
+    const err = new Error("Not connected to Tesla OS — connect it once under " +
+                          "Admin › Alerts › Tesla OS session");
+    err.needsOs = true;
+    throw err;
+  }
+  return s.token;
+}
+
+const osConnected = () => Boolean(osSaved());
+
+/* A token that exists is not a session that works — this one is opaque and
+   dies after about eighty minutes, so the only way to know is to ask. Cached
+   for a minute so painting the Admin panel does not fire a round trip per
+   repaint. */
+let osProbe = { at: 0, live: false };
+const OS_PROBE_MS = 60_000;
+
+async function osStatus(){
+  const s = osSaved();
+  if(!s) return { connected: false, user: null, name: null, title: null };
+  if(Date.now() - osProbe.at < OS_PROBE_MS){
+    return { connected: osProbe.live, user: s.user || null,
+             name: s.name || null, title: s.title || null };
+  }
+  const who = await osx.authCheck(s.token).catch(() => null);
+  osProbe = { at: Date.now(), live: Boolean(who && who.username) };
+  return { connected: osProbe.live,
+           user : (who && who.username) || s.user || null,
+           name : (who && who.name)     || s.name || null,
+           title: (who && who.title)    || s.title || null };
+}
+
+function osCommit(got){
+  osProbe = { at: Date.now(), live: true };    // just proved by grabToken
+  return saveConnections({
+    os: { token: got.token, user: got.user, name: got.name || "",
+          title: got.title || "", capturedAt: new Date().toISOString() }
+  });
+}
+
+/* Clears the failure cooldown as well as starting the flow: someone pressing
+   this has just fixed whatever was wrong and should not then be told to wait
+   ten minutes by a guard meant for unattended runs. */
+const osSignIn = () => { osHealFailedAt = 0; return osx.beginSignIn(osCommit); };
+
+function osDisconnect(){
+  osProbe = { at: 0, live: false };
+  fsdIntentCache.clear();
+  saveConnections({ os: null });
+  return { ok: true };
+}
+
+/* ── a live token: connected by hand ONCE, renewed automatically forever ──
+
+   This is the difference between the Tesla OS session and every other
+   credential on the estate. The others last a working day and a person is
+   there when they lapse. This one dies every eighty minutes and Chrome
+   DELETES it, so the state a scheduled run finds it in is usually "gone
+   entirely" — and the morning brief fires before anybody is at a desk.
+
+   So renewal is automatic: a run whose stored session has lapsed opens a Tesla
+   OS tab, lets Entra re-issue silently, takes the token and closes the tab
+   again. Nobody has to be there.
+
+   **The FIRST connect is deliberately not automatic.** A board that has never
+   been connected has no business opening a browser window on its own — that is
+   a surprise, on a machine that may not be set up for it, in service of an
+   optional column. Worse, the first sign-in is the one that may genuinely need
+   a person: Entra re-issues silently only once a profile has been through it.
+   So cold start throws and asks, and only a session that once worked is
+   repaired without asking. `force` is what the Connect button passes.
+
+   Two guards keep the automatic half from being expensive:
+
+   `osHealing` serialises it. Forty cars resolving at concurrency six would
+   otherwise all notice the dead session at the same instant and open six tabs.
+
+   `osHealFailedAt` stops a machine that simply cannot reach Tesla OS — no
+   browser, no access, signed out of Entra — from spending forty-five seconds
+   discovering that on every single run. After a failure it says so straight
+   away for ten minutes. A person who has just fixed the cause can press
+   Reconnect to clear it rather than waiting. */
+let osHealing = null;
+let osHealFailedAt = 0;
+const OS_HEAL_COOLDOWN_MS = 10 * 60 * 1000;
+
+async function osEnsureToken({ force = false } = {}){
+  const s = osSaved();
+  if(s && !force){
+    const who = await osx.authCheck(s.token).catch(() => null);
+    if(who && who.username){
+      osProbe = { at: Date.now(), live: true };
+      return s.token;
+    }
+  }
+
+  /* Never connected, and not an explicit request to connect. Ask rather than
+     opening a window nobody expects — see the note above. */
+  if(!s && !force){
+    const err = new Error("Not connected to Tesla OS — connect it once under " +
+                          "Admin › Alerts › Tesla OS session. After that it renews itself.");
+    err.needsOs = true;
+    err.neverConnected = true;
+    throw err;
+  }
+
+  if(osHealing) return osHealing;              // one repair at a time
+
+  if(Date.now() - osHealFailedAt < OS_HEAL_COOLDOWN_MS){
+    const err = new Error("Tesla OS could not be reached a few minutes ago, so this run " +
+                          "did not wait for it again. Use Reconnect under Admin › Alerts to retry now.");
+    err.needsOs = true;
+    throw err;
+  }
+
+  osHealing = (async () => {
+    const got = await osx.refreshToken();
+    if(!got.ok){
+      osProbe = { at: Date.now(), live: false };
+      osHealFailedAt = Date.now();
+      const err = new Error(
+        got.reason === "no-browser"
+          ? "No Chrome or Edge found, so a Tesla OS session could not be obtained."
+          : "Could not obtain a Tesla OS session by itself. (" + (got.detail || got.reason) + ")");
+      err.needsOs = true;
+      throw err;
+    }
+    osHealFailedAt = 0;
+    osCommit(got);
+    return got.token;
+  })();
+
+  try { return await osHealing; }
+  finally { osHealing = null; }
+}
+
+/* Clears the cooldown and forces a fresh acquisition. The one thing a person
+   can usefully do by hand here: they have just signed in somewhere, or fixed
+   whatever was broken, and do not want to wait out the ten minutes. */
+async function osReconnect(){
+  osHealFailedAt = 0;
+  const token = await osEnsureToken({ force: true });
+  return { ok: true, token: Boolean(token), connection: connectionsSummary().os };
 }
 
 /* Every appointment at one TRT on one date. `date` is a plain query
@@ -478,6 +647,75 @@ async function resolveCustomers(userIds){
   }
 
   return customerCache;
+}
+
+/* ────────────────────── does this customer want FSD? ────────────────────
+   Keyed by reference number, because that is what the order service knows —
+   which is also why this is advanced-only: an RN comes from Intrepid, and a
+   basic run has none.
+
+   Returns a Map of rn → { state, text }, where state is "intent" | "has" |
+   "none" | null. See fsdIntentOf in os.js for what those mean; the important
+   one is that **null is not "none"**. A question we could not ask must never
+   render as a customer who wants nothing.
+
+   Cached in memory for the life of the process, like the customer names above
+   and for the same reason — this is order data about a named person, not a
+   fixed roster, and it does not belong in a file on disk. The cache is
+   cleared whenever the session changes.
+
+   A run that cannot reach Tesla OS at all throws `needsOs` from the first
+   call; the caller catches that once, notes it, and leaves every row unknown
+   rather than making forty more calls that will fail the same way. */
+const fsdIntentCache = new Map();
+
+async function resolveFsdIntent(rns){
+  const want = [...new Set(rns.filter(Boolean).map(String))];
+  if(!want.filter(rn => !fsdIntentCache.has(rn)).length) return fsdIntentCache;
+
+  /* Two passes at most. The token can lapse in the middle of a run — forty
+     cars at eighty minutes a token is not a rare alignment — and the second
+     pass exists to renew it and finish the job rather than leave half the
+     centre unreadable.
+
+     A dead session must NOT be recorded per car. Marking each failure unknown
+     as it happened would be the same bug in slow motion: the run would finish,
+     every remaining row would read as "no intent stated", and the brief would
+     name customers who were never asked. So the pass sets a flag, discards
+     nothing, and goes round again. */
+  for(let attempt = 0; attempt < 2; attempt++){
+    const todo = want.filter(rn => !fsdIntentCache.has(rn));
+    if(!todo.length) break;
+
+    const token = await osEnsureToken({ force: attempt > 0 });
+    let sessionDied = false;
+
+    await pool(todo, Math.min(6, todo.length), async rn => {
+      if(sessionDied) return;                 // stop spending calls on a dead token
+      try{
+        const d = await osx.overviewFor(token, rn);
+        // null is a 404/451 — an order this account cannot resolve. Unknown,
+        // NOT "no intent".
+        if(d === null) return fsdIntentCache.set(rn, { state: null, text: "" });
+        const order = (d && d.order) || {};
+        fsdIntentCache.set(rn, osx.fsdIntentOf(order.fsdLabel));
+      }catch(err){
+        /* pool() turns a throw into a result rather than propagating it, so a
+           dead session cannot be signalled by throwing from in here. Flag it. */
+        if(err.needsOs){ sessionDied = true; return; }
+        fsdIntentCache.set(rn, { state: null, text: "" });
+      }
+    });
+
+    if(!sessionDied) break;
+    if(attempt === 1){
+      const err = new Error("The Tesla OS session kept being refused, so FSD intent is missing from this run.");
+      err.needsOs = true;
+      throw err;
+    }
+  }
+
+  return fsdIntentCache;
 }
 
 /* ───────────────────────────────── Garage ─────────────────────────────────
@@ -752,11 +990,36 @@ function dayRangeEpoch(dateStr){
 
 const TESLADEX_PAGE = 100;      // the endpoint's maximum
 
+/* ── a delivery date is not proof of a delivery ──
+
+   VRL enumeration keys on `delivery_date_epoch`, and that field gets stamped
+   on cars that have not been handed to anybody: a Monday appointment moved,
+   a car pulled into repair, an order edited. The tell is `delivery_details`.
+   It is WIPED at handover — that is the property VRL enumeration was chosen
+   for in the first place — so a car still carrying one, with a scheduled date
+   in the future, has demonstrably not gone out yet.
+
+   Checked against a week at TRT 17589: all 337 delivered cars had it null,
+   and the one exception was scheduled six days out and sitting in repair.
+
+   Read off Garage alone, deliberately. "It has no Intrepid appointment" would
+   have been the easier test and is wrong twice over — it is unavailable in
+   basic mode, where it would empty the entire report, and in advanced mode it
+   would also throw away genuine deliveries that Intrepid simply has no record
+   of, which the join below goes out of its way to keep. */
+const scheduledFor = r => {
+  const d = r && r.delivery_details;
+  if(!d) return null;
+  const when = String(d.scheduled_delivery_date || "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(when) ? when : null;
+};
+
 const toDelivery = (r, date) => ({
   vin        : r.vin,
   model      : r.model || "",
   deliveredAt: new Date(r.delivery_date_epoch * 1000).toISOString(),
-  date
+  date,
+  scheduledFor: scheduledFor(r)
 });
 
 /* Pages a query to exhaustion. Sorted, or deep paging repeats and skips. */
@@ -777,7 +1040,7 @@ async function tesladexPage(query, fields, onPage){
   return out;
 }
 
-const FIELDS = ["vin", "delivery_date_epoch", "model"];
+const FIELDS = ["vin", "delivery_date_epoch", "model", "delivery_details"];
 
 /* The centre's deliveries, straight from the index. */
 async function tesladexDeliveries(date, trtId, onPage){
@@ -1383,6 +1646,16 @@ async function collectReport({ dates, trtId, vin, rn, mode, onProgress } = {}){
                     : `, so no reference number or delivery host could be found for it.`));
   }
 
+  /* Explained rather than dropped, unlike the day report. Somebody who typed
+     this VIN wants to know about this car, and answering "no such delivery"
+     to a car that is plainly on the schedule is worse than answering with a
+     zero and the reason for it. */
+  if(single && single.scheduledFor && single.scheduledFor > single.date){
+    notes.push(`${single.vin} carries a delivery date of ${single.date} but is still ` +
+               `scheduled for ${single.scheduledFor}, so it has not been handed over — ` +
+               `any mileage below is pre-delivery and not what this board measures.`);
+  }
+
   /* ── enumerate ── */
   const scoped = [];
 
@@ -1421,11 +1694,34 @@ async function collectReport({ dates, trtId, vin, rn, mode, onProgress } = {}){
       mine.push(...strays);
     }
 
+    /* Dropped before anything is measured, not flagged afterwards. A car that
+       was never handed over has no post-delivery mileage to be right or wrong
+       about, and leaving it in cost twice: a guaranteed 0.0 dragging the
+       engagement percentage down, and an unanswerable Sub-Intent inflating the
+       "could not be checked" count on the morning brief — which is the alarm
+       for a broken Tesla OS session and should not be ringing for this.
+
+       Counted in the notice rather than dropped in silence: the day's total
+       moving with no explanation is how you lose trust in the number. */
+    const notOut = mine.filter(d => d.scheduledFor && d.scheduledFor > date);
+    const real   = notOut.length
+      ? mine.filter(d => !(d.scheduledFor && d.scheduledFor > date))
+      : mine;
+
+    if(notOut.length){
+      const when = [...new Set(notOut.map(d => d.scheduledFor))].sort();
+      notes.push(
+        `${notOut.length} car(s) dated ${date} in Garage ${notOut.length === 1 ? "is" : "are"} ` +
+        `still scheduled for ${when.join(", ")} and ${notOut.length === 1 ? "has" : "have"} not ` +
+        `been handed over — left out of the day entirely.`);
+    }
+
     const national = await nationalCount(date);
-    perDate.push({ date, national, delivered: mine.length });
+    perDate.push({ date, national, delivered: real.length,
+                   ...(notOut.length ? { notOut: notOut.length } : {}) });
     if(onProgress) onProgress({ phase: "scoped", date,
-                                national, delivered: mine.length });
-    scoped.push(...mine);
+                                national, delivered: real.length });
+    scoped.push(...real);
   }
 
   if(!scoped.length){
@@ -1499,10 +1795,43 @@ async function collectReport({ dates, trtId, vin, rn, mode, onProgress } = {}){
 
     const custs = await resolveCustomers(rows.map(r => r && r.userId));
     const cache = await resolveStaff(rows.map(r => r && r.hostUser));
+
+    /* ── does the customer want FSD? ──
+       Tesla OS, keyed by reference number. Optional in a way the other two are
+       not: a run without it is still a complete mileage report, so a failure
+       here annotates and carries on rather than taking the day down with it.
+
+       Every row is left `null` on failure, never "none" — see resolveFsdIntent.
+       A brief that names the whole centre as uninterested because a token
+       lapsed would be worse than one that says nothing. */
+    /* A never-connected board is told so plainly rather than being made to
+       wait while something tries to sign it in. Once connected, a lapsed
+       session repairs itself inside resolveFsdIntent and nothing is said —
+       that is the normal case and not worth a notice. */
+    let intents = null;
+    if(osConnected()){
+      try{
+        intents = await resolveFsdIntent(rows.map(r => r && r.rn));
+      }catch(err){
+        intents = null;
+        notes.push(`FSD Sub-Intent is missing from this run: ${err.message}`);
+      }
+    }else{
+      notes.push("FSD Sub-Intent is not shown — Tesla OS has not been connected on this " +
+                 "machine yet. Connect it once under Admin › Alerts and it will keep " +
+                 "itself signed in after that.");
+    }
+
     for(const r of rows){
       if(!r) continue;
       r.customer = r.userId ? (custs.get(String(r.userId)) || "") : "";
       r.host = staffName(cache, r.hostUser);
+
+      /* No RN means Intrepid never saw this car, so the question was never
+         asked — unknown, not "no intent". */
+      const seen = intents && r.rn ? intents.get(String(r.rn)) : null;
+      r.fsdIntent = seen ? seen.state : null;
+      r.fsdStatus = seen ? seen.text  : "";
       // The advisor is still carried, unexported — it is the join that taught
       // us most of the directory and is worth having when debugging a name.
       r.advisor = r._staff ? r._staff.advisorName : "";
@@ -1581,7 +1910,22 @@ function summarise(rows){
     gapLeaky : ok.filter(r => r.baselineGapMin > 60).length,
     // Rows whose primary counter was dead. Normally a couple per day; a run
     // where it climbs is worth knowing about before the numbers are quoted.
-    altCounter: ok.filter(r => r.altCounter).length
+    altCounter: ok.filter(r => r.altCounter).length,
+
+    /* FSD intent, counted over ALL rows rather than the measurable ones: a car
+       whose mileage could not be read still has a customer with a view about
+       FSD, and that is the question here.
+
+       `noIntent` is the chase list's size and deliberately counts only rows
+       that were actually answered. `intentUnknown` is everything we could not
+       ask about — no reference number, no Tesla OS session, or an order the
+       account cannot see. Two numbers rather than one, because a day where
+       nobody stated intent and a day where nothing could be read look
+       identical from a single count and mean opposite things. */
+    intent       : rows.filter(r => r.fsdIntent === "intent").length,
+    hasFsd       : rows.filter(r => r.fsdIntent === "has").length,
+    noIntent     : rows.filter(r => r.fsdIntent === "none").length,
+    intentUnknown: rows.filter(r => r.fsdIntent == null).length
   };
 }
 
@@ -1822,7 +2166,8 @@ function connectionsSummary(){
     droveThresholdSet: asThreshold(c.droveThreshold) != null,
     // What advanced actually buys, kept here so the panel and the README
     // cannot describe it differently.
-    advancedAdds: ["Reference number", "Delivery host", "Filter and stats by host"],
+    advancedAdds: ["Reference number", "Delivery host", "Filter and stats by host",
+                   "FSD Sub-Intent"],
     intrepid: {
       set    : Boolean(cookie),
       // A masked tail is enough to tell two pastes apart without exposing one.
@@ -1832,6 +2177,22 @@ function connectionsSummary(){
       required: mode === "advanced"
     },
     garage: { detail, signedIn },
+    /* Tesla OS is NEVER `required`. Without it every mileage figure on the
+       board is still correct and every column but one still fills — the day's
+       report does not depend on it, so a red dot here would overstate what is
+       wrong. `live` is deliberately absent: proving it costs a round trip, so
+       the panel asks for that separately through /api/os. */
+    os: (() => {
+      const s = c.os && c.os.token ? c.os : null;
+      return {
+        set  : Boolean(s),
+        user : s ? (s.user || null) : null,
+        name : s ? (s.name || "")   : "",
+        title: s ? (s.title || "")  : "",
+        since: s ? (s.capturedAt || null) : null,
+        required: false
+      };
+    })(),
     alerts: alertsSummary(c)
   };
 }
@@ -1876,7 +2237,9 @@ module.exports = {
   loadConnections, saveConnections, connectionsSummary, adminPassword, savedTrtId,
   MODES, normaliseMode, effectiveMode,
   appointmentsOn, appointmentStaff, intrepidCookie,
-  resolveStaff, staffName, resolveCustomers,
+  resolveStaff, staffName, resolveCustomers, resolveFsdIntent,
+  osConnected, osStatus, osSignIn, osDisconnect, osEnsureToken, osReconnect,
+  osSignInStatus: osx.signInStatus, osCancelSignIn: osx.cancelSignIn,
   byHost, byAdvisor, DROVE_THRESHOLD, droveThreshold, MIN_QUALIFY,
   WINDOW_HOURS, windowHours, clearMeasureCache,
   trtInfo, trtDirectory, searchSites,

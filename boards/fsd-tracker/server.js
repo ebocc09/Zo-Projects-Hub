@@ -208,6 +208,67 @@ async function runAlertCheck({ post = true } = {}){
   return { ...base, posted: true, status };
 }
 
+/* ── the morning brief ──
+
+   Two reports, not one, and that is the whole shape of it: yesterday supplies
+   the percentage, today supplies the people. Ed's framing — "here's where we
+   ended yesterday, and here's who to talk to today".
+
+   Yesterday's run is nearly free. Its windows have all closed, so every
+   measurement is served from .measure-cache.json rather than re-read from
+   Garage; the only live work is the enumeration.
+
+   Always those two dates regardless of what is on screen, because this card
+   means one thing and a version of it built from whatever the dashboard
+   happened to be showing would not. */
+async function runMorningBrief({ post = true } = {}){
+  const conn = L.loadConnections();
+  const trt  = L.savedTrtId();
+  if(!trt) return { skipped: "no-trt", reason: "No centre is set on this board.", posted: false };
+
+  const today = L.todayLocal();
+  const y = new Date();
+  y.setDate(y.getDate() - 1);
+  const p = n => String(n).padStart(2, "0");
+  const yesterday = `${y.getFullYear()}-${p(y.getMonth() + 1)}-${p(y.getDate())}`;
+
+  /* Yesterday first. If it fails the brief still goes out — "we could not
+     read yesterday" is a smaller loss than not telling anyone who to chase. */
+  let ySum = null;
+  try{
+    const yOut = await L.collectReport({ dates: [yesterday], trtId: String(trt) });
+    ySum = L.summarise(yOut.rows);
+  }catch(err){
+    log(`brief: yesterday (${yesterday}) could not be read — ${err.message}`);
+  }
+
+  const out  = await L.collectReport({ dates: [today], trtId: String(trt),
+                                       onProgress: jobUpdate });
+  const cars = A.noIntentCustomers(out.rows);
+  const sum  = L.summarise(out.rows);
+  const site = (await L.trtInfo(trt).catch(() => null) || {}).name || null;
+
+  /* `total` matters as much as `unknown` here: the card has to be able to tell
+     "none to chase" from "none checked", and that is unknown vs total, not a
+     count on its own. */
+  const card = A.briefCard({ site, trtId: trt, date: today, mode: out.mode,
+                             yesterday: ySum, cars, unknown: sum.intentUnknown,
+                             total: out.rows.length, now: new Date() });
+
+  const base = { total: out.rows.length, noIntent: cars.length,
+                 unknown: sum.intentUnknown, cars, card,
+                 mode: out.mode, trtId: trt, site, date: today,
+                 yesterdayDate: yesterday,
+                 yesterdayDone: ySum ? ySum.adoption : null,
+                 notices: out.notices };
+  if(!post) return { ...base, posted: false, reason: "preview" };
+
+  const status = await A.postWithOneRetry(conn.alertWebhook, card);
+  log(`brief: posted — yesterday ${ySum ? ySum.adoption + "%" : "unread"}, ` +
+      `${cars.length} of ${out.rows.length} today without Sub-Intent (HTTP ${status})`);
+  return { ...base, posted: true, status };
+}
+
 /* Fires every 30s and asks one question of the current wall clock. NOT a
    setTimeout chained to the next hour boundary: that is stateful about the
    future, so a laptop sleeping through a fire loses the following hour too
@@ -289,12 +350,17 @@ function startAlertClock(){
    printing a stack: a dead cookie and a dead Garage token need different
    actions from the person reading the screen. */
 function sendErr(res, err){
-  const code = err.needsTrt ? 400 : (err.needsCookie || err.needsAuth ? 401 : 502);
+  const code = err.needsTrt ? 400
+             : (err.needsCookie || err.needsAuth || err.needsOs ? 401 : 502);
   sendJson(res, code, {
     error      : err.message,
     needsCookie: Boolean(err.needsCookie),
     needsAuth  : Boolean(err.needsAuth),
-    needsTrt   : Boolean(err.needsTrt)
+    needsTrt   : Boolean(err.needsTrt),
+    // Tesla OS renews itself on demand, so this only ever reaches the page
+    // when the repair itself failed — which is a different fix from the
+    // others and gets its own message.
+    needsOs    : Boolean(err.needsOs)
   });
 }
 
@@ -373,6 +439,54 @@ const server = http.createServer(async (req, res) => {
       const q = (url.searchParams.get("q") || "").trim();
       if(q.length < 2) return sendJson(res, 200, { q, sites: [] });
       return sendJson(res, 200, { q, sites: await L.searchSites(q, 20) });
+    }
+
+    /* ── the Tesla OS session ──
+
+       Ungated, like /api/state and for the same reason: none of these returns
+       a credential, and connecting is a thing you do because a badge is
+       missing, not a privileged act. `live` costs one authenticated round trip
+       and is cached for a minute inside lib.
+
+       Worth knowing while reading these: /connect is pressed once per machine
+       and then effectively never again — a session that has worked before is
+       renewed automatically by the run that needs it. A cold board is the one
+       case that waits to be asked. See osEnsureToken in lib.
+
+       /reconnect is now the same thing as /connect on a warm board — both
+       clear the cooldown and force a fresh token — and the UI no longer calls
+       it. Kept as a curl-able one-shot; delete it if that stops being useful. */
+    if(p === "/api/os" && req.method === "GET"){
+      const st = await L.osStatus();
+      return sendJson(res, 200, {
+        connection: L.connectionsSummary().os,
+        live      : st.connected,
+        who       : { user: st.user, name: st.name, title: st.title },
+        signin    : L.osSignInStatus()
+      });
+    }
+
+    if(p === "/api/os/connect" && req.method === "POST"){
+      return sendJson(res, 200, { ok: true, signin: L.osSignIn() });
+    }
+
+    if(p === "/api/os/cancel" && req.method === "POST"){
+      return sendJson(res, 200, { ok: true, signin: L.osCancelSignIn() });
+    }
+
+    /* Force a fresh session now, skipping the ten-minute cooldown a failed
+       attempt leaves behind. For the case where someone has just fixed
+       whatever was wrong and does not want to wait it out. */
+    if(p === "/api/os/reconnect" && req.method === "POST"){
+      const out = await L.osReconnect();
+      log("tesla os session renewed by hand");
+      return sendJson(res, 200, { ok: true, ...out });
+    }
+
+    if(p === "/api/os/disconnect" && req.method === "POST"){
+      const out = L.osDisconnect();
+      log("tesla os session forgotten");
+      return sendJson(res, 200, { ok: true, ...out, connection: L.connectionsSummary().os });
     }
 
     /* ── AD username → display name, for the other boards ──
@@ -558,7 +672,16 @@ const server = http.createServer(async (req, res) => {
           // True when this car's usual FSD counter was dead and the figure was
           // read off the backup one. Round-trips through re-score and export so
           // the caveat survives everywhere the number goes.
-          altCounter: r.altCounter === true
+          altCounter: r.altCounter === true,
+          /* Whether the customer wants FSD, from the Tesla OS order.
+             "intent" | "has" | "none" | null, and null is NOT "none" — it is
+             the question we could not ask. The page must render those two
+             differently, and the morning brief must only ever chase "none". */
+          fsdIntent: r.fsdIntent ?? null,
+          // The order's own wording, e.g. "Trial expiring September 25, 2026,
+          // Subscription Intended". Shown on hover so the expiry date is
+          // reachable without another column.
+          fsdStatus: r.fsdStatus || ""
         }))
       });
     }
@@ -634,7 +757,11 @@ const server = http.createServer(async (req, res) => {
           // handover and owns the FSD figure; the advisor owns the
           // appointment. They differ on about a third of cars.
           ...(advanced ? [{ key: "host",    header: "Delivery host",    width: 22 },
-                          { key: "advisor", header: "Delivery advisor", width: 22 }] : []),
+                          { key: "advisor", header: "Delivery advisor", width: 22 },
+                          // The order's own wording, not a yes/no. "Not asked"
+                          // and "said nothing" are different answers and the
+                          // spreadsheet has room to say which.
+                          { key: "fsd",     header: "FSD Sub-Intent",   width: 42 }] : []),
           { key: "miles",   header: `FSD miles, first ${win} h`, width: 24,
             type: "number", digits: 2 },
           { key: "model",   header: "Model",            width: 12 },
@@ -649,6 +776,9 @@ const server = http.createServer(async (req, res) => {
           miles: r.miles,
           model: r.modelLabel || r.model || "",
           gapMin: r.gapMin,
+          fsd: r.fsdIntent == null ? "Not known"
+             : r.fsdIntent === "none" ? "No Sub-Intent"
+             : (r.fsdStatus || (r.fsdIntent === "intent" ? "Sub-Intent" : "Has FSD")),
           note: noteFor(r)
         }))
       });
@@ -817,6 +947,23 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true, ...out });
     }
 
+
+    /* ── send the morning brief by hand ──
+       Always yesterday's percentage and today's list, whatever the dashboard
+       is currently showing. `post:false` previews the card without touching
+       the channel, which is how you check the wording. */
+    if(p === "/api/admin/brief/run" && req.method === "POST"){
+      const body = await readBody(req);
+      if(!authed(body)) return sendJson(res, 401, { error: "Wrong password" });
+
+      const post = body.post === true;
+      if(post && !String(L.loadConnections().alertWebhook || "").trim()){
+        return sendJson(res, 400, { error: "No webhook set — save one first." });
+      }
+
+      const out = await withReportLock("brief-manual", () => runMorningBrief({ post }));
+      return sendJson(res, 200, { ok: true, ...out });
+    }
 
     if(p === "/api/admin/clear-vin-cache" && req.method === "POST"){
       const body = await readBody(req);

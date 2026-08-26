@@ -231,6 +231,15 @@ a.vin-link:hover{border-bottom-color:var(--blue);color:var(--blue)}
 /* Still inside the measurement window, so the figure beside it is not final.
    A caveat rather than a verdict, so it stays quiet — and it carries a live
    dot because "counting" is a state, not an outcome. */
+/* The customer said they want FSD. Informational, NOT a verdict on the car —
+   this is the one badge on the row that says nothing about how far anything
+   drove. ZO-1's informational-tag pair, which is the only status slot this
+   board had left, and deliberately not a warning colour: a customer who wants
+   FSD is good news and must not sit in amber next to a genuine caveat. */
+.badge.intent{background:#F1ECFC;color:#5B3DB1}
+/* Already has it — bought, subscribed or transferred in. Stays on the default
+   grey: it is a fact about the order, not something to act on. */
+.badge.hasfsd{background:#EEEFF0;color:#5C5E62}
 .badge.live{background:#E8F2EF;color:#15665A}
 .badge.live::before{
   content:"";width:5px;height:5px;border-radius:50%;background:currentColor;
@@ -712,6 +721,9 @@ a.vin-link:hover{border-bottom-color:var(--blue);color:var(--blue)}
 .conn .dot{width:8px;height:8px;border-radius:50%;background:var(--grey-car);flex:none}
 .conn.ok .dot{background:var(--green)}
 .conn.bad .dot{background:var(--red)}
+/* Missing, but nothing is broken by its absence — an optional source. Red is
+   reserved for "this board cannot do its job". */
+.conn.warn .dot{background:var(--amber)}
 .conn b{font-weight:600}
 .conn span{color:var(--ink-mute);margin-left:auto;text-align:right;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:58%}
@@ -1147,6 +1159,10 @@ a.vin-link:hover{border-bottom-color:var(--blue);color:var(--blue)}
       <div class="conn" id="cTesladex"><i class="dot"></i><b>Tesladex</b><span>—</span></div>
       <div class="conn" id="cGarage"><i class="dot"></i><b>Garage</b><span>—</span></div>
       <div class="conn adv-only" id="cIntrepid" hidden><i class="dot"></i><b>Intrepid</b><span>—</span></div>
+      <!-- Tesla OS is advanced-only because it is keyed by reference number, and a
+           basic run has none. It is never "required": without it every mileage
+           figure is still right and only the Sub-Intent badge is missing. -->
+      <div class="conn adv-only" id="cOs" hidden><i class="dot"></i><b>Tesla OS</b><span>—</span></div>
       <button class="btn btn-ghost" id="testBtn" style="width:100%">Test connections</button>
       <div class="hub-note">
         Sign-ins live on the <b>Zo Projects Hub</b>. One session there covers every
@@ -1201,6 +1217,27 @@ a.vin-link:hover{border-bottom-color:var(--blue);color:var(--blue)}
         never moves at all, so it can never change a figure the usual one could
         produce, and a car that genuinely sat still still reads zero. Those rows are
         marked <b>Backup counter</b>.</p>
+
+      <div class="sec-title">FSD Sub-Intent</div>
+      <p class="sec-p">Whether the customer has said they want FSD. It comes from their
+        <b>order</b> in Tesla OS, not from the car — Intrepid has no record of it — so
+        it is an advanced-mode column: the lookup is keyed by reference number, and a
+        basic run has none.</p>
+      <p class="sec-p">A row marked <b>Sub-Intent</b> has a customer who intends to
+        subscribe, or is transferring FSD across from another car. <b>Has FSD</b> means
+        they already own it. Both are people you can leave alone. A row with
+        <i>neither</i> badge is a customer who has said nothing — those are the ones the
+        morning brief names, and the ones worth a conversation before they drive away.</p>
+      <p class="sec-p">An unmarked row is not proof of disinterest, though: a car whose
+        order could not be read is also unmarked, and the run says how many of those
+        there were. Not asked and not interested are different answers, and this board
+        never quietly turns the first into the second. The order's own wording, trial
+        expiry and all, is on the badge's tooltip.</p>
+      <p class="sec-p">The Tesla OS session behind it expires about every eighty
+        minutes and the browser deletes it, so it is usually gone by the time a report
+        runs. The board renews it by itself — it opens a tab, takes the new token and
+        closes the tab again — which is why there is no Connect button to press and why
+        the scheduled morning brief works with nobody at the desk.</p>
 
       <div class="sec-title">The <span class="win-h">12</span>-hour window</div>
       <p class="sec-p">Miles are counted for the first <b><span class="win-h">12</span>
@@ -1341,6 +1378,48 @@ a.vin-link:hover{border-bottom-color:var(--blue);color:var(--blue)}
           as pressing Load does.</div>
       </div>
       <div class="hint" id="alertPreviewBox" hidden></div>
+
+      <div class="sep"></div>
+
+      <div class="sec-title">Morning brief</div>
+      <p class="sec-p">A different card from the hourly one, and the only place this
+        board puts a customer's name in a channel. It says where <b>yesterday</b>
+        finished — the percentage on its own, not the list — and then names today's
+        customers who have <b>not</b> stated FSD Sub-Intent, so each advisor knows who
+        to spend the day on and who they can leave alone. Always those two dates,
+        whatever the dashboard happens to be showing.</p>
+      <p class="sec-p">Customers whose order could not be read are counted and
+        mentioned, never named as uninterested — not asked and not interested are
+        different answers.</p>
+      <div class="field">
+        <div class="connect-row">
+          <button class="btn btn-ghost" id="briefPreview" style="flex:1">Preview</button>
+          <button class="btn btn-dark" id="briefSend" style="flex:1">Send now</button>
+        </div>
+        <div class="hint" id="briefHint">Two report runs — yesterday for the percentage
+          and today for the list — so it takes a little longer than the hourly preview.
+          Yesterday's windows have all closed, so most of it comes from cache.</div>
+      </div>
+      <div class="hint" id="briefPreviewBox" hidden></div>
+
+      <div class="sec-title">Tesla OS session</div>
+      <p class="sec-p"><b>Connect once.</b> A sign-in window opens; if this machine has
+        already been through Entra it completes on its own in a few seconds and nothing
+        needs clicking.</p>
+      <p class="sec-p">After that it keeps itself signed in. The session expires about
+        every eighty minutes and the browser deletes it, so it is usually gone by the
+        time a report runs — the board quietly opens a tab, takes a new token and closes
+        the tab again. That is why the scheduled morning brief works with nobody at the
+        desk. The first connect is the only one you do by hand.</p>
+      <p class="sec-p">If a renewal fails it stops trying for ten minutes rather than
+        making every run wait. Pressing <b>Connect</b> clears that and retries now.</p>
+      <div class="field">
+        <div class="connect-row">
+          <button class="btn btn-dark" id="osConnect" style="flex:1">Connect</button>
+          <button class="btn btn-ghost" id="osForget" style="flex:1">Forget session</button>
+        </div>
+        <div class="hint" id="osHint">—</div>
+      </div>
     </section>
 
     <section class="sec" id="secMaintenance">
@@ -1574,6 +1653,14 @@ const ES = {
   "Send now"             : "Enviar ahora",
   "Send one now"         : "Enviar uno ahora",
   "Backup counter"       : "Contador de respaldo",
+  /* Left in English on purpose: "Sub-Intent" is what the Tesla OS order page
+     calls it and what the team says out loud, so translating it would put a
+     word on the badge that matches nothing the advisor can look up. The
+     tooltips beside it are translated, which is where the meaning lives. */
+  "Sub-Intent"           : "Sub-Intent",
+  "Has FSD"              : "Tiene FSD",
+  "Tesla OS"             : "Tesla OS",
+  "Morning brief"        : "Resumen matutino",
   "Reset dashboard"      : "Restablecer el panel",
   "Press again to reset" : "Pulsa de nuevo para restablecer",
   "Clear loaded statistics" : "Borrar las estadísticas cargadas",
@@ -2417,6 +2504,37 @@ function orderLink(r){
              title="Open order ${esc(r.rn)} in OS">${esc(label)}</a>`;
 }
 
+/* Does this customer want FSD, according to their order?
+
+   Three states are rendered and a fourth deliberately is not. "intent" and
+   "has" get a badge; "none" and unknown get nothing.
+
+   Leaving "none" unbadged is the choice worth explaining. It is the state that
+   matters most — those are the customers the morning brief names — but the
+   dashboard is read to find things to act on, and forty grey "no intent"
+   chips would drown the two that say something. Absence reads as "nothing
+   stated", which is exactly what it means.
+
+   Unknown renders as nothing for a different reason: we never got an answer,
+   and inventing a chip for that would put a question we failed to ask in the
+   same visual language as a fact about the customer. The run's notices say so
+   in words instead. */
+function intentBadge(r){
+  if(r.fsdIntent === "intent"){
+    const detail = r.fsdStatus
+      ? esc(r.fsdStatus) + " — no need to sell them on it."
+      : "This customer intends to subscribe to FSD.";
+    return `<span class="badge intent" title="${detail}">Sub-Intent</span>`;
+  }
+  if(r.fsdIntent === "has"){
+    const detail = r.fsdStatus
+      ? esc(r.fsdStatus) + " — they already have FSD."
+      : "This customer already has FSD.";
+    return `<span class="badge hasfsd" title="${detail}">Has FSD</span>`;
+  }
+  return "";
+}
+
 function rowHtml(r){
   const used  = droveFsd(r);
   const mdl   = modelLabel(r.model);
@@ -2458,6 +2576,7 @@ function rowHtml(r){
         ${r.altCounter
           ? `<span class="badge warn" title="This car's usual FSD odometer never moved all fortnight — it is stuck, not idle. The figure here is read off the vehicle's backup FSD counter, which agrees with the usual one to the thousandth of a mile on every car where both are working.">Backup counter</span>`
           : ""}
+        ${intentBadge(r)}
       </div>
     </div>
 
@@ -2539,6 +2658,12 @@ function render(data){
   if(s.failed)   msgs.push(`${s.failed} vehicle(s) returned no telemetry.`);
   if(s.gapLeaky) msgs.push(`${s.gapLeaky} vehicle(s) have a pre-handoff baseline older than an hour — a little staff driving may be counted in those rows.`);
   if(s.altCounter) msgs.push(`${s.altCounter} vehicle(s) have a stuck FSD odometer and were measured on the backup counter instead — they would otherwise have read zero.`);
+  /* Only when SOME rows were answered. If nothing could be checked the run
+     already carries a notice from the server saying why, and a bare count on
+     top of it would read as a finding rather than a failure. */
+  if(s.intentUnknown && s.intentUnknown < s.vehicles){
+    msgs.push(`${s.intentUnknown} vehicle(s) could not be checked for FSD Sub-Intent — those rows are unmarked either way.`);
+  }
   if(msgs.length) note(msgs.join(" ")); else clearNotes();
 }
 
@@ -3052,15 +3177,36 @@ function fillConnections(c){
   ct.className = "conn";
   ct.querySelector("span").textContent = "delivered-vehicle access — press Test to check";
 
+  /* Tesla OS. Amber rather than red when it is missing: the report is complete
+     without it and only the Sub-Intent badge goes away, so a red dot here
+     would say "this board is broken" about a board that is working.
+
+     No Connect button. The board renews this session by itself whenever a run
+     needs one — see os.js — so a button would mostly be a thing people press
+     when nothing is wrong. Forget is offered because undoing is the action a
+     person genuinely cannot take any other way. */
+  const co = $("cOs");
+  co.className = "conn adv-only " + (c.os && c.os.set ? "ok" : "warn");
+  co.hidden = S.mode !== "advanced";
+  co.querySelector("span").textContent = c.os && c.os.set
+    ? `signed in as ${c.os.name || c.os.user}` + (c.os.title ? ` · ${c.os.title}` : "")
+    : "not connected — Sub-Intent will be blank until a run renews it";
+
   // Rail dot: red only when something is actually missing, so it means
   // "attend to this" rather than decorating the rail permanently. Basic mode
-  // needs no cookie, so a missing one is not a fault there.
+  // needs no cookie, so a missing one is not a fault there. Tesla OS is
+  // deliberately NOT in this test — it is optional and repairs itself.
   const intrepidOk = S.mode !== "advanced" || (c.intrepid.set && c.intrepid.looksOk);
   $("railWarnConn").hidden = c.garage.signedIn && intrepidOk;
 
   // Painted from the same summary, so the alerts panel is refreshed by every
   // caller that already repaints connections rather than needing its own.
   fillAlerts(c.alerts);
+  /* Not awaited: it costs an authenticated round trip to Tesla OS and nothing
+     else on this panel depends on the answer. Painting the rest immediately
+     and letting this line fill in a moment later beats holding the whole
+     panel back for an optional source. */
+  paintOs();
 }
 
 /* Switching sources re-runs whatever is on screen. The user asked for the
@@ -3311,6 +3457,154 @@ async function runAlertNow(post){
 }
 $("alertPreview").addEventListener("click", () => runAlertNow(false));
 $("alertSend").addEventListener("click",    () => runAlertNow(true));
+
+/* The morning brief. Its own note line and its own box rather than sharing the
+   digest's: the two cards say different things and a shared preview pane would
+   leave yesterday's answer sitting under today's button. */
+const briefNote = (msg, bad) => {
+  const el = $("briefHint");
+  el.textContent = msg;
+  el.style.color = bad ? "var(--red)" : "";
+};
+
+async function runBriefNow(post){
+  const btn = post ? $("briefSend") : $("briefPreview");
+  const box = $("briefPreviewBox");
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = post ? "Sending…" : "Running…";
+  briefNote(post ? "Running yesterday and today, then posting…"
+                 : "Running yesterday and today…");
+  try{
+    const d = await api("/api/admin/brief/run", { password: S.password, post });
+
+    if(d.skipped){ briefNote(d.reason, true); box.hidden = true; return; }
+
+    const head = d.yesterdayDone == null
+      ? `<b>Yesterday (${esc(d.yesterdayDate)}) could not be read.</b>`
+      : `<b>We ended yesterday with ${d.yesterdayDone}% FSD engagement.</b>`;
+
+    if(!d.noIntent){
+      box.hidden = false;
+      box.innerHTML = head + `<br>` + (d.total
+        ? `All ${d.total} of today's customers already have FSD or intend to subscribe — nobody to chase.`
+        : `No cars delivering today.`) +
+        (d.unknown ? `<br>${d.unknown} could not be checked.` : "");
+    }else{
+      const lines = d.cars.slice(0, 25).map(c =>
+        `${esc(c.advisor || "Unassigned")} — ${esc(c.customer || "unnamed customer")}` +
+        (c.vin ? ` · ${esc(c.vin)}` : "")).join("<br>");
+      box.hidden = false;
+      box.innerHTML = head + `<br>${d.noIntent} without Sub-Intent:<br>${lines}` +
+        (d.noIntent > 25 ? `<br>…and ${d.noIntent - 25} more` : "") +
+        (d.unknown ? `<br><i>${d.unknown} could not be checked — not listed either way.</i>` : "");
+    }
+    briefNote(post ? `Posted to Teams (HTTP ${d.status}).`
+                   : `Preview only — nothing was posted.`);
+  }catch(err){
+    box.hidden = true;
+    briefNote(err.message, true);
+  }finally{
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+$("briefPreview").addEventListener("click", () => runBriefNow(false));
+$("briefSend").addEventListener("click",    () => runBriefNow(true));
+
+/* The Tesla OS session. Connect is setup on a cold board and a recovery action
+   on a warm one — the board renews itself once it has been connected, so the
+   second press is only ever someone forcing it early. */
+const osNote = (msg, bad) => {
+  const el = $("osHint");
+  el.textContent = msg;
+  el.style.color = bad ? "var(--red)" : "";
+};
+
+/* keepHint: after a failed or cancelled sign-in the hint already says what
+   happened, and that is more use than "Not connected." The button label still
+   has to be refreshed, so the two are separable. */
+async function paintOs({ keepHint = false } = {}){
+  try{
+    const d = await api("/api/os");
+    const c = d.connection || {};
+    /* The button says which of the two jobs it is doing. "Connect" on a board
+       that has never been connected is the one action that genuinely has to be
+       taken by hand; on a connected board the same button is just a way to
+       force a renewal early. */
+    $("osConnect").textContent = c.set ? "Reconnect" : "Connect";
+    if(keepHint) return;
+    osNote(c.set
+      ? (d.live ? `Signed in as ${c.name || c.user}. Renews itself from here on.`
+                : `Stored session for ${c.name || c.user} has lapsed — the next run will `
+                  + `replace it automatically. Nothing to do.`)
+      : "Not connected. Sub-Intent stays blank until you connect this once.");
+  }catch(err){ osNote(err.message, true); }
+}
+
+/* The sign-in is a server-side state machine, polled — closing the panel
+   mid-flow must not abandon a capture that is seconds from succeeding.
+
+   The one button does both jobs. It stays live while the flow runs and turns
+   into Cancel, because the server allows three minutes for a window a person
+   may already have given up on, and a dead disabled button for that long reads
+   as a hang. */
+let osBusy = false;
+
+/* Cancelling deliberately does NOT clear osBusy or repaint. The connect call
+   still owns the button; it is one poll away from seeing phase "cancelled" and
+   tidying up itself. Two owners is how you get a button that says Cancel with
+   nothing running behind it. */
+async function osCancel(){
+  const btn = $("osConnect");
+  btn.disabled = true; btn.textContent = "Cancelling…";
+  try{ await api("/api/os/cancel", { password: S.password }); }
+  catch(err){ osNote(err.message, true); }
+}
+
+async function osButton(){
+  if(osBusy) return osCancel();
+
+  const btn = $("osConnect");
+  let told = false;                    // did we already leave a message worth keeping?
+  osBusy = true;
+  btn.textContent = "Cancel";
+  try{
+    await api("/api/os/connect", { password: S.password });
+
+    for(let i = 0; i < 95; i++){
+      await new Promise(r => setTimeout(r, 2000));
+      const d = await api("/api/os");
+      const s = d.signin || {};
+      if(s.phase === "connected") return;                    // finally repaints
+      if(s.phase === "failed" || s.phase === "cancelled"){
+        osNote(s.error || "Sign-in cancelled.", s.phase === "failed");
+        told = true;
+        return;
+      }
+      if(s.detail) osNote(s.detail);
+    }
+    osNote("Gave up waiting for the sign-in.", true); told = true;
+  }catch(err){ osNote(err.message, true); told = true; }
+  finally{
+    osBusy = false;
+    btn.disabled = false;
+    /* Never restore a remembered label — the whole point of the press was to
+       change which of Connect/Reconnect is correct. Ask the server. */
+    try{ await paintOs({ keepHint: told }); }catch{ btn.textContent = "Connect"; }
+  }
+}
+
+$("osConnect").addEventListener("click", osButton);
+
+$("osForget").addEventListener("click", async () => {
+  try{
+    await api("/api/os/disconnect", { password: S.password });
+    /* Forgetting takes the board back to cold, and a cold board does NOT sign
+       itself in — that is the whole point of the first connect being manual.
+       Saying "the next run will sign in again" here would be untrue. */
+    $("osConnect").textContent = "Connect";
+    osNote("Forgotten. Sub-Intent stays blank until you press Connect again.");
+  }catch(err){ osNote(err.message, true); }
+});
 
 /* Not blockAction: that puts the result INTO the button, which is right for
    "42 sites cached" and wrong for a sentence. The message belongs in the

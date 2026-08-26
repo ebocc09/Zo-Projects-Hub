@@ -8,6 +8,8 @@ node_modules/
 # Each board keeps its own runtime state — settings, caches, and any cookie
 # it fell back to before the hub existed. None of it belongs in a shared zip.
 boards/*/.connections.json
+boards/*/.connections.*.json
+boards/*/.connections.bak*
 boards/*/.garage.json
 boards/*/.tokens*.json
 boards/*/.client*.json

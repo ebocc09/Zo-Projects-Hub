@@ -89,6 +89,10 @@ const BOARDS = [
     // into its own sync field, which is what the Token button is for.
     needsToken: "github"
   }
+  /* ZO-007 (Bay Tracker) was built and withdrawn on 2026-08-24. Indoors, 23% of
+     cars on site report no GPS fix at all and the D row read a 93 m spread
+     across an 18 m row, so bay-level tracking could not be made to work. The
+     serial is retired, not reused — same rule as ZO-005. */
 ];
 
 const dirOf = b => path.join(ROOT, b.dir);

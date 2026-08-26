@@ -1088,6 +1088,302 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
    exist until the process is restarted, and a row that just sat at "English"
    would be lying about which language is in force. */
 #langNow.stale{color:var(--red);font-size:11.5px}
+
+/* ═══════════════════════════ Parts — the tree ═══════════════════════════
+
+   Ed's design, in his words: "a bunch of cards on the left stringing to the
+   main card on the right", and you finish it by dragging the part onto the
+   VIN. A node graph, near enough to Blender's that the gesture is obvious
+   without a label explaining it.
+
+   The wires are ONE svg sitting behind the cards, absolutely positioned over
+   the whole tree and redrawn from measured element boxes. Not per-card
+   pseudo-elements: the cards change height as they fill in, and a border
+   trick would need every possible height baked in. Cubic curves with
+   horizontal control arms, which is what makes them read as cables rather
+   than as elbows.
+
+   pointer-events:none on the svg is load-bearing — it covers the cards, so
+   without it nothing underneath could be clicked at all. */
+
+.ptree-wrap{position:relative}
+.ptree-wires{position:absolute;inset:0;width:100%;height:100%;
+  pointer-events:none;z-index:0;overflow:visible}
+.ptree-wires path{fill:none;stroke:var(--line);stroke-width:2}
+/* Dashed until the node it comes from has a value. The unfinished cable IS
+   the validation message — there is no separate "you must pick a part". */
+.ptree-wires path.pending{stroke-dasharray:5 5;stroke:var(--line-soft)}
+.ptree-wires path.live{stroke:var(--ink);stroke-width:2.5}
+
+/* The dialog used to hold the tree and needed 940px for it. It holds a VIN
+   and one slide now, so it is an ordinary modal and the width problem moved
+   onto the page with the workspace. */
+/* The anchor for both rails — they belong to this section, not to the window,
+   so they scroll with it and stay inside the board's own width. The tree and
+   the run are indented past the quick-add rail; the head is not, so the title
+   still starts at the board's left edge. */
+.parts-page{position:relative}
+.parts-page[hidden]{display:none}
+#partsPageNote,#partsTreeWrap,#partsRun{margin-left:232px}
+.pp-head{display:flex;align-items:baseline;gap:14px;margin-bottom:14px;flex-wrap:wrap}
+.pp-head h3{margin:0;font-size:13px;font-weight:600;letter-spacing:.11em;
+  text-transform:uppercase}
+.pp-head .modal-sub{font-size:12.5px;color:var(--ink-mute)}
+/* Another VIN stays with the title on the LEFT. The far right of this row
+   belongs to the cancel lever, and the two most consequential controls in the
+   tool should not sit side by side. */
+.pp-head{padding-right:200px}
+.pp-head .btn{margin-left:8px}
+.ptree{position:relative;z-index:1;display:grid;
+  grid-template-columns:minmax(0,1fr) 96px minmax(300px,340px);
+  align-items:center;gap:0}
+.ptree-col{display:flex;flex-direction:column;gap:10px}
+
+/* A node. The dot on the right edge is where its wire leaves from, so the
+   curve has somewhere honest to start. */
+.pnode{position:relative;border:1px solid var(--line);border-radius:var(--r-md);
+  background:var(--paper);padding:10px 12px}
+.pnode.set{border-color:var(--ink-soft)}
+.pnode.warn{border-color:var(--amber)}
+.pnode::after{content:"";position:absolute;right:-5px;top:50%;
+  width:9px;height:9px;margin-top:-4.5px;border-radius:50%;
+  background:var(--line);border:2px solid var(--paper)}
+.pnode.set::after{background:var(--ink)}
+.pnode-k{font-size:10px;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-mute)}
+.pnode-v{margin-top:3px;font-size:13.5px;font-weight:500;line-height:1.35}
+.pnode-v.empty{color:var(--ink-mute);font-weight:400;font-style:italic}
+.pnode-sub{margin-top:3px;font-size:11.5px;color:var(--ink-mute);line-height:1.45}
+.pnode-sub.amber{color:#8a6200}
+.pnode-row{display:flex;align-items:flex-start;gap:10px}
+.pnode-row .pnode-main{flex:1;min-width:0}
+.pnode-act{display:flex;gap:6px;flex:none;align-items:center}
+
+/* Stock. The number Ed reads is FREE — on hand minus allocated — so it is the
+   one in the pill, and on-hand only appears in the quieter line beside it.
+   Zero is red rather than grey: it is the state that blocks the run, so it
+   should not look like ordinary metadata. */
+.pstock{display:inline-flex;align-items:baseline;gap:4px;padding:2px 7px;
+  border-radius:999px;background:var(--paper-alt);border:1px solid var(--line-soft);
+  font-size:11px;font-weight:600;white-space:nowrap}
+.pstock b{font-size:12.5px;letter-spacing:-.01em}
+.pstock.none{background:#FDECEC;border-color:#F5C4C5;color:var(--red)}
+.pstock.some{background:#E7F7EF;border-color:#B7E7CE;color:#0A7A45}
+
+/* The car. Deliberately the heaviest thing on screen — it is what everything
+   else points at, and the drop target. */
+.pvin{border:1px solid var(--ink);border-radius:var(--r-lg);
+  background:var(--paper);padding:16px 18px;box-shadow:var(--shadow)}
+.pvin-vin{font-size:15px;font-weight:600;letter-spacing:-.01em;
+  font-variant-numeric:tabular-nums}
+/* The canonical deep link, which needs the account segment as well as the VIN
+   and the visit id — `userId` off SCA's own visit header, the thing that made
+   this route buildable at all. Opens in its own tab: leaving a half-run
+   workspace to look something up would cost the run. */
+.pvin-sv{display:inline-block;margin-top:2px;font-size:11.5px;font-weight:600;
+  color:var(--blue);text-decoration:none;letter-spacing:-.01em}
+.pvin-sv:hover{text-decoration:underline}
+.pvin-k{font-size:10px;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-mute);margin-bottom:2px}
+/* The confirm card in the dialog is the same list of facts as the car card
+   on the page, so it reads off the same rules rather than a second set. */
+.pvin dl,#partsConfirm dl{margin:10px 0 0;display:grid;grid-template-columns:auto 1fr;
+  gap:3px 12px;font-size:12.5px}
+.pvin dt,#partsConfirm dt{color:var(--ink-mute)}
+.pvin dd,#partsConfirm dd{margin:0;text-align:right;font-weight:500}
+.pvin.armed{border-color:var(--blue);box-shadow:0 0 0 4px rgba(62,106,225,.14)}
+.pvin.armed .pvin-vin{color:var(--blue)}
+
+/* The part card is the one you pick up, so it says so — and only once every
+   other node is solid. A draggable card that cannot be dropped anywhere is
+   worse than one that is plainly not ready yet. */
+.pnode.drag{cursor:grab;border-color:var(--ink);box-shadow:var(--shadow)}
+.pnode.drag:active{cursor:grabbing}
+.pnode.dragging{opacity:.55}
+.pdrag-hint{margin-top:6px;font-size:11px;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--blue)}
+.pdrag-hint.off{color:var(--ink-mute)}
+
+/* The whole CARD follows the pointer, not a label of it — Ed's ask, and it is
+   the honest gesture: what you are moving onto the car is the part line, so
+   the thing in your hand should be the part line. A copy, so the original
+   stays in the tree and the column does not collapse under the cursor.
+
+   Fixed, so it is not clipped by anything it is dragged over. The clone keeps
+   its own `.pnode` styling; this rule only positions it and lifts it.
+
+   Scaled down in flight, and not for decoration: the part card is the full
+   width of the left column and the car it is dropped on is a 340px panel, so
+   held at full size it covers the target completely. `transform-origin:0 0`
+   keeps the top-left where it is put, which is what lets the grab offset stay
+   under the cursor — the scale is applied to that offset in the drag. */
+.pnode.pghost-card{position:fixed;z-index:80;pointer-events:none;margin:0;
+  box-shadow:var(--shadow-lg);transform-origin:0 0;
+  transform:rotate(-1.2deg) scale(.58)}
+
+/* The quick-add chip in flight. Already small, so it is carried at full size
+   — shrinking a 132px chip would make it hard to see what is in your hand.
+
+   Both ghost rules are written at TWO classes on purpose. A ghost is a clone,
+   so it keeps the class of the thing it copies — and `.qa-item` sets
+   `position:relative` further down this stylesheet. At equal specificity the
+   later rule wins, so the ghost computed `relative`, was laid out at the end
+   of the document at y≈1918, and the drag looked like it did nothing at all.
+   Nothing about that is visible in the source; it took measuring the clone.
+
+   Same shape as `.chip.on` losing to `.trk-base .chip` on the Tracker. When a
+   rule exists to beat the class it is applied alongside, it has to outrank it
+   rather than merely follow it. */
+.qa-item.pghost-qa{position:fixed;z-index:80;pointer-events:none;margin:0;
+  box-shadow:var(--shadow-lg);transform:rotate(-1.2deg)}
+
+/* Working. The tree stays exactly where it is and stops being touchable,
+   rather than disappearing: collapsing it hid the thing you had just spent a
+   minute assembling, at the moment you most wanted to read it back against
+   what the run was reporting. Ed's ask, 2026-08-25. */
+.ptree-wrap.locked{opacity:.45;pointer-events:none;filter:saturate(.4)}
+.ptree-wrap.locked .pdrag-hint{visibility:hidden}
+
+/* The run sits under the tree now instead of replacing it, so it needs the
+   gap the tree used to get by being the only thing there. */
+#partsRun{margin-top:20px}
+
+/* ── cancel, far top right ──
+   Mirrors the quick-add rail on the other side and is the furthest thing on
+   screen from the tree, the slide and Another VIN. The track drops downward
+   out of the knob, so it needs room below and nothing under it. */
+/* Inside the BOARD's column, not the window's. Ed's correction: "furthermost
+   right" meant the far edge of the workspace, not out in the header margin
+   where it floated over the hero. Absolute against `.parts-page`, so it sits
+   at the top-right of the tool it belongs to and scrolls with it. */
+.pa-cancel{position:absolute;right:0;top:0;z-index:40}
+.pa-cancel[hidden]{display:none}
+
+/* Red throughout, Ed's. It is the one destructive control on the board and it
+   should look like it from across the room — the arming colour then only has
+   to say "now", not "danger". */
+.pa-cancel .lv-knob{border-color:#C53030;color:#C53030;
+  background:rgba(197,48,48,.06)}
+.pa-cancel .lv-knob:hover{background:rgba(197,48,48,.12)}
+.pa-cancel .lever.armed .lv-knob{background:#C53030;color:#fff;border-color:#C53030}
+.pa-cancel .lever.armed .lv-fill{background:rgba(197,48,48,.20)}
+.pa-cancel .lever.armed .lv-foot{color:#C53030}
+
+/* One size, always. The knob is an inline-flex chip that sized itself to its
+   label, so "Cancel this ticket" → "Keep pulling…" → "Release to cancel"
+   made it three different widths mid-gesture — the box changing shape under
+   your hand while you pull it. Fixed to the widest of the three. */
+.pa-cancel .lv-knob{width:176px;justify-content:center;box-sizing:border-box}
+.pa-cancel .lv-text{white-space:nowrap}
+
+/* ── quick add ──
+   Fixed to the left edge of the WINDOW. `main` is max-width:1180 centred, so
+   at 1440 there is ~130px of margin either side and the rail lives in it
+   without moving anything. Below that it would overlap the column, so it
+   stops being fixed and rides above the workspace instead — overlapping the
+   thing you are dragging onto would be worse than being in the way. */
+/* Its own panel, not a floating stack of chips. It is fixed, so what sits
+   behind it changes as the page scrolls — over the dark hero the heading and
+   the dashed Add button were ink-on-ink and all but invisible. A surface of
+   its own means it reads the same wherever it happens to be.
+
+   118 wide at left:8 ends at 126px, and `main` is 1180 centred — so at a
+   1440 window it clears the column by 4px. Below 1400 it cannot, and it goes
+   horizontal above the workspace rather than sitting on top of the thing it
+   is dragged onto. */
+/* Inside the board's column, at the far left of the WORKSPACE — Ed's
+   correction. It was fixed to the window and floated over the hero, which is
+   header space and not the board. Absolute against `.parts-page` now, level
+   with the tree, and the tree is indented to leave it the room. */
+.qa{position:absolute;left:0;top:44px;width:214px;z-index:40;
+  display:flex;flex-direction:column;gap:6px;
+  background:var(--paper);border:1px solid var(--line);
+  border-radius:var(--r-md);padding:9px 8px}
+.qa[hidden]{display:none}
+.qa-h{font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-mute);padding:0 2px 2px}
+.qa-list{display:flex;flex-direction:column;gap:6px}
+.qa-item{position:relative;border:1px solid var(--line);border-radius:var(--r-sm);
+  background:var(--paper);padding:7px 15px 7px 7px;font-size:11px;line-height:1.35;
+  cursor:grab;user-select:none}
+.qa-item:hover{border-color:var(--ink)}
+.qa-item:active{cursor:grabbing}
+.qa-item.dragging{opacity:.5}
+/* Nothing is clipped any more. The rail was 118px and squeezed against the
+   window margin, so both lines had to be truncated and Ed could not read
+   which part a chip was. Inside the board's column it can simply be wide
+   enough: the number never wraps at 214px, and the NAME is allowed to run to
+   as many lines as it needs — a name you cannot finish reading is the same
+   problem as no name at all. */
+.qa-item .pn{display:block;font-weight:600;font-size:11.5px;letter-spacing:-.01em;
+  white-space:nowrap}
+.qa-item .nm{display:block;color:var(--ink-mute);margin-top:1px}
+/* Stock is never stored with the part — a saved count would be a lie the
+   moment somebody else picked one. Fetched on every paint. */
+.qa-item .qty{display:inline-block;margin-top:3px;font-weight:600;font-size:10px;
+  padding:1px 5px;border-radius:999px;background:var(--paper-alt);color:var(--ink-mute)}
+.qa-item .qty.some{background:rgba(46,138,87,.12);color:#2E8A57}
+.qa-item .qty.none{background:rgba(197,48,48,.10);color:#C53030}
+.qa-item .x{position:absolute;top:3px;right:3px;width:15px;height:15px;padding:0;
+  border:0;background:none;color:var(--ink-mute);cursor:pointer;font-size:13px;
+  line-height:15px;border-radius:3px}
+.qa-item .x:hover{background:var(--paper-alt);color:var(--ink)}
+.qa-add{border:1px dashed var(--line);border-radius:var(--r-sm);background:none;
+  padding:7px 8px;font-size:11px;font-weight:600;color:var(--ink-mute);cursor:pointer}
+.qa-add:hover{border-color:var(--ink);color:var(--ink)}
+.qa-find input{width:100%;padding:6px 7px;font-size:11px;border:1px solid var(--line);
+  border-radius:var(--r-sm);background:var(--paper)}
+.qa-find .psugg{max-height:260px}
+.qa-find .psugg button{font-size:11px;padding:6px 7px}
+.qa-empty{font-size:11px;color:var(--ink-mute);line-height:1.4;padding:2px}
+
+/* No width fallback any more. Both rails live inside the board's own column
+   now, so they scale with it instead of fighting the window for margin. */
+
+/* Full width, because it stands where a full-width button used to and the
+   stylesheet's default 280px track read as the card shrinking on the press —
+   which is the thing this slide exists to stop doing. */
+#partsOpenSlide .slide{width:100%;margin-top:0}
+#partsOpenSlide .slide.working{opacity:.8}
+
+/* The close button and the slide it turns into are the same 280px, so the
+   swap changes what the control IS without changing where it sits. */
+/* 38px is `.slide`'s height. Matching it as well as the width is what makes
+   the swap invisible — 4px of panel reflow is small and still reads as a
+   flinch at the moment you press. */
+#partsCloseBtn{width:280px;max-width:100%;height:38px}
+.close-slide{width:280px;max-width:100%}
+.close-slide .slide{width:100%;margin-top:0}
+.close-slide .slide.working{opacity:.8}
+
+/* Search-as-you-type inside a node. Same bones as the site picker. */
+.psearch{margin-top:8px}
+.psearch input{width:100%;padding:7px 9px;border:1px solid var(--line);
+  border-radius:var(--r-sm);background:var(--paper)}
+.psugg{margin-top:5px;max-height:210px;overflow:auto;border:1px solid var(--line-soft);
+  border-radius:var(--r-sm)}
+.psugg:empty{display:none}
+.psugg button{display:flex;width:100%;gap:10px;align-items:center;
+  text-align:left;padding:7px 9px;border-bottom:1px solid var(--line-soft);
+  font-size:12.5px;background:var(--paper)}
+.psugg button:last-child{border-bottom:none}
+.psugg button:hover{background:var(--paper-alt)}
+.psugg button:disabled{opacity:.55;cursor:not-allowed}
+.psugg button:disabled:hover{background:var(--paper)}
+.psugg .pn{font-weight:600;font-variant-numeric:tabular-nums;flex:none}
+.psugg .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* The run, step by step. Written as it goes so a failure names the step it
+   failed at rather than replacing everything with one red line. */
+.pstep{display:flex;gap:9px;align-items:baseline;padding:5px 0;
+  border-bottom:1px solid var(--line-soft);font-size:13px}
+.pstep:last-child{border-bottom:none}
+.pstep .ic{flex:none;width:15px;font-weight:700}
+.pstep.ok .ic{color:var(--green)}
+.pstep.bad .ic{color:var(--red)}
+.pstep.skip .ic{color:var(--ink-mute)}
+.pstep .nm{font-weight:500}
+.pstep .dt{color:var(--ink-mute);font-size:12px;margin-left:auto;text-align:right}
 </style>
 </head>
 <body>
@@ -1142,6 +1438,19 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
        <b>waiting</b> for it.</p>
     <div class="tools">
       <button class="btn btn-primary" id="svBtn">Service Visits</button>
+      <!-- Beside Service Visits because it is the other half of that job: one
+           reads what is wrong with a centre's cars, this one puts a part on a
+           car and closes the ticket behind it. Ed's placement.
+
+           The only tool here that WRITES as its whole purpose. Everything else
+           reads, or writes one field on request. Undelivered only, and the
+           gate is server-side on a fresh Garage read.
+
+           `partsBtn`, `/api/parts/*` and `PS` keep the old word on purpose —
+           same call as the Expenable rename below: the button is the rename,
+           and forty identifiers across three files are not worth churning for
+           a label. -->
+      <button class="btn btn-primary" id="partsBtn">Part Picker</button>
       <button class="btn btn-primary" id="cogBtn">Cars on Ground</button>
       <!-- No modal behind this one: the bucket is the bucket and the centre is
            already picked, so there is nothing to choose before it runs.
@@ -1274,6 +1583,78 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
        <b>Pending Inventory</b> for the cars that are matched to a customer
        with no appointment booked.</p>
   </div>
+
+  <!-- ═══ Parts — the workspace ═══
+       The dialog confirms one car and opens the ticket; everything after that
+       happens out here. It is its own section rather than a shape inside
+       `.list` because it is a tree against one car, and the strip, the count
+       and the export above the list all mean nothing to it.
+
+       The tree is drawn against a ticket that ALREADY EXISTS, which is what
+       lets the pay type be read off the activity instead of promised. -->
+  <section class="parts-page" id="partsPage" hidden>
+    <div class="pp-head">
+      <h3>Part Picker</h3>
+      <span class="modal-sub" id="partsPageCtx"></span>
+      <span class="modal-sub" id="partsPageFoot"></span>
+      <button class="btn btn-ghost" id="partsAnother">Another VIN</button>
+    </div>
+
+    <!-- ═══ Cancel the ticket — the lever, top right OF THE BOARD ═══
+         The undo for a ticket that should never have been opened, and the
+         only control here that cancels a SERVICE VISIT. Part Picker alone.
+
+         Two things keep it away from your hand. It is a `.lever`: no click
+         handler exists at all, so a stray click cannot fire it — only a drag
+         the full length of the track. And it sits at the far right of the
+         workspace, diagonally opposite the quick-add rail, with Another VIN
+         kept over on the left so the two consequential controls in this tool
+         are never side by side. -->
+    <div class="pa-cancel" id="paCancelWrap" hidden>
+      <div class="lever" id="paCancel">
+        <div class="lv-track">
+          <div class="lv-fill"></div>
+          <div class="lv-foot">Release to cancel</div>
+        </div>
+        <button class="chip lv-knob" type="button" aria-describedby="paCancelHow">
+          <span class="lv-grip" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lv-text">Cancel this ticket</span>
+        </button>
+        <span id="paCancelHow" hidden>Grab and pull down to cancel this service
+          visit in the Service App, under Parts delays</span>
+      </div>
+    </div>
+
+    <!-- ═══ Quick add — the rail at the far left OF THE BOARD ═══
+         Parts this centre reaches for constantly. Drag one onto the car and
+         it is selected AND billed in the one gesture — the whole point is
+         that the common part costs one movement, not a search and two drags.
+         Inside the section rather than pinned to the window: the board's
+         column is what "far left" means here. -->
+    <aside class="qa" id="quickAdd" hidden>
+      <div class="qa-h">Quick add</div>
+      <div class="qa-list" id="qaList"></div>
+      <button class="qa-add" id="qaAdd">+ Add a part</button>
+      <div class="qa-find" id="qaFind" hidden>
+        <input type="text" id="qaQ" autocomplete="off" spellcheck="false"
+               placeholder="Search the catalogue">
+        <div class="psugg" id="qaSugg"></div>
+      </div>
+    </aside>
+
+    <div id="partsPageNote"></div>
+
+    <div id="partsTreeWrap" class="ptree-wrap" hidden>
+      <svg class="ptree-wires" id="partsWires" aria-hidden="true"></svg>
+      <div class="ptree">
+        <div class="ptree-col" id="partsNodes"></div>
+        <div></div>
+        <div id="partsCarCol"></div>
+      </div>
+    </div>
+
+    <div id="partsRun" hidden></div>
+  </section>
 </main>
 
 <footer class="foot">
@@ -1560,6 +1941,44 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
   <div class="modal-body" id="trkMapBody"></div>
 </div>
 
+<!-- ── Parts ──
+     Bills a part onto an undelivered car and closes the ticket behind it.
+
+     The dialog holds the VIN and one slide, and nothing else. Ed's line:
+     confirm the car here, then work on the page. It also happens to be what
+     makes the pay type honest — the tree out on the page is drawn against a
+     ticket that already exists, so it can read which pay types that activity
+     really takes instead of promising one. The workspace itself is at the
+     bottom of <main>. -->
+<div class="modal" id="partsModal" role="dialog" aria-label="Part Picker">
+  <div class="modal-head"><h3>Part Picker</h3>
+    <span class="modal-sub" id="partsCtx"></span>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body">
+    <div id="partsNote"></div>
+
+    <div class="facet">
+      <div class="facet-head"><span>One VIN</span></div>
+      <div class="field">
+        <input type="text" id="partsVin" autocomplete="off" spellcheck="false"
+               placeholder="5YJ… / 7SA… — 17 characters" maxlength="17">
+        <div class="hint"><b>Undelivered cars only.</b> A delivered car is
+          refused against a fresh Garage read, not against anything this page
+          is holding.</div>
+      </div>
+      <button class="btn btn-dark" id="partsGo" style="width:100%">Look up this VIN</button>
+    </div>
+
+    <!-- What the swipe is about to write to, shown before it can be swiped. -->
+    <div id="partsConfirm" hidden></div>
+  </div>
+  <div class="modal-foot">
+    <span class="modal-sub" id="partsFoot" style="margin-right:auto"></span>
+    <button class="btn btn-ghost" data-close>Cancel</button>
+  </div>
+</div>
+
 <div class="modal" id="trtModal" role="dialog" aria-label="Set TRT">
   <div class="modal-head"><h3>Set TRT</h3>
     <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
@@ -1649,6 +2068,13 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
         </svg>
         Tracker
         <span class="warn" id="railWarnTracker" hidden></span>
+      </button>
+      <button class="rail-item" data-sec="parts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 16V8l-9-5-9 5v8l9 5 9-5z"/><path d="M3.3 7.3 12 12l8.7-4.7M12 12v9"/>
+        </svg>
+        Part Picker
+        <span class="warn" id="railWarnParts" hidden></span>
       </button>
       <button class="rail-item" data-sec="checks">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
@@ -1908,6 +2334,55 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
         forgetting a path forgets it for good.</p>
       <button class="btn-block red" id="trkForget">Forget every recorded path</button>
       <div class="why" id="trkMsg" style="margin-top:4px"></div>
+    </section>
+
+    <!-- ── Part Picker ──
+         Everything a run starts with. The site is NOT among them any more: it
+         follows the centre the board is pointed at, so there is nothing here
+         that can disagree with the nav. The row below is a readout. -->
+    <section class="sec" id="secParts">
+      <h4 class="sec-h">Part Picker</h4>
+      <p class="sec-p">What a Part Picker run starts with. All of it is editable per
+        car on the tree — this is only the starting point.</p>
+
+      <div class="conn" id="paSiteRow"><i class="dot"></i><b>Site</b><span id="paSiteNow">—</span></div>
+      <div class="hint" style="margin-top:6px">Follows the centre picked in the
+        nav — tickets are opened there and shelf stock is counted from it. The
+        Service App is asked for it by name, because its directory does not
+        answer to a TRT number.</div>
+
+      <div class="field" style="margin-top:14px">
+        <label>Default technician</label>
+        <input type="text" id="paTechQ" autocomplete="off" spellcheck="false"
+               placeholder="Technician name">
+        <div class="psugg" id="paTechSugg" style="margin-top:6px"></div>
+      </div>
+      <div class="conn" id="paTechRow"><i class="dot"></i><b>Technician</b><span id="paTechNow">—</span></div>
+
+      <div class="field" style="margin-top:14px">
+        <label>Default correction code</label>
+        <input type="text" id="paCorrNow" autocomplete="off" readonly>
+        <div class="hint">Changed on the tree, per car. Shown here so the
+          starting point is visible in one place.</div>
+      </div>
+      <div class="field">
+        <label>Default symptom</label>
+        <input type="text" id="paSympNow" autocomplete="off" readonly>
+      </div>
+
+      <div class="row2">
+        <div class="field"><label>Activity narrative</label>
+          <input type="text" id="paNarr" autocomplete="off" maxlength="200"></div>
+        <div class="field"><label>Customer repair notes</label>
+          <input type="text" id="paNote" autocomplete="off" maxlength="500"></div>
+      </div>
+      <div class="hint" style="margin-top:-4px">Some tickets refuse to close
+        without customer repair notes. The board cannot write one — that call was
+        never captured and this board does not invent Service App writes — so it
+        tells you when one is needed and this is the wording to paste.</div>
+
+      <button class="btn-block" id="paSave" style="margin-top:12px">Save Part Picker settings</button>
+      <div class="why" id="paMsg" style="margin-top:4px"></div>
     </section>
 
     <section class="sec" id="secChecks">
@@ -2535,14 +3010,16 @@ function showModal(el, over){
   modalStack.push(el);
   el.classList.add("on");
   $("scrim").classList.add("on");
+  syncQuickAdd();
 }
 
 function hideModal(){
   const top = modalStack.pop();
   if(top){ top.classList.remove("on"); emptyModal(top); }
   const back = modalStack[modalStack.length - 1];
-  if(back){ back.classList.add("on"); return; }
+  if(back){ back.classList.add("on"); syncQuickAdd(); return; }
   $("scrim").classList.remove("on");
+  syncQuickAdd();
 }
 $("scrim").addEventListener("click", hideModal);
 document.addEventListener("click", e => {
@@ -4387,6 +4864,60 @@ function paintSlide(slide, v, words){
    `opts.end` overrides the word shown at the far end. Labels are kept short:
    the message above the slider has already said what is about to happen, and
    a sentence in the track leaves the knob nowhere to sit. */
+/* A slide that is simply THERE, rather than one a button turns into.
+
+   `confirmBySlide` below hides the control it replaces AND every sibling
+   beside it — right for a button standing in a row of buttons, wrong for a
+   card whose siblings are the thing you are confirming. On the Parts confirm
+   card those siblings are the car's own details, so the card collapsed the
+   moment you pressed it and the slider that replaced a full-width button came
+   up at the stylesheet's 280px. Ed's ask: no press at all, the slide is on the
+   card as soon as the VIN resolves.
+
+   Same markup and the same paintSlide as every other slide on this board. Only
+   the mounting is different, which is why this is a sibling of confirmBySlide
+   rather than a flag inside it — the stowing behaviour is correct where it is
+   used and should not grow a mode. */
+function mountSlide(host, label, onDone, opts = {}){
+  const words = { rest: label, end: opts.end || "Release to confirm" };
+  host.innerHTML = `
+    <div class="slide${opts.tone === "danger" ? " danger" : ""}">
+      <div class="fill"></div>
+      <div class="lbl">${esc(label)}</div>
+      <div class="grip">&rarr;</div>
+      <input type="range" min="0" max="100" value="0" step="1" aria-label="${esc(label)}">
+    </div>`;
+
+  const slide = host.querySelector(".slide");
+  const range = host.querySelector("input");
+  const paint = v => paintSlide(slide, v, words);
+
+  range.addEventListener("input", () => paint(Number(range.value)));
+  // `change` fires on release — exactly when "did they mean it" is answered.
+  range.addEventListener("change", () => {
+    if(Number(range.value) < 100){ range.value = 0; paint(0); return; }
+    onDone();
+  });
+  range.addEventListener("keyup", e => {
+    if(e.key === "End" && Number(range.value) === 100) onDone();
+  });
+  paint(0);
+
+  return {
+    /* Held at the far end rather than removed, so the card keeps its height
+       and its shape while the write runs. */
+    busy(text){
+      range.disabled = true; range.value = 100; paint(100);
+      slide.querySelector(".lbl").textContent = text;
+      slide.classList.add("working");
+    },
+    reset(){
+      range.disabled = false; range.value = 0; paint(0);
+      slide.classList.remove("working");
+    }
+  };
+}
+
 function confirmBySlide(button, label, opts = {}){
   return new Promise(resolve => {
     const words = { rest: label, end: opts.end || "Release to confirm" };
@@ -8455,6 +8986,1278 @@ $("resetBoard").addEventListener("click", async e => {
   setTrt(null, null);
 });
 
+/* ── Admin › Part Picker ── */
+const PA = { tech: null, correction: null, symptom: null };
+
+function paintPartsSettings(s){
+  PA.tech = s.tech;
+  PA.correction = s.correction; PA.symptom = s.symptom;
+  /* Derived, not stored — the server resolves it from the nav's TRT and sends
+     the reason instead when it cannot. Still red when it fails, for the same
+     reason as before: no site costs the whole tool, not one field. */
+  $("paSiteNow").textContent = s.site
+    ? `${s.site.name} · TRT ${s.site.trtId} · SCA ${s.site.scaLocationId}`
+    : (s.siteWhy || "not resolved");
+  $("paSiteRow").classList.toggle("ok",  Boolean(s.site));
+  $("paSiteRow").classList.toggle("bad", !s.site);
+  $("paTechNow").textContent = s.tech ? `${s.tech.name} · ${s.tech.userId}` : "not set";
+  $("paTechRow").classList.toggle("ok", Boolean(s.tech));
+  $("paCorrNow").value = s.correction ? `${s.correction.code} · ${s.correction.name}` : "";
+  $("paSympNow").value = s.symptom ? s.symptom.description : "";
+  $("paNarr").value = s.narrative || "";
+  $("paNote").value = s.customerNote || "";
+  $("railWarnParts").hidden = Boolean(s.site);
+}
+
+/* Two type-aheads, same bones as the move picker. Kept local rather than
+   folded into the tree's editor: this one writes a setting, that one fills a
+   run, and sharing them would mean one of the two carrying an argument it
+   never uses. */
+function wireAdminPicker(inputId, suggId, search, onPick){
+  let t = null, seq = 0;
+  $(inputId).addEventListener("input", () => {
+    clearTimeout(t);
+    t = setTimeout(async () => {
+      const term = $(inputId).value.trim();
+      const mine = ++seq;
+      if(term.length < 2){ $(suggId).innerHTML = ""; return; }
+      try{
+        const rows = await search(term);
+        if(mine !== seq) return;
+        $(suggId).innerHTML = rows.length
+          ? rows.map((r, i) => `<button data-i="${i}"><span class="nm">${esc(r.label)}</span>
+              <span style="color:var(--ink-mute)">${esc(r.sub || "")}</span></button>`).join("")
+          : `<button disabled><span class="nm">Nothing matched</span></button>`;
+        $(suggId).querySelectorAll("[data-i]").forEach(b => {
+          b.addEventListener("click", () => {
+            onPick(rows[Number(b.dataset.i)].raw);
+            $(suggId).innerHTML = ""; $(inputId).value = "";
+          });
+        });
+      }catch(err){
+        if(mine === seq) $(suggId).innerHTML =
+          `<button disabled><span class="nm">${esc(err.message)}</span></button>`;
+      }
+    }, 220);
+  });
+}
+
+/* No site picker here any more — the site follows the nav's centre and is a
+   readout. `/api/sites` still exists for the Move Ticket picker, which is a
+   genuine choice of somewhere else. */
+wireAdminPicker("paTechQ", "paTechSugg", async term => {
+  const d = await api(`/api/parts/techs?q=${encodeURIComponent(term)}`);
+  return (d.techs || []).map(t => ({ label: t.name, sub: t.title || "", raw: t }));
+}, tech => {
+  PA.tech = { userId: tech.userId, name: tech.name };
+  $("paTechNow").textContent = `${tech.name} · ${tech.userId} — not saved yet`;
+});
+
+$("paSave").addEventListener("click", async e => {
+  $("paMsg").textContent = "";
+  try{
+    const out = await admin("/api/admin/parts-defaults", { settings: {
+      tech: PA.tech,
+      narrative: $("paNarr").value, customerNote: $("paNote").value
+    } }, e.target);
+    paintPartsSettings(out);
+    $("paMsg").textContent = "Saved.";
+  }catch(err){
+    $("paMsg").textContent = err.message;
+  }
+});
+
+/* ═════════════════════════════════ Parts ═════════════════════════════════
+
+   A node tree you finish by dragging. Cards down the left, the car on the
+   right, and the part card is the one you pick up: dropping it on the car
+   builds the ticket. Then the house slider closes it.
+
+   ── the drag IS the confirmation for the build ──
+
+   Not a click with a dialog behind it. A pointer press, a travel across the
+   dialog and a release on a specific target is the same bargain the `.slide`
+   makes — deliberate, and impossible to do by brushing past. What it must not
+   be is a gesture that trusts the state which enabled it, so the drop handler
+   re-asserts every node and the server re-reads Garage before it writes.
+   [[test-drags-fire-for-real]]: a stale fixture once dragged a real control
+   because the state had moved under the test.
+
+   Phase B keeps a slider of its own, because closing a ticket is the half
+   that cannot be undone. */
+
+/* `built` is the ticket itself and it is filled in twice: the swipe puts
+   serviceVisitId + activityId on it, the drag adds activityCorrectionId. It
+   is the one thing on this state that survives a mistake — once it is set, a
+   real ticket exists at the centre and starting over means going to the
+   Service App, not pressing Another VIN. */
+const PS = {
+  vin: null, car: null, defaults: null,
+  symptom: null, correction: null, part: null, tech: null,
+  editing: null, built: null, payType: null, filled: false, locked: false,
+  cancelled: false, done: false, busy: false, slide: null
+};
+
+$("partsBtn").addEventListener("click", () => {
+  partsReset();
+  showModal($("partsModal"));
+  setTimeout(() => $("partsVin").focus(), 60);
+});
+$("partsAnother").addEventListener("click", () => {
+  partsReset();
+  showModal($("partsModal"));
+  setTimeout(() => $("partsVin").focus(), 60);
+});
+$("partsGo").addEventListener("click", partsLookup);
+$("partsVin").addEventListener("keydown", e => { if(e.key === "Enter") partsLookup(); });
+
+function partsReset(){
+  Object.assign(PS, { vin:null, car:null, defaults:null, symptom:null,
+                      correction:null, part:null, tech:null, editing:null,
+                      built:null, payType:null, filled:false, locked:false,
+                      cancelled:false, done:false, busy:false, slide:null });
+  $("partsPage").hidden        = true;
+  $("partsTreeWrap").hidden    = true;
+  lockTree(false);
+  $("partsRun").hidden         = true;
+  $("partsRun").innerHTML      = "";
+  $("partsPageNote").innerHTML = "";
+  $("partsPageCtx").textContent  = "";
+  $("partsPageFoot").textContent = "";
+  $("partsConfirm").hidden     = true;
+  $("partsConfirm").innerHTML  = "";
+  $("partsNote").innerHTML     = "";
+  $("partsCtx").textContent    = "";
+  $("partsFoot").textContent   = "";
+  $("partsVin").value = "";
+  /* Put the page's own empty state back the way paintList would have it —
+     the workspace borrowed the space, it does not own it. */
+  $("empty").hidden = S.rows.length > 0;
+  /* Hides the rail; the saved parts behind it are untouched. They are the
+     point of the feature and outlive every ticket. */
+  syncQuickAdd();
+}
+
+/* Two notes, because there are two surfaces. The dialog's note answers the
+   VIN; the page's answers the ticket. One shared writer would put "this car
+   already has an open ticket" on a page that is not showing yet. */
+/* Greyed and untouchable, still on screen. Everything that used to hide the
+   tree goes through here — there is no state in this tool where the right
+   answer is to take it away. */
+const lockTree = on => $("partsTreeWrap").classList.toggle("locked", Boolean(on));
+
+/* ── the lever, generically ──
+   The contact switch's pull, lifted out so a second lever does not mean a
+   second copy of the mechanics. That one is left exactly as it is: it carries
+   its own count-in-the-label logic and rewiring a working control to add a
+   feature beside it is how this board has broken things before.
+
+   The bargain is the same one and it is the whole point: NO click handler
+   exists, so a stray click does nothing at all. Only a drag the length of the
+   track fires it, and it springs back if released short. */
+function wireLever(el, { label, armed, onPull, can }){
+  const knob = el.querySelector(".lv-knob");
+  const fill = el.querySelector(".lv-fill");
+  const text = el.querySelector(".lv-text");
+  let pulling = false, startY = 0, dy = 0;
+  const armedAt = LV_THROW - 4;      // the last few px are travel, not a target
+
+  const paint = () => {
+    const isArmed = dy >= armedAt;
+    knob.style.transform = `translateY(${dy}px)`;
+    fill.style.height = (30 + dy) + "px";
+    el.classList.toggle("armed", isArmed);
+    text.textContent = isArmed ? armed : dy > 8 ? "Keep pulling…" : label;
+  };
+  const spring = () => {
+    pulling = false; dy = 0;
+    el.classList.remove("pulling", "armed");
+    knob.style.transform = ""; fill.style.height = "";
+    text.textContent = label;
+  };
+  const ok = () => (can ? can() : true) && !el.classList.contains("busy");
+
+  knob.addEventListener("pointerdown", e => {
+    if(!ok()) return;
+    pulling = true; startY = e.clientY; dy = 0;
+    el.classList.add("pulling");
+    // Capture, or dragging off the side of the knob drops the gesture.
+    try{ knob.setPointerCapture(e.pointerId); }catch{ /* pull on without it */ }
+    paint();
+  });
+  knob.addEventListener("pointermove", e => {
+    if(!pulling) return;
+    dy = Math.max(0, Math.min(LV_THROW, e.clientY - startY));
+    paint();
+  });
+  knob.addEventListener("pointerup", () => {
+    if(!pulling) return;
+    const go = dy >= armedAt;
+    spring();
+    if(go) onPull();
+  });
+  knob.addEventListener("pointercancel", () => { if(pulling) spring(); });
+
+  /* The same lever from the keyboard: down a quarter at a time or End, then
+     Enter. Space and Enter do nothing until it is at the bottom — a press is
+     not a pull, which is the whole point of the control. */
+  knob.addEventListener("keydown", e => {
+    if(!ok()) return;
+    if(e.key === "ArrowDown" || e.key === "End"){
+      e.preventDefault();
+      el.classList.add("pulling"); pulling = true;
+      dy = e.key === "End" ? LV_THROW : Math.min(LV_THROW, dy + LV_THROW / 4);
+      paint();
+    }else if(e.key === "ArrowUp" || e.key === "Escape"){
+      if(pulling){ e.preventDefault(); e.stopPropagation(); spring(); }
+    }else if(e.key === "Enter" || e.key === " "){
+      e.preventDefault();
+      if(dy < armedAt) return;
+      spring(); onPull();
+    }
+  });
+  knob.addEventListener("blur", () => { if(pulling) spring(); });
+  return { spring, busy(on){ el.classList.toggle("busy", Boolean(on)); } };
+}
+
+/* ══════════════════════ cancel this ticket ══════════════════════
+
+   Shown only while Part Picker holds an open ticket, which is the only thing
+   it can cancel. Gone the moment the visit is closed or cancelled — a lever
+   that would refuse is worse than no lever. */
+const PA_CANCEL = wireLever($("paCancel"), {
+  label: "Cancel this ticket",
+  armed: "Release to cancel",
+  can  : () => Boolean(PS.built) && !PS.busy && !PS.cancelled && !PS.done,
+  onPull: () => runPartsCancel()
+});
+
+function syncCancelLever(){
+  const on = Boolean(PS.built) && !PS.cancelled && !PS.done && !$("partsPage").hidden;
+  $("paCancelWrap").hidden = !on;
+}
+
+async function runPartsCancel(){
+  if(!PS.built || PS.busy) return;
+  PS.busy = true;
+  PA_CANCEL.busy(true);
+  lockTree(true);
+  ppnote("");
+  paintRun("Cancelling the ticket", [{ name: "Working…", detail: "" }]);
+  try{
+    const out = await api("/api/parts/cancel", {
+      vin: PS.vin, serviceVisitId: PS.built.serviceVisitId
+    });
+    PS.cancelled = true;
+    syncCancelLever();
+    paintRun("Ticket cancelled", out.steps,
+      `<div class="hub-note" style="margin-top:10px">Visit
+         <b>${esc(String(PS.built.serviceVisitId))}</b> is cancelled in the Service
+         App under <b>Parts delays</b>, read back off the record.` +
+      (out.openLines.length
+        ? ` Its ${out.openLines.length === 1 ? "line is" : "lines are"} back in
+            outstanding work rather than cancelled — cancelling a visit does not
+            always take what is on it.`
+        : "") + `</div>`);
+  }catch(err){
+    const landed = (Array.isArray(err.partial) ? err.partial : []).map(s => ({ ...s }));
+    paintRun("The cancel stopped", landed.concat([{ name: err.message, bad: true }]),
+      `<div class="hub-note" style="margin-top:10px">Visit
+         <b>${esc(String(PS.built.serviceVisitId))}</b> is as the steps above leave
+         it. Check it in the Service App before trying again.</div>`);
+  }finally{
+    PS.busy = false;
+    PA_CANCEL.busy(false);
+  }
+}
+
+/* ══════════════════════════ quick add ══════════════════════════
+
+   A short list of parts this centre reaches for constantly, dragged straight
+   onto the car instead of searched for every time. Dropping one SELECTS it —
+   the billing is still the part card's own drag onto the same target, which
+   is the gesture that costs money and keeps its own confirmation.
+
+   Kept in localStorage, like the inventory filters and unlike the named
+   presets: it is one operator's shortcuts at one bench, not board
+   configuration, and it must not need the admin password to add a row to.
+
+   The STOCK is never stored with it. A saved count is a lie the moment
+   somebody else picks the last one, and this list exists to be trusted at a
+   glance. Fetched fresh on every paint, per part, and the number in the pill
+   is FREE — on hand minus allocated — the same figure the tree gates on. */
+const QA_KEY = "compiler.quickadd";
+
+const qaLoad = () => {
+  try{
+    const v = JSON.parse(localStorage.getItem(QA_KEY) || "[]");
+    return Array.isArray(v) ? v.filter(p => p && p.partNumber) : [];
+  }catch{ return []; }
+};
+const qaSave = list => {
+  try{ localStorage.setItem(QA_KEY, JSON.stringify(list)); }
+  catch{ /* a full or blocked store is not worth breaking the tool over */ }
+};
+
+/* The rail belongs to Part Picker and must not outlive its dialog: visible
+   while the VIN dialog is up or the workspace is on the page, and never
+   over the other tools, which have nowhere to drop a part. */
+function syncQuickAdd(){
+  /* The rail lives inside the workspace now, so it shows with the workspace
+     and nothing else — which is also the only time there is a car to drop a
+     part onto. It used to appear with the VIN dialog, where there was not. */
+  const on = !$("partsPage").hidden;
+  $("quickAdd").hidden = !on;
+  if(on) paintQuickAdd();
+  syncCancelLever();
+}
+
+function paintQuickAdd(){
+  const list = qaLoad();
+  const box  = $("qaList");
+
+  box.innerHTML = list.length
+    ? list.map((p, i) => `
+        <div class="qa-item" data-i="${i}" title="Drag onto the car to bill ${
+             esc(p.partNumber + " · " + (p.name || ""))} to this ticket">
+          <button class="x" data-drop="${i}" title="Remove from quick add">&times;</button>
+          <span class="pn">${esc(p.partNumber)}</span>
+          <span class="nm">${esc(p.name || "")}</span>
+          <span class="qty" data-qty="${esc(p.partNumber)}">…</span>
+        </div>`).join("")
+    : `<div class="qa-empty">Nothing here yet. Add the parts you reach for
+         most and drag them onto the car.</div>`;
+
+  for(const b of box.querySelectorAll("[data-drop]"))
+    b.addEventListener("click", e => {
+      e.stopPropagation();
+      const next = qaLoad();
+      next.splice(Number(b.dataset.drop), 1);
+      qaSave(next); paintQuickAdd();
+    });
+
+  for(const el of box.querySelectorAll(".qa-item"))
+    wireQuickDrag(el, list[Number(el.dataset.i)]);
+
+  qaStock(list);
+}
+
+/* One call per part, in parallel, each badge filled as its answer lands — a
+   rail that waits for the slowest of six before showing any number reads as
+   broken. A part whose count cannot be read says so rather than showing 0. */
+function qaStock(list){
+  for(const p of list){
+    const cell = $("qaList").querySelector(`[data-qty="${CSS.escape(p.partNumber)}"]`);
+    if(!cell) continue;
+    api(`/api/parts/stock?part=${encodeURIComponent(p.partNumber)}`)
+      .then(s => {
+        if(s.free == null){ cell.textContent = "stock ?"; return; }
+        cell.textContent = s.free + " in stock";
+        cell.classList.add(s.free > 0 ? "some" : "none");
+      })
+      .catch(() => { cell.textContent = "stock ?"; });
+  }
+}
+
+/* ── adding one ──
+   The catalogue search is per MODEL — `partssearch` takes a Modelid and there
+   is no all-models form of it — so this needs a car on screen. Said out loud
+   rather than greyed: a button that does nothing and will not say why is the
+   thing this board keeps getting told off for. */
+$("qaAdd").addEventListener("click", () => {
+  const find = $("qaFind");
+  find.hidden = !find.hidden;
+  $("qaSugg").innerHTML = "";
+  $("qaQ").value = "";
+  if(find.hidden) return;
+  if(!PS.car){
+    $("qaSugg").innerHTML = `<button disabled><span class="nm">Look a VIN up
+      first — the parts catalogue is searched per model.</span></button>`;
+    return;
+  }
+  $("qaQ").focus();
+});
+
+let qaTimer = null, qaSeq = 0;
+$("qaQ").addEventListener("input", () => {
+  clearTimeout(qaTimer);
+  const term = $("qaQ").value.trim();
+  if(!PS.car || term.length < 2){ $("qaSugg").innerHTML = ""; return; }
+  const mine = ++qaSeq;
+  qaTimer = setTimeout(async () => {
+    try{
+      const d = await api(`/api/parts/search?q=${encodeURIComponent(term)}` +
+        `&modelId=${encodeURIComponent(PS.car.modelId)}`);
+      if(mine !== qaSeq) return;                 // a later keystroke won
+      const rows = (d.parts || []).slice(0, 30);
+      $("qaSugg").innerHTML = rows.length
+        ? rows.map((r, i) => `<button data-add="${i}">
+             <span class="pn">${esc(r.partNumber)}</span>
+             <span class="nm">${esc(r.name || "")}</span></button>`).join("")
+        : `<button disabled><span class="nm">Nothing matched.</span></button>`;
+      for(const b of $("qaSugg").querySelectorAll("[data-add]"))
+        b.addEventListener("click", () => qaAdd(rows[Number(b.dataset.add)]));
+    }catch(err){
+      if(mine === qaSeq)
+        $("qaSugg").innerHTML =
+          `<button disabled><span class="nm">${esc(err.message)}</span></button>`;
+    }
+  }, 220);
+});
+
+function qaAdd(row){
+  if(!row || !row.partNumber) return;
+  const list = qaLoad();
+  // Same part twice would be two chips that do the same thing.
+  if(!list.some(p => p.partNumber === row.partNumber))
+    list.push({ partNumber: row.partNumber, name: row.name || "",
+                isSerialized: Boolean(row.isSerialized),
+                procurement: row.procurement || "Allowed" });
+  qaSave(list);
+  $("qaFind").hidden = true;
+  $("qaQ").value = ""; $("qaSugg").innerHTML = "";
+  paintQuickAdd();
+}
+
+/* Same gesture as the part card's drag, same target, and now the same
+   outcome: the part is billed to the ticket. It used to only select, and Ed
+   was right that this was silly — dragging a chip at the car so you could
+   then drag the card at the same car is two movements for one intention.
+
+   No extra confirmation, for the same reason the part card has none: the drag
+   IS the confirmation. What guards it is the length of the gesture and
+   `qaBlocked()`, which refuses rather than half-doing and names the card
+   standing in the way. */
+function wireQuickDrag(el, part){
+  if(!part) return;
+
+  el.addEventListener("pointerdown", e => {
+    if(e.target.closest("button")) return;      // the remove ×
+    const car = $("partsCar");
+    if(!car || PS.busy) return;
+    e.preventDefault();
+    try{ el.setPointerCapture(e.pointerId); }catch{ /* see the part card */ }
+
+    const box   = el.getBoundingClientRect();
+    const grabX = e.clientX - box.left, grabY = e.clientY - box.top;
+
+    const ghost = el.cloneNode(true);
+    ghost.classList.add("pghost-qa");
+    const x = ghost.querySelector(".x"); if(x) x.remove();
+    ghost.style.width = box.width + "px";
+    document.body.appendChild(ghost);
+    el.classList.add("dragging");
+
+    const over = ev => {
+      const b = car.getBoundingClientRect();
+      return ev.clientX >= b.left && ev.clientX <= b.right &&
+             ev.clientY >= b.top  && ev.clientY <= b.bottom;
+    };
+    const move = ev => {
+      ghost.style.left = (ev.clientX - grabX) + "px";
+      ghost.style.top  = (ev.clientY - grabY) + "px";
+      car.classList.toggle("armed", over(ev));
+    };
+    const up = ev => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+      ghost.remove();
+      el.classList.remove("dragging");
+      car.classList.remove("armed");
+      /* Asserted with the gesture, not inherited: the tree can have been
+         locked or the part billed since this drag started. This drop BILLS
+         now, so the assertion matters more than it did when it only selected.
+         [[test-drags-fire-for-real]] */
+      if(over(ev) && PS.built && !PS.filled && !PS.locked && !PS.busy)
+        qaDrop(part);
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+    move(e);
+  });
+}
+
+/* Dropped on the car: select it AND bill it, in one gesture.
+
+   Ed's correction, and he is right that the first cut was silly — dragging a
+   chip onto the car only to then drag the part card onto the same car is two
+   gestures for one intention. The chip goes the whole way now, which makes
+   this a WRITE and puts it on exactly the same footing as the part card's
+   drag: no extra confirmation, because the drag IS the confirmation, same as
+   every other drag-to-bill on this tool.
+
+   Stock is re-read and AWAITED before anything is billed. The rail's badge
+   may be a minute old, and it is the number the whole thing is gated on —
+   billing a part that somebody else took in the meantime is exactly the
+   mistake this ordering exists to stop. */
+async function qaDrop(part){
+  PS.part = { partNumber: part.partNumber, name: part.name || "",
+              isSerialized: Boolean(part.isSerialized),
+              procurement: part.procurement || "Allowed",
+              quantity: 1, suggested: false, free: null };
+  paintTree();
+
+  /* Held for the read so a second chip cannot land on top of this one. */
+  PS.busy = true;
+  let s = null;
+  try{ s = await api(`/api/parts/stock?part=${encodeURIComponent(part.partNumber)}`); }
+  catch{ /* left at free:null — an unknown count must never read as available */ }
+  PS.busy = false;
+
+  if(s && PS.part && PS.part.partNumber === part.partNumber){
+    PS.part.free = s.free; PS.part.onHand = s.onHand;
+  }
+  paintTree();
+
+  /* Refused rather than half-done, and it says which card is in the way. The
+     part stays on the tree either way, so the fix is one click from here. */
+  const why = qaBlocked();
+  if(why){ ppnote(why, true); return; }
+  ppnote("");
+  partsRunFill();
+}
+
+/* Why the drop cannot bill, in the words of the card that is stopping it.
+   Ordered the way you would read the tree, so the first thing named is the
+   first thing to go and fix. */
+function qaBlocked(){
+  if(!PS.built)   return "No ticket open — look a VIN up first.";
+  if(PS.filled)   return "A part is already billed to this ticket.";
+  if(PS.locked)   return "This ticket is part-billed — finish it in the Service App.";
+  if(!PS.symptom || !PS.symptom.symptomCode) return "Set the symptom before billing a part.";
+  if(!PS.correction || !PS.correction.code)  return "Set the correction code before billing a part.";
+  const free = PS.part ? PS.part.free : null;
+  if(free == null) return `Stock for ${PS.part.partNumber} could not be read, so nothing was billed.`;
+  if(Number(free) <= 0)
+    return `${PS.part.partNumber} is not in stock here — nothing was billed. ` +
+           `It is on the tree, so pick another with Change part.`;
+  return "";
+}
+
+const pnote = (msg, bad) => {
+  $("partsNote").innerHTML = `<div class="note${bad ? " err" : ""}">${esc(msg)}</div>`;
+};
+const ppnote = (msg, bad) => {
+  $("partsPageNote").innerHTML =
+    msg ? `<div class="note${bad ? " err" : ""}" style="margin-bottom:14px">${esc(msg)}</div>` : "";
+};
+
+async function partsLookup(){
+  const vin = $("partsVin").value.trim().toUpperCase();
+  if(vin.length !== 17) return pnote("A VIN is 17 characters.", true);
+  const btn = $("partsGo");
+  btn.disabled = true; btn.textContent = "Looking up…";
+  $("partsNote").innerHTML = "";
+  try{
+    const car = await api(`/api/parts/resolve?vin=${encodeURIComponent(vin)}`);
+    PS.vin = vin; PS.car = car; PS.defaults = car.defaults;
+
+    /* Seeded from Admin › Part Picker, then editable. Ed's ask was a default
+       symptom and correction "that can be edited the same way it can be in
+       the service ticket tool" — so they arrive filled, not blank. */
+    PS.symptom    = { ...car.defaults.symptom };
+    PS.correction = { ...car.defaults.correction };
+    PS.tech       = { ...car.defaults.tech };
+    PS.part       = null;
+
+    $("partsCtx").textContent = `${vin} · ${car.site.name || ""}`;
+
+    /* One of ours is already open on this car — carry on with it rather than
+       opening a second. Ed's: a reload should not cost a ticket. The confirm
+       card never appears, because there is nothing left to confirm. */
+    if(car.resume){ partsResume(car.resume); return; }
+
+    paintConfirm();
+
+    /* No warning about an existing open ticket, deliberately. This tool does
+       what the recorded run did — Create service visit, NOT Check in for
+       immediate service — so a second visit alongside an open one is the
+       normal case here, not a collision. Ed's call, 2026-08-25. */
+  }catch(err){
+    pnote(err.message, true);
+  }finally{
+    btn.disabled = false; btn.textContent = "Look up this VIN";
+  }
+}
+
+/* ── the swipe ──
+   What the slide is about to write, named before it can be pulled: the car it
+   found, and the two things that happen whether or not anything is ever
+   billed — a visit exists, and the contacts stop being the customer's. */
+function paintConfirm(){
+  const c = PS.car;
+  const box = $("partsConfirm");
+  box.hidden = false;
+  box.innerHTML = `
+    <div class="facet" style="margin-top:12px">
+      <div class="facet-head"><span>${esc(c.vin)}</span></div>
+      <dl>
+        <dt>Model</dt><dd>${esc(c.model || "—")}</dd>
+        <dt>Colour</dt><dd>${esc(c.colour || "—")}</dd>
+        ${c.rn ? `<dt>RN</dt><dd>${esc(c.rn)}</dd>` : ""}
+        <dt>Centre</dt><dd>${esc(c.site.name || "")}</dd>
+      </dl>
+      <div class="hint" style="margin:10px 0 12px">Opens a service visit,
+        switches the main and billing contacts to <b>Tesla Motors Inventory</b>
+        and adds the activity. Nothing is billed yet — the part goes on out on
+        the page, where you can see the pay type this activity actually takes.</div>
+      <div id="partsOpenSlide"></div>
+    </div>`;
+
+  PS.slide = mountSlide($("partsOpenSlide"), "Slide to create the ticket", () => {
+    /* Asserted in the same breath as the gesture, rather than trusted from
+       whatever the lookup left behind. [[test-drags-fire-for-real]] */
+    if(PS.busy || !PS.vin || !PS.car || PS.built){ PS.slide.reset(); return; }
+    partsOpenTicket();
+  });
+}
+
+/* Picking a ticket back up. Everything the swipe would have set, set from
+   what the Service App already has — no writes at all, because all of them
+   have already happened. `filled` comes off whether a part is on the line, so
+   a run that got as far as billing does not offer to bill again. */
+function partsResume(r){
+  PS.built  = { serviceVisitId: r.serviceVisitId, activityId: r.activityId,
+                activityNumber: r.activityNumber,
+                activityCorrectionId: r.activityCorrectionId || null };
+  PS.filled = Boolean(r.billed);
+
+  hideModal();
+  $("empty").hidden         = true;
+  $("partsPage").hidden     = false;
+  $("partsTreeWrap").hidden = false;
+  syncQuickAdd();
+  $("partsPageCtx").textContent =
+    `${PS.vin} · visit ${r.serviceVisitId}` +
+    (r.activityNumber ? ` · activity ${r.activityNumber}` : "");
+
+  paintRun("Picked up where you left off", [
+    { name: "Ticket found", detail: `visit ${r.serviceVisitId}` },
+    { name: "Activity found", detail: r.narrative || r.activityNumber || "" },
+    ...(r.billed
+      ? [{ name: "Part already billed", detail: "close it below" }]
+      : [{ name: "No part billed yet", detail: "drop one on the car", skip: true }])
+  ], `<div class="hub-note" style="margin-top:10px">This ticket was opened by
+        Part Picker — it carries the <b>ZO004</b> marker — so nothing new was
+        created. ${r.billed
+          ? "The part is on it already."
+          : "Carry on from the tree."}</div>`);
+
+  paintTree();
+  $("partsPage").scrollIntoView({ behavior: "smooth", block: "start" });
+  partsRefreshPayType();
+  if(!r.billed) partsSuggestPart();
+}
+
+/* The first write. Everything after this point is editing a ticket that
+   exists, which is why the dialog closes on it: coming back to a VIN box
+   would suggest this could be started over, and it cannot. */
+async function partsOpenTicket(){
+  PS.busy = true;
+  // Held at the far end with its own label, so the card keeps its shape.
+  if(PS.slide) PS.slide.busy("Opening the ticket…");
+  $("partsNote").innerHTML = "";
+  try{
+    const out = await api("/api/parts/open", {
+      vin: PS.vin, narrative: PS.defaults.narrative
+    });
+    PS.built = { serviceVisitId: out.serviceVisitId, activityId: out.activityId,
+                 activityNumber: out.activityNumber, activityCorrectionId: null };
+
+    hideModal();
+    $("empty").hidden     = true;
+    $("partsPage").hidden = false;
+    $("partsTreeWrap").hidden = false;
+    syncQuickAdd();
+    $("partsPageCtx").textContent =
+      `${PS.vin} · visit ${out.serviceVisitId}` +
+      (out.activityNumber ? ` · activity ${out.activityNumber}` : "");
+    paintRun("Ticket opened", out.steps);
+    paintTree();
+    $("partsPage").scrollIntoView({ behavior: "smooth", block: "start" });
+
+    /* Now that there is an activity, the pay type is a fact rather than a
+       rule — and the part the correction suggests can be looked up. */
+    partsRefreshPayType();
+    partsSuggestPart();
+  }catch(err){
+    /* Array-checked, not just defaulted: the server sends a boolean when
+       nothing landed, and `true.map` inside a catch block is how this page
+       once hung on "Working…" instead of reporting the failure. */
+    const landed = (Array.isArray(err.partial) ? err.partial : []).map(s => ({ ...s }));
+    if(landed.length){
+      /* Something was written. The dialog is the wrong place to say so — it
+         still has a VIN box in it, which reads as "try again". */
+      hideModal();
+      $("empty").hidden     = true;
+      $("partsPage").hidden = false;
+      paintRun("The ticket did not finish opening",
+        landed.concat([{ name: err.message, bad: true }]),
+        `<div class="hub-note" style="margin-top:10px">Everything above actually
+           happened. Finish or unpick it in the Service App — running this VIN
+           again would open a second ticket.</div>`);
+    }else{
+      pnote(err.message, true);
+      // Nothing was written, so the slide springs back and can be pulled again.
+      if(PS.slide) PS.slide.reset();
+    }
+  }finally{ PS.busy = false; }
+}
+
+/* Which pay types this activity will really take. Asked of the server the
+   moment there is an activity, and again whenever the correction changes,
+   so "defaulting to Rectification" is said before the part is billed rather
+   than reported after. */
+async function partsRefreshPayType(){
+  if(!PS.built || !PS.correction || !PS.correction.code){ PS.payType = null; return; }
+  const asked = PS.correction.code;
+  try{
+    const d = await api(`/api/parts/paytype?activityId=${encodeURIComponent(PS.built.activityId)}` +
+      `&correctionCode=${encodeURIComponent(asked)}`);
+    // The correction may have moved on while this was in flight.
+    if(PS.correction && PS.correction.code === asked){ PS.payType = d; paintTree(); }
+  }catch(err){
+    /* Not fatal and not silently "fine": the node says it could not be read,
+       and the fill reports whichever pay type it actually got.
+
+       The binding was missing here — `catch{` with `err.message` inside — so
+       the one path that reports a pay type it could not read threw a
+       ReferenceError instead. It only fires when the paytype call fails,
+       which is why nothing had hit it until the resume did. */
+    if(PS.correction && PS.correction.code === asked){
+      PS.payType = { unknown: true, why: err.message }; paintTree();
+    }
+  }
+}
+
+/* The correction proposes its own part, so the common case needs no typing.
+   It stays a suggestion: the key card is right often and wrong often, which
+   is why the card carries Remove and Replace beside it. */
+async function partsSuggestPart(){
+  if(!PS.correction || !PS.correction.code) return;
+  try{
+    const d = await api(`/api/parts/recommend?vin=${encodeURIComponent(PS.vin)}` +
+      `&modelId=${encodeURIComponent(PS.car.modelId)}` +
+      `&correctionCode=${encodeURIComponent(PS.correction.code)}`);
+    const p = (d.parts || [])[0];
+    if(p && !PS.part){ PS.part = { ...p, suggested: true, quantity: 1 }; paintTree(); }
+  }catch{ /* a suggestion that cannot be fetched is not an error */ }
+}
+
+/* ── stock, said the way Ed reads it ──
+   FREE is on hand minus allocated, and it is the number in the pill. Cypress
+   holds two key cards and both are allocated, so the honest answer is nought
+   and the run is blocked on it. */
+function stockPill(p){
+  if(p.free == null) return `<span class="pstock">stock unknown</span>`;
+  const cls = p.free > 0 ? "some" : "none";
+  const extra = p.onHand != null && p.onHand !== p.free
+    ? ` <span style="font-weight:500;opacity:.75">of ${p.onHand}</span>` : "";
+  return `<span class="pstock ${cls}"><b>${p.free}</b>${extra} in stock</span>`;
+}
+
+/* `built` and `!filled` are in here for the same reason as everything else:
+   the drag bills a part onto an activity, so there has to be one, and it can
+   only be billed once. */
+const partsReady = () =>
+  Boolean(PS.vin && PS.built && !PS.filled && !PS.locked &&
+          PS.symptom && PS.symptom.symptomCode &&
+          PS.correction && PS.correction.code &&
+          PS.part && PS.part.partNumber && Number(PS.part.free) > 0);
+
+function paintTree(){
+  const c = PS.car;
+
+  const node = (key, label, value, sub, actions, cls) => `
+    <div class="pnode ${cls || ""}" data-node="${key}">
+      <div class="pnode-row">
+        <div class="pnode-main">
+          <div class="pnode-k">${esc(label)}</div>
+          <div class="pnode-v${value ? "" : " empty"}">${value ? esc(value) : "not set"}</div>
+          ${sub ? `<div class="pnode-sub">${sub}</div>` : ""}
+        </div>
+        <div class="pnode-act">${actions || ""}</div>
+      </div>
+      <div class="psearch" data-editor="${key}" hidden>
+        <input type="text" placeholder="Type to search…" autocomplete="off" spellcheck="false">
+        <div class="psugg"></div>
+      </div>
+    </div>`;
+
+  const edit = k => `<button class="mini" data-edit="${k}">Edit</button>`;
+
+  /* Pay type is a READOUT, not a picker — which pay types are legal is a
+     question about the activity, and the activity is open by the time this
+     tree is drawn, so the card can state the answer instead of the rule.
+     The fallback is named here, before the part is billed, which is the whole
+     reason the swipe was split off the drag. */
+  const pt = PS.payType;
+  const payValue = !pt ? "Reading…"
+    : pt.unknown ? "Could not be read"
+    : (pt.name || "Transportation Damage");
+  const payLine = !pt
+    ? `Asking the Service App which pay types this activity takes.`
+    : pt.unknown
+      ? `<span class="amber">${esc(pt.why || "The Service App did not answer.")}</span>`
+      : pt.note
+        ? `<span class="amber">${esc(pt.note)}</span>`
+        : `Read off activity ${esc(String((PS.built || {}).activityNumber ||
+            (PS.built || {}).activityId || ""))}.`;
+  const payCls = !pt ? "" : pt.unknown ? "warn" : "set";
+
+  /* "Remove and Replace" is Ed's phrase for one specific thing: the part the
+     correction code auto-populated, which is right about as often as it is
+     wrong. A part somebody CHOSE — searched for, or dragged off quick add —
+     is not being replaced, it is being changed, and leaving the old label on
+     it made a card that had just updated look like it had not. That is what
+     it was reported as: "didn't actually update … I still see the remove and
+     replace like the key card part has". The wire was fine; the word was not. */
+  const chosen = Boolean(PS.part && !PS.part.suggested);
+
+  const partNode = PS.part
+    ? node("part", "Part",
+        `${PS.part.partNumber} · ${PS.part.name || ""}`,
+        `${stockPill(PS.part)}${PS.part.suggested
+            ? ` <span style="opacity:.75">suggested by the correction code</span>` : ""}` +
+        (Number(PS.part.free) > 0 ? "" :
+          `<div class="pnode-sub amber" style="margin-top:5px">Not in stock here —
+             this part cannot be billed. ${chosen
+               ? "Choose another." : "Use Remove and Replace."}</div>`),
+        `<button class="mini" data-edit="part">${
+          chosen ? "Change part" : "Remove and Replace"}</button>`,
+        Number(PS.part.free) > 0 ? "set" : "warn")
+    : node("part", "Part", "", "Search by part number or description.",
+        `<button class="mini" data-edit="part">Find a part</button>`);
+
+  $("partsNodes").innerHTML = [
+    node("symptom", "Symptom", PS.symptom && PS.symptom.description,
+         PS.symptom && PS.symptom.hyper
+           ? `${esc(PS.symptom.hyper)}${PS.symptom.cosmetic ? " · cosmetic " + esc(PS.symptom.cosmetic) : ""}`
+           : "", edit("symptom"), PS.symptom ? "set" : ""),
+    node("correction", "Correction code",
+         PS.correction && `${PS.correction.code} · ${PS.correction.name || ""}`,
+         "", edit("correction"), PS.correction ? "set" : ""),
+    node("paytype", "Pay type", payValue, payLine, "", payCls),
+    node("tech", "Technician", PS.tech && PS.tech.name,
+         PS.tech && PS.tech.title ? esc(PS.tech.title) : "", edit("tech"),
+         PS.tech ? "set" : ""),
+    partNode
+  ].join("");
+
+  $("partsCarCol").innerHTML = `
+    <div class="pvin" id="partsCar">
+      <div class="pvin-k">Vehicle</div>
+      <div class="pvin-vin">${esc(c.vin)}</div>
+      ${PS.built ? `<a class="pvin-sv" target="_blank" rel="noopener"
+           href="https://serviceapp.tesla.com/service/service-home/product-details/${
+             encodeURIComponent(c.userId)}/${encodeURIComponent(c.vin)}/service-visit/${
+             encodeURIComponent(PS.built.serviceVisitId)}"
+           title="Open this service visit in the Service App"
+           >Ticket ${esc(String(PS.built.serviceVisitId))} &nearr;</a>` : ""}
+      <dl>
+        <dt>Model</dt><dd>${esc(c.model || "—")}</dd>
+        <dt>Colour</dt><dd>${esc(c.colour || "—")}</dd>
+        ${c.rn ? `<dt>RN</dt><dd>${esc(c.rn)}</dd>` : ""}
+        <dt>Contacts</dt><dd>Tesla Motors Inventory</dd>
+        <dt>Centre</dt><dd>${esc(c.site.name || "")}</dd>
+        ${PS.built ? `<dt>Visit</dt><dd>${esc(String(PS.built.serviceVisitId))}</dd>` : ""}
+      </dl>
+      <div class="pnode-sub" style="margin-top:10px">
+        ${PS.filled
+          ? `The part is on this ticket. Close it below.`
+          : PS.locked
+            ? `Part of the billing landed. Check this visit in the Service App —
+               dropping again would bill it twice.`
+          : partsReady()
+            ? `<b>Drag the part here</b> to bill it to this ticket.`
+            : `Fill every card, with the part in stock, to arm the drag.`}
+      </div>
+    </div>`;
+
+  $("partsPageFoot").textContent = PS.filled
+    ? "Billed — close the ticket below"
+    : partsReady()
+      ? "Ready — drag the part onto the car"
+      : "";
+
+  wireNodeButtons();
+  wirePartDrag();
+  requestAnimationFrame(drawWires);
+}
+
+/* ── the wires ──
+   Measured, not guessed: every card is a different height and they change as
+   they fill in. One path per node, from its right edge to the car's left. */
+function drawWires(){
+  const svg  = $("partsWires");
+  const wrap = $("partsTreeWrap");
+  const car  = $("partsCar");
+  if(!svg || !wrap || !car) return;
+  const W = wrap.getBoundingClientRect();
+  svg.setAttribute("viewBox", `0 0 ${W.width} ${W.height}`);
+
+  const cb = car.getBoundingClientRect();
+  const cx = cb.left - W.left, cy = cb.top - W.top + cb.height / 2;
+
+  const ready = { symptom: Boolean(PS.symptom), correction: Boolean(PS.correction),
+                  paytype: true, tech: Boolean(PS.tech),
+                  part: Boolean(PS.part && Number(PS.part.free) > 0) };
+
+  svg.innerHTML = [...$("partsNodes").children].map(n => {
+    const b = n.getBoundingClientRect();
+    const x = b.right - W.left, y = b.top - W.top + b.height / 2;
+    // Horizontal control arms, so it leaves and arrives flat — a cable, not
+    // an elbow. Half the gap on each side is what keeps the sag even.
+    const m = Math.max(28, (cx - x) / 2);
+    const state = ready[n.dataset.node] ? "live" : "pending";
+    return `<path class="${state}" d="M${x} ${y} C ${x + m} ${y}, ${cx - m} ${cy}, ${cx} ${cy}"/>`;
+  }).join("");
+}
+window.addEventListener("resize", () => { if(!$("partsTreeWrap").hidden) drawWires(); });
+
+/* ── the editors ──
+   One search box per node, opened in place. Symptom and correction reuse the
+   same routes the Service Visits editor uses, so a symptom means the same
+   thing in both tools. */
+function wireNodeButtons(){
+  $("partsNodes").querySelectorAll("[data-edit]").forEach(b => {
+    b.addEventListener("click", () => openNodeEditor(b.dataset.edit));
+  });
+}
+
+function openNodeEditor(key){
+  const host = $("partsNodes").querySelector(`[data-editor="${key}"]`);
+  if(!host) return;
+  const open = !host.hidden;
+  $("partsNodes").querySelectorAll("[data-editor]").forEach(h => { h.hidden = true; });
+  if(open){ drawWires(); return; }
+  host.hidden = false;
+  const input = host.querySelector("input");
+  const sugg  = host.querySelector(".psugg");
+  input.value = ""; sugg.innerHTML = "";
+  input.placeholder = key === "part" ? "Part number or description…"
+    : key === "tech" ? "Technician name…"
+    : key === "correction" ? "Correction code or wording…" : "Symptom…";
+  input.focus();
+  drawWires();
+
+  let seq = 0;
+  const run = async () => {
+    const term = input.value.trim();
+    const mine = ++seq;
+    if(term.length < 2){ sugg.innerHTML = ""; return; }
+    try{
+      const rows = await nodeSearch(key, term);
+      if(mine !== seq) return;            // a slower earlier keystroke landing late
+      sugg.innerHTML = rows.length
+        ? rows.map((r, i) => nodeRow(key, r, i)).join("")
+        : `<button disabled><span class="nm">Nothing matched “${esc(term)}”</span></button>`;
+      sugg.querySelectorAll("[data-pick]").forEach(b => {
+        b.addEventListener("click", () => {
+          pickNode(key, rows[Number(b.dataset.pick)]);
+          host.hidden = true;
+        });
+      });
+      drawWires();
+    }catch(err){
+      if(mine === seq) sugg.innerHTML = `<button disabled><span class="nm">${esc(err.message)}</span></button>`;
+    }
+  };
+  let t = null;
+  input.oninput = () => { clearTimeout(t); t = setTimeout(run, 220); };
+}
+
+async function nodeSearch(key, term){
+  const q = encodeURIComponent(term);
+  if(key === "part"){
+    const d = await api(`/api/parts/search?q=${q}&modelId=${encodeURIComponent(PS.car.modelId)}`);
+    return d.parts || [];
+  }
+  if(key === "tech"){
+    const d = await api(`/api/parts/techs?q=${q}`);
+    return d.techs || [];
+  }
+  if(key === "correction"){
+    const d = await api(`/api/parts/corrections?q=${q}` +
+      `&modelCode=${encodeURIComponent(PS.car.modelCode)}&vin=${encodeURIComponent(PS.vin)}`);
+    return d.corrections || [];
+  }
+  const d = await api(`/api/parts/symptoms?q=${q}&modelId=${encodeURIComponent(PS.car.modelId)}`);
+  return d.symptoms || [];
+}
+
+/* A part with nothing free is shown and NOT selectable — Ed's rule. Hiding it
+   would read as "no such part", which is a different and wrong answer. */
+function nodeRow(key, r, i){
+  if(key === "part"){
+    const dead = !(Number(r.free) > 0);
+    return `<button data-pick="${i}"${dead ? " disabled" : ""}>
+      <span class="pn">${esc(r.partNumber)}</span>
+      <span class="nm">${esc(r.name || "")}</span>
+      ${stockPill(r)}</button>`;
+  }
+  if(key === "tech")
+    return `<button data-pick="${i}"><span class="nm">${esc(r.name)}</span>
+      <span style="color:var(--ink-mute)">${esc(r.title || "")}</span></button>`;
+  if(key === "correction")
+    return `<button data-pick="${i}"><span class="pn">${esc(r.code)}</span>
+      <span class="nm">${esc(r.name || "")}</span></button>`;
+  return `<button data-pick="${i}"><span class="nm">${esc(r.name || r.description || "")}</span></button>`;
+}
+
+async function pickNode(key, r){
+  if(key === "part"){
+    PS.part = { ...r, suggested: false, quantity: 1 };
+    paintTree(); return;
+  }
+  if(key === "tech"){ PS.tech = { userId: r.userId, name: r.name, title: r.title }; paintTree(); return; }
+  if(key === "correction"){
+    PS.correction = { code: r.code, name: r.name };
+    /* A new correction means a new suggested part — the old one belonged to
+       a code nobody chose any more. Only replaces a suggestion, never a part
+       somebody picked by hand. */
+    if(PS.part && PS.part.suggested) PS.part = null;
+    /* The pay type belongs to the activity AND the correction, so a new code
+       makes the old answer stale rather than merely out of date — cleared
+       before the re-read so the card cannot show the previous code's answer
+       while this one is in flight. */
+    PS.payType = null;
+    paintTree();
+    partsRefreshPayType();
+    partsSuggestPart();
+    return;
+  }
+  /* cosmeticIssue and hyperSymptom travel with the symptom and are NOT in the
+     search results — only the single-symptom read has them. Taking them from
+     the row would leave two fields describing the previous symptom. */
+  try{
+    const d = await api(`/api/parts/symptom?code=${encodeURIComponent(r.code || r.symptomCode)}` +
+      `&modelId=${encodeURIComponent(PS.car.modelId)}`);
+    PS.symptom = { symptomId: d.symptomId ?? r.symptomId ?? null,
+                   symptomCode: d.symptomCode || r.code,
+                   description: d.name || r.name || "",
+                   hyper: d.hyper || "", cosmetic: d.cosmetic || "" };
+  }catch{
+    PS.symptom = { symptomId: r.symptomId ?? null, symptomCode: r.code || r.symptomCode,
+                   description: r.name || "", hyper: "", cosmetic: "" };
+  }
+  paintTree();
+}
+
+/* ── the drag ── */
+function wirePartDrag(){
+  const card = $("partsNodes").querySelector('[data-node="part"]');
+  const car  = $("partsCar");
+  if(!card || !car) return;
+
+  const armed = partsReady();
+  card.classList.toggle("drag", armed);
+  const hint = document.createElement("div");
+  hint.className = "pdrag-hint" + (armed ? "" : " off");
+  hint.textContent = armed ? "Drag me onto the car" : "";
+  if(armed) card.appendChild(hint);
+  if(!armed) return;
+
+  card.addEventListener("pointerdown", e => {
+    if(e.target.closest("button, input")) return;   // Remove and Replace is a button
+    if(PS.busy) return;
+    e.preventDefault();
+    /* Capture keeps the moves coming when the cursor leaves the card. It is an
+       optimisation, not a requirement, and it throws outright when there is no
+       live pointer — so a failure here must not take the drag with it. */
+    try{ card.setPointerCapture(e.pointerId); }catch{ /* drag on without it */ }
+
+    /* Picked up where it was grabbed, not snapped to the cursor: the card has
+       to stay under the finger that took it or the gesture reads as a new
+       object appearing rather than this one moving. */
+    const GHOST_SCALE = 0.58;              // must match .pghost-card
+    const box   = card.getBoundingClientRect();
+    /* Scaled with the card, so the point you grabbed stays the point under
+       the cursor rather than drifting toward the top-left as it shrinks. */
+    const grabX = (e.clientX - box.left) * GHOST_SCALE;
+    const grabY = (e.clientY - box.top)  * GHOST_SCALE;
+
+    const ghost = card.cloneNode(true);
+    ghost.classList.add("pghost-card");
+    ghost.classList.remove("dragging");
+    ghost.removeAttribute("data-node");
+    // The hint travels with the clone and would read "Drag me onto the car"
+    // in the hand of somebody already doing it.
+    const h = ghost.querySelector(".pdrag-hint");
+    if(h) h.remove();
+    // Cloned inputs would be found by the editors' own querySelectors.
+    for(const n of ghost.querySelectorAll("input")) n.remove();
+    ghost.style.width = box.width + "px";
+    ghost.style.left  = box.left + "px";
+    ghost.style.top   = box.top + "px";
+    document.body.appendChild(ghost);
+    card.classList.add("dragging");
+
+    const move = ev => {
+      ghost.style.left = (ev.clientX - grabX) + "px";
+      ghost.style.top  = (ev.clientY - grabY) + "px";
+      const b = car.getBoundingClientRect();
+      const over = ev.clientX >= b.left && ev.clientX <= b.right &&
+                   ev.clientY >= b.top  && ev.clientY <= b.bottom;
+      car.classList.toggle("armed", over);
+    };
+    const up = ev => {
+      card.removeEventListener("pointermove", move);
+      card.removeEventListener("pointerup", up);
+      card.removeEventListener("pointercancel", up);
+      ghost.remove();
+      card.classList.remove("dragging");
+      const b = car.getBoundingClientRect();
+      const over = ev.clientX >= b.left && ev.clientX <= b.right &&
+                   ev.clientY >= b.top  && ev.clientY <= b.bottom;
+      car.classList.remove("armed");
+      /* Asserted in the same breath as the gesture, not inherited from
+         whatever armed the card however long ago. */
+      if(over && partsReady() && !PS.busy) partsRunFill();
+    };
+    card.addEventListener("pointermove", move);
+    card.addEventListener("pointerup", up);
+    card.addEventListener("pointercancel", up);
+    move(e);
+  });
+}
+
+/* ── the run ── */
+const stepRow = s => `<div class="pstep ${s.bad ? "bad" : s.skip ? "skip" : "ok"}">
+  <span class="ic">${s.bad ? "✕" : s.skip ? "·" : "✓"}</span>
+  <span class="nm">${esc(s.name)}</span>
+  <span class="dt">${esc(s.detail || "")}</span></div>`;
+
+const looksSkipped = s => /\bNOT\b|No courtesy/.test(s.name);
+
+function paintRun(title, steps, tail){
+  $("partsRun").hidden = false;
+  $("partsRun").innerHTML =
+    `<div class="facet"><div class="facet-head"><span>${esc(title)}</span></div>` +
+    /* An explicit `skip` from the server wins. Reading it out of the wording
+       is a fallback for the steps that do not set one, not the rule. */
+    steps.map(s => stepRow({ ...s, skip: s.skip === undefined ? looksSkipped(s) : s.skip })).join("") +
+    (tail || "") + `</div>`;
+}
+
+async function partsRunFill(){
+  PS.busy = true;
+  /* Locked, not hidden. It used to collapse on the drop; the tree is the only
+     record on screen of what is being billed, so it stays up and stops being
+     touchable while the writes run. */
+  lockTree(true);
+  ppnote("");
+  paintRun("Billing the part", [{ name: "Working…", detail: "" }]);
+  $("partsPageFoot").textContent = "";
+  try{
+    const out = await api("/api/parts/fill", {
+      vin: PS.vin,
+      serviceVisitId: PS.built.serviceVisitId,
+      activityId: PS.built.activityId,
+      symptom: PS.symptom,
+      correctionCode: PS.correction.code,
+      part: { partNumber: PS.part.partNumber, name: PS.part.name,
+              quantity: PS.part.quantity || 1,
+              isSerialized: Boolean(PS.part.isSerialized),
+              procurement: PS.part.procurement }
+    });
+    /* Extended, not replaced: serviceVisitId and activityId came from the
+       swipe and the close needs all three. */
+    Object.assign(PS.built, { activityCorrectionId: out.activityCorrectionId });
+    PS.filled = true;
+    paintQuickAdd();          // the shelf just moved; the badges are stale
+
+    const bits = [];
+    if(out.payType && out.payType.note)
+      bits.push(`<div class="hub-note" style="margin-top:10px"><b>Pay type:</b>
+        ${esc(out.payType.note)}.</div>`);
+    /* No notesNeeded branch any more — the note is written on every run, so
+       whether it landed is a step in the list above like any other write. */
+
+    paintRun("Part billed", out.steps, bits.join("") + `
+      <div style="margin-top:14px;font-weight:600">Process completed — close ticket?</div>
+      <div class="pnode-sub" style="margin-bottom:8px">Walks it Prepared →
+        Arrived → Service → Service Complete → Ready for Pick Up → Delivered,
+        removes the courtesy line and sets ${esc(PS.tech ? PS.tech.name : "the technician")}.</div>
+      <button class="btn btn-dark" id="partsCloseBtn">Close the ticket</button>`);
+
+    /* Sized to the slide it becomes, not to the panel it sits in. Ed's: a
+       full-width button that collapses into a 280px track looks broken at the
+       moment it changes, and the jump is the only thing you notice.
+
+       And it swaps only ITSELF. `confirmBySlide` hides every sibling too,
+       which here would take the step list and the sentence explaining what
+       the close does — the same collapse the confirm card had. */
+    const btn = $("partsCloseBtn");
+    btn.addEventListener("click", () => {
+      const host = document.createElement("div");
+      host.className = "close-slide";
+      btn.replaceWith(host);
+      mountSlide(host, "Slide to close the ticket", () => partsRunClose());
+    });
+  }catch(err){
+    /* Array-checked, not just defaulted: the server sends a boolean when
+       nothing landed, and `true.map` inside a catch block is how this page
+       once hung on "Working…" instead of reporting the failure. */
+    const landed = (Array.isArray(err.partial) ? err.partial : []).map(s => ({ ...s }));
+    /* The ticket is open whatever happened here — it was opened by the swipe,
+       not by this call — so "nothing happened" is never the right message.
+       The tree comes back so the part can be changed and dropped again. */
+    paintRun("The part was not billed", landed.concat([{ name: err.message, bad: true }]),
+      `<div class="hub-note" style="margin-top:10px">Visit
+         <b>${esc(String(PS.built.serviceVisitId))}</b> is open` +
+      (landed.length
+        ? ` and everything above actually happened — check it in the Service App
+            before dropping the part again.`
+        : ` and nothing was billed to it. Change the part and drop it again, or
+            close the ticket in the Service App.`) + `</div>`);
+    /* Only a run that landed NOTHING gets the drag back. A half-billed
+       activity dropped on a second time is how you end up with two correction
+       lines on one ticket — that is a trip to the Service App, not a retry. */
+    if(landed.length) PS.locked = true;
+    /* Unlocked only when nothing landed and there is something to change.
+       A half-billed ticket keeps the tree readable and untouchable. */
+    lockTree(PS.locked);
+    paintTree();
+  }finally{ PS.busy = false; }
+}
+
+async function partsRunClose(){
+  PS.busy = true;
+  const b = PS.built;
+  paintRun("Closing the ticket", [{ name: "Working…", detail: "" }]);
+  try{
+    const out = await api("/api/parts/close", {
+      vin: PS.vin, serviceVisitId: b.serviceVisitId, activityId: b.activityId,
+      activityCorrectionId: b.activityCorrectionId,
+      technicianId: PS.tech ? PS.tech.userId : null
+    });
+    /* Delivered: there is nothing left for the cancel lever to act on, so it
+       goes. A control that would only ever refuse is worse than no control. */
+    if(out.closed){ PS.done = true; syncCancelLever(); }
+    paintRun(out.closed ? "Done — the ticket is closed" : "Closed with something left over",
+      out.steps,
+      out.closed
+        ? `<div class="hub-note" style="margin-top:10px">Visit
+             <b>${esc(String(b.serviceVisitId))}</b> is at Delivered, read back off
+             the record rather than taken from the responses.</div>`
+        : `<div class="hub-note" style="margin-top:10px">The run finished but the
+             visit is at motion <b>${esc(String(out.motion))}</b>, not Delivered.
+             Check it in the Service App.</div>`);
+  }catch(err){
+    /* Array-checked, not just defaulted: the server sends a boolean when
+       nothing landed, and `true.map` inside a catch block is how this page
+       once hung on "Working…" instead of reporting the failure. */
+    const landed = (Array.isArray(err.partial) ? err.partial : []).map(s => ({ ...s }));
+    paintRun("The close stopped", landed.concat([{ name: err.message, bad: true }]),
+      `<div class="hub-note" style="margin-top:10px">Visit
+         <b>${esc(String(b.serviceVisitId))}</b> is open and part-closed. The steps
+         above are the ones that landed.</div>`);
+  }finally{ PS.busy = false; }
+}
+
 /* ── boot ── */
 (async () => {
   try{
@@ -8478,6 +10281,10 @@ $("resetBoard").addEventListener("click", async e => {
     paintBilling(st.billingAddress);
     paintTeams(st.teams);
     paintSvCall(st.svcall);
+    /* Its own call rather than a field on /api/state: the Part Picker settings are
+       read by one tool and one admin section, and widening the state payload
+       for them would make every board load pay for it. */
+    api("/api/parts/settings").then(paintPartsSettings).catch(() => {});
     // After the facets land: a saved selection is validated against them.
     paintQuick();
   }catch(err){
