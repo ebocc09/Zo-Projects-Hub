@@ -666,8 +666,15 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 .empty svg{width:130px;height:auto;display:block;margin:0 auto 16px;opacity:.55}
 
 .foot{display:flex;gap:22px;flex-wrap:wrap;max-width:1180px;margin:0 auto;
-  padding:20px 22px 40px;font-size:11px;font-weight:600;letter-spacing:.09em;
+  padding:20px 22px 12px;font-size:11px;font-weight:600;letter-spacing:.09em;
   text-transform:uppercase;color:var(--ink-mute);border-top:1px solid var(--line-soft)}
+
+/* House credit. Its own line under the footer rather than another `.foot`
+   span: the footer's spans are status readouts that change as you work, and
+   this does not. Right-aligned to the same 1180px column the footer uses, so
+   it lands on the page's bottom-right corner and not the viewport's. */
+.zo-credit{max-width:1180px;margin:0 auto;padding:0 22px 30px;text-align:right;
+  font-size:10.5px;color:var(--ink-mute);opacity:.7}
 
 /* ── overlays ── */
 .scrim{position:fixed;inset:0;background:rgba(23,26,32,.42);z-index:50;
@@ -1984,6 +1991,7 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
   <span id="fSrc">Not connected</span>
   <span>The Compiler</span>
 </footer>
+<div class="zo-credit">Originated and developed in house at Houston Cypress</div>
 
 <!-- ═════════════════════════ OVERLAYS ═════════════════════════ -->
 <div class="scrim" id="scrim"></div>

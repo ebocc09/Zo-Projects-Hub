@@ -1,0 +1,9 @@
+{
+  "version": "v24.18.0",
+  "arch": "x64",
+  "tag": "runtime-v24.18.0-win-x64",
+  "asset": "node-win-x64.zip",
+  "size": 34592698,
+  "sha256": "9c2112fecf8560b4f1e3a6d5ced0b55702e37c5e5d25e1e66fc9dc79dde3a569",
+  "url": "https://github.com/ebocc09/Zo-Projects-Hub/releases/download/runtime-v24.18.0-win-x64/node-win-x64.zip"
+}

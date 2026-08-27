@@ -280,7 +280,11 @@ zo-hub/
   garage-oauth.js  the MCP token — copied into ZO-002, which consumes it
   server.js        launch, stop, status, admin, the OAuth callback
   index.html       the board — ZO-1, one file, no build
+  get-runtime.cmd  fetch Node on a machine that has none — see below
+  runtime.json     which Node the fetch pulls, and its sha256
+  release-runtime.js  upload that Node as a release asset (Ed only, rarely)
   logs/            per-board server output, one file per serial
+  runtime/         the fetched Node. Gitignored, never published.
   boards/
     charging-tracker/   ZO-001
     fsd-tracker/        ZO-002
@@ -297,8 +301,16 @@ handed over with nothing outside it.
 
 ### Sharing it
 
-Zip the folder. That is the whole procedure. What deliberately does *not*
-travel with it:
+Two ways out, and they differ only in how Node arrives.
+
+- **`node package-portable.js`** builds a zip with Node inside it. Nothing to
+  fetch, nothing to install, works with no network. Send it via OneDrive or
+  Teams — it is ~120 MB and mail filters strip zips containing an `.exe`.
+- **Push to GitHub** (the admin panel) publishes the estate to
+  `github.com/ebocc09/Zo-Projects-Hub`. Smaller, always current, and the way
+  an existing copy updates itself.
+
+What deliberately does *not* travel with either:
 
 - **Credentials.** They live in `%LOCALAPPDATA%\ZoProjects\credentials.json`,
   outside the project, and each board's local fallback is gitignored. A
@@ -306,8 +318,57 @@ travel with it:
 - **Runtime state** — chosen centre, caches, thresholds. Machine state, not
   something to hand over.
 
-A recipient needs Node and nothing else; there are no dependencies to install
-and no build step in any board.
+There are no dependencies to install and no build step in any board.
+
+### Node, on a machine that has none
+
+The GitHub copy carries no Node binary and cannot: `publish.js` ships only what
+git tracks, and a 92 MB `node.exe` has no business in a public repo — GitHub
+hard-rejects any blob at 100 MiB, so committing it would leave the estate one
+Node release away from a publish that fails with no way back except rewriting
+published history.
+
+So the runtime is a **release asset** on the same repository, and the launchers
+fetch it once:
+
+```
+runtime\node.exe  →  node on PATH  →  get-runtime.cmd fetches it
+```
+
+`get-runtime.cmd` reads `runtime.json`, downloads the asset with `curl.exe`,
+checks it against the sha256 pinned there, and unpacks it with `tar.exe` into
+`runtime\`. Both tools are in `System32` on Windows 10 1803 and later — it
+calls them by full path, because Git for Windows puts a GNU `tar` ahead of them
+on PATH and GNU tar cannot read a zip. No PowerShell, so no execution policy to
+be blocked by. Nothing is installed and no admin rights are needed.
+
+The hash is the point: `runtime.json` arrives through the estate's own
+hash-manifested channel, the 92 MB of binary does not, and a mismatch deletes
+the download rather than running it.
+
+**Recipients need do nothing.** Double-click a launcher; if Node is missing it
+says so and fetches it, once, for the whole estate.
+
+#### When Node itself is upgraded
+
+Only Ed does this, and only when the bundled Node version should change:
+
+```sh
+node release-runtime.js --dry-run   # build and hash, upload nothing
+node release-runtime.js             # upload, then rewrite runtime.json
+```
+
+It packages whichever Node is running it — `process.execPath`, so no path
+guessing and by definition a working binary — with Node's LICENSE beside it, as
+the MIT terms require. Then **press Push to GitHub**: until `runtime.json` is
+published, the release exists but nothing points at it. Old tags stay
+downloadable, so a copy holding an older `runtime.json` keeps working.
+
+A bump does **not** re-fetch anyone's existing runtime: `get-runtime.cmd` stops
+the moment it sees `runtime\node.exe`, so copies in the field stay on the Node
+they first fetched. That is deliberate — no board depends on a Node version,
+and re-probing `node -v` on every launch of every board costs more than it is
+worth. To move a copy forward, delete its `runtime` folder and start it again.
 
 `credstore.js` is **copied** into each project rather than required across
 folders, so every board stays self-contained and runnable on its own.

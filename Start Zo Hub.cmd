@@ -4,16 +4,33 @@ rem
 rem  Uses the bundled runtime if this is the portable build, otherwise falls
 rem  back to whatever Node is on PATH — so the same launcher works from a
 rem  git checkout and from the zip.
+rem
+rem  Failing both, it fetches one. A copy downloaded from GitHub carries no
+rem  binary — publish.js can only ship what git tracks, and a 92 MB node.exe
+rem  does not belong in a public repo — so on a machine with no Node there is
+rem  nothing to run until get-runtime.cmd has been round once. That is the one
+rem  path that needs the network, and it needs it exactly once.
 
 setlocal
 cd /d "%~dp0"
 
-set "NODE=%~dp0runtime\node.exe"
-if not exist "%NODE%" set "NODE=node"
+set "NODE="
+if exist "%~dp0runtime\node.exe" set "NODE=%~dp0runtime\node.exe"
+if not defined NODE (
+  where /q node && set "NODE=node"
+)
 
-where /q "%NODE%" 2>nul || if not exist "%NODE%" (
+if not defined NODE (
+  if exist "%~dp0get-runtime.cmd" (
+    call "%~dp0get-runtime.cmd" /nopause
+    if exist "%~dp0runtime\node.exe" set "NODE=%~dp0runtime\node.exe"
+  )
+)
+
+if not defined NODE (
   echo.
-  echo   Node could not be found.
+  echo   Node could not be found, and could not be fetched. Any reason for the
+  echo   fetch failing is printed above.
   echo.
   echo   If you unzipped the portable build, the runtime folder is missing —
   echo   re-copy the whole folder rather than just the files you recognise.

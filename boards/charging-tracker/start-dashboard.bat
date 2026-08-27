@@ -16,7 +16,12 @@ REM   2. the one shared runtime at the hub root - the hub-wide portable build
 REM      ships a single copy there rather than 88 MB per board
 REM   3. whatever is on PATH - a normal developer checkout
 REM   4. a no-admin portable install under %USERPROFILE%\nodejs
-REM The same launcher therefore works from either zip and from a git clone.
+REM   5. failing all of those, fetch the shared runtime into the hub root -
+REM      a copy downloaded from GitHub carries no binary, because publish.js
+REM      ships only what git tracks and a 92 MB node.exe does not belong in a
+REM      public repo. One download, once, for the whole estate.
+REM The same launcher therefore works from either zip, from a git clone, and
+REM from a fresh GitHub download on a machine with no Node at all.
 set "NODE="
 if exist "%~dp0runtime\node.exe" set "NODE=%~dp0runtime\node.exe"
 
@@ -34,9 +39,19 @@ if not defined NODE (
   )
 )
 
+REM A board folder lifted out on its own has no hub above it and so cannot
+REM fetch - that case falls through to the message below, as it did before.
+if not defined NODE (
+  if exist "%~dp0..\..\get-runtime.cmd" (
+    call "%~dp0..\..\get-runtime.cmd" /nopause
+    if exist "%~dp0..\..\runtime\node.exe" set "NODE=%~dp0..\..\runtime\node.exe"
+  )
+)
+
 if not defined NODE (
   echo.
-  echo   Node.js was not found.
+  echo   Node.js was not found, and could not be fetched. Any reason for
+  echo   the fetch failing is printed above.
   echo.
   echo   If you unzipped the portable build, the runtime folder is
   echo   missing - re-copy the whole folder rather than just the files

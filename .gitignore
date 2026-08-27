@@ -24,3 +24,9 @@ logs/
 
 # What the updater keeps when an incoming file would overwrite a local edit.
 .zo-backup/
+
+# The fetched Node runtime. Never committed and never published: 92 MB of stock
+# binary, in a public repo, against GitHub's 100 MiB hard limit on a blob. It
+# arrives as a release asset instead — see release-runtime.js. The trailing
+# slash matters; runtime.json is the pinned descriptor and MUST publish.
+runtime/

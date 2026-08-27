@@ -38,6 +38,14 @@ const STATE = [
      be swept into the next publish — uploading one machine's private edits to
      everyone else, which is the opposite of what keeping a backup is for. */
   /(^|[\\/])\.zo-backup[\\/]/i,
+  /* The fetched Node runtime. .gitignore already covers it, but this list is
+     what the publisher and the zip actually consult, and the consequence of
+     the two disagreeing is a 92 MB binary pushed to a public repo — or, once
+     it crosses 100 MiB, a publish that fails outright with no way back except
+     rewriting published history. Belt and braces on this one.
+     Separator-anchored so it cannot swallow runtime.json, which must publish:
+     it is the only thing telling a fresh copy where the runtime lives. */
+  /(^|[\\/])runtime[\\/]/i,
 ];
 
 const isSecret = p => SECRET.test(String(p));

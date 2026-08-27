@@ -101,6 +101,12 @@ input{font-family:inherit;font-size:14px;color:inherit}
 
 main{max-width:1440px;margin:0 auto;padding:22px}
 
+/* House credit. This board has no status footer, so the line stands on its
+   own under `main` — same 1440px column, right-aligned, so it lands on the
+   page's bottom-right corner and not the viewport's. */
+.zo-credit{max-width:1440px;margin:0 auto;padding:0 22px 24px;text-align:right;
+  font-size:10.5px;color:var(--ink-mute);opacity:.7}
+
 .note{border:1px solid var(--line-soft);border-radius:var(--r-md);padding:11px 14px;margin-bottom:14px;
   font-size:12.5px;color:var(--ink-soft);background:var(--paper-alt)}
 .note.bad{border-color:rgba(232,33,39,.4);background:#FDE7E8;color:#A3161B}
@@ -483,6 +489,7 @@ small.rate{font-size:11px;font-weight:500;color:var(--ink-mute);letter-spacing:0
     <p>Upload a survey export above to build the scorecard.</p>
   </div>
 </main>
+<div class="zo-credit">Originated and developed in house at Houston Cypress</div>
 
 <!-- overlays -->
 <div class="scrim" id="scrim"></div>

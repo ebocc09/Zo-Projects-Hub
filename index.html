@@ -210,9 +210,16 @@ a.mini.dark{color:#fff}
   padding:12px 16px;margin-bottom:18px;font-size:13px;color:var(--ink-soft)}
 .note.err{border-left-color:var(--red)}
 
-.foot{display:flex;gap:22px;flex-wrap:wrap;max-width:1180px;margin:0 auto;padding:20px 22px 40px;
+.foot{display:flex;gap:22px;flex-wrap:wrap;max-width:1180px;margin:0 auto;padding:20px 22px 12px;
   font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
   color:var(--ink-mute);border-top:1px solid var(--line-soft)}
+
+/* House credit. Its own line under the footer rather than another `.foot`
+   span: the footer's spans are status readouts that change as you work, and
+   this does not. Right-aligned to the same 1180px column the footer uses, so
+   it lands on the page's bottom-right corner and not the viewport's. */
+.zo-credit{max-width:1180px;margin:0 auto;padding:0 22px 30px;text-align:right;
+  font-size:10.5px;color:var(--ink-mute);opacity:.7}
 
 /* ── overlays ── */
 .scrim{position:fixed;inset:0;background:rgba(23,26,32,.42);z-index:50;opacity:0;
@@ -554,6 +561,7 @@ a.mini.dark{color:#fff}
   <span id="fStore">credentials —</span>
   <span>ZO-000</span>
 </footer>
+<div class="zo-credit">Originated and developed in house at Houston Cypress</div>
 
 <div class="scrim" id="scrim"></div>
 

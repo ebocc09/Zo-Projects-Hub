@@ -913,10 +913,17 @@ body.no-scroll{overflow:hidden}
 
 .foot{
   border-top:1px solid var(--line-soft);
-  padding:22px;text-align:center;
+  padding:22px 22px 10px;text-align:center;
   font-size:11.5px;color:var(--ink-mute);
 }
 .foot span{margin:0 9px}
+
+/* House credit. Its own line under the footer rather than another `.foot`
+   span: the footer's spans are status readouts that change as you work, and
+   this does not. Right-aligned rather than centred with them, so it lands on
+   the page's bottom-right corner. */
+.zo-credit{padding:0 22px 24px;text-align:right;
+  font-size:10.5px;color:var(--ink-mute);opacity:.7}
 
 @media (max-width:900px){
   .veh{grid-template-columns:152px 1fr 128px 36px;gap:13px}
@@ -1093,6 +1100,7 @@ body.no-scroll{overflow:hidden}
 <footer class="foot">
   <span id="fMode">Simulation mode</span>·<span id="fEnv">Production Garage</span>·<span>Reading <b>USOE</b> (usable state of energy)</span>·<span>Charging Tracker</span>
 </footer>
+<div class="zo-credit">Originated and developed in house at Houston Cypress</div>
 
 <!-- ══════════════════════════ OVERLAYS ══════════════════════════ -->
 <div class="scrim" id="scrim"></div>
