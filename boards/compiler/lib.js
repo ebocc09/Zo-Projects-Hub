@@ -130,6 +130,44 @@ function scaToken(){
   return s.token;
 }
 
+/* ── the OTHER Service App credential ──
+
+   TSS does not take the SecureToken. It takes the `access_token` cookie,
+   captured by the same Connect, stored beside it, and with **its own
+   expiry** — which is the trap: `isLive` only ever looked at the SecureToken,
+   so the board went on reporting SCA connected while this half was dead and
+   the user got TSS's own words back.
+
+   Ed, on a car he was trying to move to collision: "getting a cannot cancel
+   tss booking unathorized user". The SecureToken was fine; this one had
+   lapsed 54 minutes earlier. "Unauthorized user" is a true sentence about a
+   dead credential and a useless one to read, because it sounds like a
+   permission you do not have rather than a button you need to press.
+
+   Checked BEFORE the call, so the answer names the fix. */
+function tssToken(){
+  const s = scaSaved();
+  const t = s && s.accessToken;
+  if(!t){
+    const err = new Error("The Service App connection has no TSS credential — " +
+      "press Connect on SCA in Admin › Sources. One press captures both.");
+    err.needsSca = true; throw err;
+  }
+  /* Its own exp, read off the JWT rather than the stored one, which belongs
+     to the SecureToken. A malformed token is treated as dead: guessing that
+     an unreadable credential is fine is how this failure got through once. */
+  let exp = 0;
+  try{ exp = JSON.parse(Buffer.from(String(t).split(".")[1], "base64").toString()).exp * 1000; }
+  catch{ exp = 0; }
+  if(!(exp > Date.now() + 30000)){
+    const err = new Error("The Service App's TSS credential has expired — press Connect " +
+      "on SCA in Admin › Sources. It expires separately from the main one, so the " +
+      "rest of the board can still be working.");
+    err.needsSca = true; throw err;
+  }
+  return t;
+}
+
 const scaConnected = () => sca.isLive(scaSaved());
 
 function scaCommit(got){
@@ -1578,10 +1616,7 @@ async function scaCancelAppointment({ vin, serviceVisitId }){
     .map(a => [a.activityID, a.activityStatusID]);
 
   if(before.appointmentID != null){
-    if(!saved.accessToken)
-      throw new Error("Connect SCA again — the credential the scheduler needs was not captured. " +
-                      "Admin › Sources › Connect.");
-    const c = await sca.cancelAppointment(saved.accessToken, before.appointmentID, svid);
+    const c = await sca.cancelAppointment(tssToken(), before.appointmentID, svid);
     if(!c.ok)
       throw new Error(`Could not cancel the appointment${c.message ? ` — ${c.message}` : ""}. ` +
                       `Nothing else was attempted.`);
@@ -1735,10 +1770,7 @@ async function scaMoveVisit({ vin, serviceVisitId, dest }){
         `Appointments are only cancellable on undelivered cars, so a customer's booking ` +
         `cannot be cancelled from this board. Nothing was changed.`);
 
-    if(!saved.accessToken)
-      throw new Error("Connect SCA again — the credential the scheduler needs was not captured. " +
-                      "Admin › Sources › Connect.");
-    const c = await sca.cancelAppointment(saved.accessToken, before.appointmentID, svid);
+    const c = await sca.cancelAppointment(tssToken(), before.appointmentID, svid);
     if(!c.ok)
       throw new Error(`Could not cancel the appointment${c.message ? ` — ${c.message}` : ""}. ` +
                       `Nothing else was attempted.`);
@@ -4935,6 +4967,364 @@ async function partsStock(partNumber){
   };
 }
 
+/* ═══════════════════ Parts Catalog — the sixth tool ═══════════════════
+
+   Read-only, all of it. The tool it sits beside is the only one on this board
+   that closes a ticket; this one opens nothing, bills nothing and writes
+   nothing, and the absence of a single POST route behind it is the guarantee.
+
+   The API and why it needs no VIN are documented on `parts.catalogList`. What
+   lives here is the shaping: the tree SCA sends is enormous and mostly
+   repetition, and the stock figures have to be gathered across several
+   centres at once rather than one part at a time. */
+
+/* ── the strip ──
+
+   Every category re-embeds the whole catalogue object, and every system group
+   carries `systemGroupImages`, `extraLinks` and `pointOfImpacts`. Measured on
+   catalogue 3115: **212KB down to 16KB** keeping id and title per level.
+
+   What is NOT dropped any more is the drawing. An earlier version of this
+   comment said the images were left out because the host "would need its own
+   credential" — that was an assumption and it was **wrong**: epc.tesla.com
+   answers **200 with no Authorization header at all**, bearer or not. Same
+   shape as the inventory search. So the URL rides along and the page renders
+   a plain `<img>`, exactly as Pending Inventory does with the car compositor.
+
+   Measured across catalogue 3115: **176 of 179 groups carry one**, always as
+   a matched pair — 176 SVG and 176 PNG of the same drawing. Both are kept
+   because they are not interchangeable: the PNG is **182KB** and goes in the
+   panel, the SVG is **1.28MB** and is what you open when you need to zoom
+   into a callout. Putting the SVG in the panel would have cost seven times
+   the bytes on a page that repaints per node.
+
+   Categories carry a photograph of their own (`image`, a jpg). Subcategories
+   carry an `imageUrl` field that is **null on every subcategory measured** —
+   read it anyway rather than assuming, and let the page draw nothing. */
+const catalogImages = g => {
+  const of = type => ((g.systemGroupImages || [])
+    .find(i => i && i.mimetype === type && i.imageURL) || {}).imageURL || "";
+  return { png: of("image/png"), svg: of("image/svg+xml") };
+};
+
+function catalogSlim(c){
+  if(!c) return null;
+  return {
+    id        : c.id,
+    name      : c.name || "",
+    model     : c.catalogModelName || "",
+    generation: c.generation || null,
+    categories: (c.categories || []).map(cat => ({
+      id   : cat.id,
+      title: cat.title || "",
+      image: cat.image || cat.imageUrl || "",
+      subCategories: (cat.subCategories || []).map(sub => ({
+        id   : sub.id,
+        title: sub.title || "",
+        image: sub.image || sub.imageUrl || "",
+        systemGroups: (sub.systemGroups || []).map(g => ({
+          id: g.id, title: g.title || "", img: catalogImages(g)
+        }))
+      }))
+    }))
+  };
+}
+
+/* The 15 vehicle catalogues, newest-looking first is NOT imposed — SCA's own
+   order is by model then generation and re-sorting it would put Cybercab
+   above Model Y at a centre that has never seen one. Left as sent. */
+const catalogList = () =>
+  parts.catalogList(scaToken()).then(rows => (rows || []).map(c => ({
+    id        : c.id,
+    name      : c.name || "",
+    model     : c.catalogModelName || "",
+    generation: c.generation || null
+  })));
+
+const catalogTree = catalogId =>
+  parts.catalogTree(scaToken(), catalogId).then(catalogSlim);
+
+/* One catalogue, one term, by name or by part number. Sorted by SCA's own
+   relevance score and capped — a term like "bumper" answers 10 and "wiper"
+   16, so the cap is a guard against a one-letter term rather than a page
+   size anybody will meet. The score is dropped here: it is the search's
+   working, and a row that says 0.99 invites somebody to compare it with a
+   0.97 that is the part they actually want. */
+const CATALOG_HITS = 40;
+
+const catalogSearch = (catalogId, term) =>
+  parts.catalogSearch(scaToken(), { catalogId, term })
+    .then(hits => hits
+      .sort((a, b) => b.score - a.score)
+      .slice(0, CATALOG_HITS)
+      .map(({ score, ...h }) => h));
+
+/* ── the catalogue for one car ──
+
+   Ed's second way in: type a VIN instead of choosing a model. One call does
+   the whole job — SCA reads the VIN, decides which of the fifteen catalogues
+   the car belongs to, and returns that catalogue's entire tree. So there is
+   no model to pick and no second fetch to make.
+
+   **The tree is the SAME tree** — 22 categories, 84 subcategories, 179 groups
+   for a Model Y either way, byte for byte the same ids. The VIN does not
+   prune the catalogue and this function does not pretend it does. What the
+   VIN changes is the PARTS, one group at a time: see `catalogParts` below. */
+async function catalogForVin(vin){
+  /* Both reads at once. The delivery state is not needed to draw the
+     catalogue and must not hold it up — but it IS needed before the page
+     decides whether to offer a way into Part Picker, and asking for it later
+     would mean drawing the button first and taking it away. */
+  const [raw, und] = await Promise.all([
+    parts.catalogForVin(scaToken(), vin),
+    /* Failing closed: a Garage read that did not answer is not permission.
+       Ed's rule for every gate on this board, and the reason the reason is
+       carried rather than just the boolean. */
+    isUndelivered(vin).catch(e => ({ ok: false, why: `could not be checked — ${e.message}` }))
+  ]);
+  if(!raw || !raw.id) throw new Error("No catalogue came back for that VIN.");
+
+  return {
+    catalog: { id: raw.id, name: raw.name || "",
+               model: raw.catalogModelName || "", generation: raw.generation || null },
+    tree: catalogSlim(raw),
+    /* **The catalogue opens for a delivered car; a ticket does not.** Ed's
+       rule, and the two halves are separate on purpose: what a part fits is a
+       fact about the car and is worth reading for anybody's Model Y, while
+       Part Picker writes to service records and is pre-delivery only. So this
+       is a display flag, not a refusal — and it is NOT the enforcement. The
+       gate is still `partsGate` inside `partsResolve`, server-side, fresh, on
+       the way to the write, exactly where a stale tab cannot get past it. */
+    ticketable: und.ok === true,
+    why: und.ok ? "" : (und.why || "is not eligible")
+  };
+}
+
+/* ── every catalogue at once ──
+
+   Ed: "the manual search defeats the purpose a little if you have to select
+   a model first". It does, and the way round it is to ask all fifteen.
+
+   **The fan-out costs almost nothing because it is parallel.** Measured
+   against the one-catalogue baseline: "bumper" 280ms → 415ms for all 15,
+   "wiper blade" 206 → 581, "1974875" 301 → 374. Fifteen calls, half a
+   second, because the wait is the round trip and they share it.
+
+   The grouping is the second half of Ed's ask — "when no model is selected
+   it'll display under the part the models its compatable with". A part
+   number that comes back from six catalogues IS its compatibility list;
+   nothing has to be looked up to know it. Measured on Cypress terms: the
+   median part is in one model, "BUMPER-OVERSLAM AT LOWER LIFTGATE" is in
+   seven, and one drive-unit filter is in sixteen.
+
+   Each model keeps its own position ids, so a part in seven catalogues
+   offers seven places to jump to and each one lands correctly — the tree is
+   per-catalogue and a single set of ids would be right for at most one. */
+
+/* The catalogue list is the one input the fan-out needs and it changes about
+   never — fifteen rows that have not moved in the life of this board. Held
+   for a few minutes so a burst of typing does not re-ask for it every time,
+   and NOT held forever, because a new model appearing and never showing up
+   until a restart is the kind of staleness nobody thinks to suspect. */
+const CATALOG_LIST_TTL = 10 * 60 * 1000;
+let catalogListCache = null;
+
+async function catalogListCached(){
+  if(catalogListCache && Date.now() - catalogListCache.at < CATALOG_LIST_TTL)
+    return catalogListCache.rows;
+  const rows = await catalogList();
+  catalogListCache = { at: Date.now(), rows };
+  return rows;
+}
+
+async function catalogSearchAll(term){
+  const cats = await catalogListCached();
+  const token = scaToken();
+
+  /* One catalogue failing must not take the search down — fourteen answers
+     is a result, and the count of what did not reply is reported rather than
+     folded silently into "that is all there is". */
+  const runs = await Promise.all(cats.map(c =>
+    parts.catalogSearch(token, { catalogId: c.id, term })
+      .then(hits => ({ c, hits }))
+      .catch(err => ({ c, hits: [], err: err.message }))));
+
+  const byPn = new Map();
+  for(const { c, hits } of runs){
+    /* Best first WITHIN the catalogue, because only the first occurrence of
+       a part in a catalogue is kept and it should be the closest match. */
+    for(const h of [...hits].sort((a, b) => b.score - a.score)){
+      const key = String(h.partNumber || "").toUpperCase();
+      if(!key) continue;
+      if(!byPn.has(key)) byPn.set(key, {
+        partNumber: h.partNumber,
+        /* Names differ between catalogues — the same number is
+           "ASY,CARRIER FR END" in one and "COMPONENT - FRONT END CARRIER" in
+           another — so the one shown is the one from the catalogue that
+           matched best. */
+        name: h.name, notes: h.notes, score: h.score,
+        models: [], byCatalog: new Map()
+      });
+      const row = byPn.get(key);
+      if(h.score > row.score){ row.score = h.score; row.name = h.name; }
+
+      /* **One entry per CATALOGUE, not per hit.** A common fastener is in
+         nine system groups of the same Model Y catalogue, and the first cut
+         listed "Model Y Jan 2020 - Jan 2025" nine times: 35 chips for one
+         bolt, which is not a compatibility list, it is noise. The extra
+         places are counted and named on the chip instead. */
+      const seen = row.byCatalog.get(c.id);
+      if(seen){ seen.also++; continue; }
+      const entry = {
+        catalogId  : c.id,
+        /* The catalogue's full name, not model+generation: two catalogues
+           can share both — "Model 3 Classic" appears twice — and a list that
+           said the same thing twice would read as a bug. */
+        catalogName: c.name,
+        categoryId : h.categoryId,
+        subCategoryId: h.subCategoryId,
+        systemGroupId: h.systemGroupId,
+        groupTitle : h.groupTitle,
+        also       : 0
+      };
+      row.byCatalog.set(c.id, entry);
+      row.models.push(entry);
+    }
+  }
+
+  const rows = [...byPn.values()]
+    /* Parts in more catalogues first among equals: a part that fits seven
+       models is more likely the one somebody searching without a model in
+       mind is after. */
+    .sort((a, b) => (b.score - a.score) || (b.models.length - a.models.length))
+    .slice(0, CATALOG_HITS)
+    .map(({ score, byCatalog, ...r }) => r);   // both are working, not answer
+
+  const failed = runs.filter(r => r.err);
+  return {
+    hits: rows,
+    searched: runs.length - failed.length,
+    of: runs.length,
+    failed: failed.map(f => f.c.name)
+  };
+}
+
+/* `quantity` here is how many the CAR takes, not how many are on the shelf —
+   a different question from the stock read below, and both are shown, so the
+   names have to stay apart. `restriction` is SCA's own sentence ("Sold by
+   Tesla; None") and is passed through verbatim rather than interpreted. */
+async function catalogParts(ids){
+  const g = await parts.catalogParts(scaToken(), ids);
+  return (g && g.parts ? g.parts : []).map(p => ({
+    partId     : p.partId,
+    partNumber : p.partNumber || "",
+    name       : p.title || "",
+    perCar     : p.quantity ?? null,
+    restriction: p.partRestrictionMessage || "",
+    superseded : Boolean(p.hasSuperSession),
+    /* Only ever true when a VIN was sent, and that is the whole of the VIN
+       mode: SCA resolves the car's configuration and marks the parts that
+       apply to it. Measured on a Model Y — 105 of 196 across 11 groups, and
+       10 of those 11 groups were MIXED, so it discriminates rather than
+       blessing everything. "Front Door Hinges and Fittings" came back 8 of
+       30. Three real Model Ys of the same build answer identically and a
+       fictional VIN marks nothing, so it is the car's configuration talking,
+       not the string. */
+    fits       : p.recommendationType === "RECOMMENDED"
+  }));
+}
+
+/* ── stock, a group at a time and a centre at a time ──
+
+   NOT a loop over partsStock(). That one answers a single part at the board's
+   own site and fires four calls to do it; this needs a whole system group —
+   five to forty parts — at every centre on screen. The two endpoints it uses
+   are batched by part number precisely so that is affordable, and price and
+   request counts are left out because Ed asked for the inventory.
+
+   `free = onHand − allocated`, the same arithmetic and the same field
+   partsStock uses, so the two tools cannot disagree about what "in stock"
+   means. A location whose read fails is `free: null` and says so on the row —
+   never a silent nought, which would read as "none here" when the truth is
+   "nobody asked". */
+async function catalogStock(partNumbers, locations){
+  const pns = [...new Set((partNumbers || []).map(s => String(s).trim()).filter(Boolean))];
+  const locs = (locations || []).filter(l => l && l.locationId);
+  if(!pns.length || !locs.length) return {};
+
+  const token = scaToken();
+  const per = await Promise.all(locs.map(async loc => {
+    const site = { locationId: Number(loc.locationId),
+                   scaLocationId: loc.scaLocationId ?? null,
+                   scaLocationID: loc.scaLocationId ?? null };
+    const [details, alloc] = await Promise.all([
+      parts.partDetails(token, site, pns).catch(() => null),
+      parts.partAllocation(token, site, pns).catch(() => null)
+    ]);
+    /* A failed details read is the one that matters — allocation legitimately
+       comes back empty for parts nobody has claimed, and treating [] as a
+       failure would blank every clean shelf in the estate. */
+    return { loc, details, alloc: alloc || [] };
+  }));
+
+  const out = {};
+  for(const pn of pns){
+    const key = pn.toUpperCase();
+    out[key] = per.map(({ loc, details, alloc }) => {
+      if(details == null)
+        return { locationId: loc.locationId, name: loc.name || "", free: null,
+                 onHand: null, allocated: null, bin: null, failed: true };
+      const find = rows => (rows || []).find(x =>
+        String(x.partNumber || "").toUpperCase() === key) || {};
+      const d = find(details), a = find(alloc);
+      const onHand    = d.quantity ?? d.availableQuantity ?? null;
+      const allocated = a.quantity ?? 0;
+      return {
+        locationId: loc.locationId,
+        name      : loc.name || d.locationName || "",
+        onHand, allocated,
+        free      : onHand == null ? null : Math.max(0, onHand - allocated),
+        bin       : d.binLocation || null,
+        failed    : false
+      };
+    });
+  }
+  return out;
+}
+
+/* ── where the figures come from ──
+
+   The same directory search the move picker uses, and reusing it is the right
+   answer rather than a convenience: the one site type it filters out is 8,
+   Mobile, and a mobile unit shares its parent centre's inventory outright —
+   "Mobile Service Houston Cypress" carries inventoryLocationID 15138, which
+   IS Cypress. Offering both would be the same shelf listed twice.
+
+   Rows with no inventoryLocationID cannot answer a stock question at all, so
+   they are dropped here rather than offered and then failing. */
+const catalogSites = async term => {
+  const rows = await scaSites(term);
+  return (rows || [])
+    .filter(r => r.inventoryLocationId)
+    .map(r => ({ locationId: Number(r.inventoryLocationId),
+                 scaLocationId: r.scaLocationId, trtId: r.trtId,
+                 name: r.name || "" }));
+};
+
+/* The location the tool opens on. partsSite() already turns the nav's centre
+   into an inventoryLocationId, already caches it per TRT and already explains
+   itself when it cannot — so the default is that answer, and its refusal is
+   passed through as words rather than swallowed into a blank picker. */
+async function catalogHome(){
+  try{
+    const s = await partsSite();
+    return { home: { locationId: s.locationId, scaLocationId: s.scaLocationId,
+                     trtId: s.trtId, name: s.name }, homeWhy: "" };
+  }catch(err){
+    return { home: null, homeWhy: err.message };
+  }
+}
+
 /* ── the pay-type rule ──
 
    Ed's rule, and the one place the tool is opinionated: always Transportation
@@ -5607,7 +5997,7 @@ async function partsClose({ vin, serviceVisitId, activityId, activityCorrectionI
 module.exports = {
   CONFIG, loadConnections, saveConnections, adminPassword, savedTrtId, savedOffsiteTrtId,
   intrepidCookie, intrepidGet, intrepidPost, appointmentsOn,
-  scaToken, scaConnected, scaSignIn, scaDisconnect, vriCompletions,
+  scaToken, tssToken, scaConnected, scaSignIn, scaDisconnect, vriCompletions,
   /* Pending Inventory — Tesla OS. `osStatus` is async and probes; `osConnected` is the
      synchronous "is there a token at all" the scan guard uses. */
   osToken, osConnected, osStatus, osSignIn, osDisconnect, expScan,
@@ -5633,6 +6023,10 @@ module.exports = {
   partsCorrectionSearch, partsPartSearch, partsTechSearch, partsRecommend, partsStock,
   scaSymptomDetail,
   partsOpen, partsFill, partsClose, partsCancel, partsPayTypeFor,
+  /* Parts Catalog — the sixth. Every one of these is a read; the tool has no
+     write half at all. */
+  catalogList, catalogTree, catalogParts, catalogStock, catalogSites, catalogHome,
+  catalogSearch, catalogSearchAll, catalogForVin,
   scaPhotoStream: sca.photoStream,
   scaSignInStatus: sca.signInStatus, scaCancelSignIn: sca.cancelSignIn,
   scaBrowserStatus: sca.browserStatus,

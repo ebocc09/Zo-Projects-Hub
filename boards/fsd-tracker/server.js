@@ -144,6 +144,9 @@ const reportBusy = () => queued > 0;
 /* Surfaced in /api/state so a broken background job is visible somewhere
    other than a console nobody is reading. */
 let lastAlertAt = null, lastAlertResult = null, lastAlertError = null;
+// Which card the last fire was, so the panel can say "morning brief" rather
+// than reporting every post as a digest.
+let lastAlertKind = null;
 
 // The hour a digest was last DECIDED for — "2026-08-13T14". A name, not a
 // timestamp. In memory on purpose: persisting it would race the admin panel
@@ -208,6 +211,45 @@ async function runAlertCheck({ post = true } = {}){
   return { ...base, posted: true, status };
 }
 
+/* ── the Tesla OS session, before the brief rather than during it ──
+
+   The report renews a lapsed session by itself when it reaches the first order
+   lookup (osEnsureToken, lib.js), so this is not what makes the brief work
+   unattended — that already worked. What it changes is WHEN and WHETHER:
+
+     · the renewal happens before the first Garage call rather than forty cars
+       into the run, so the whole brief is measured against one live session
+       instead of hitting the lapse mid-flight and going round again;
+     · the ten-minute failure cooldown is cleared first. It exists so a machine
+       that cannot reach Tesla OS does not spend forty-five seconds proving it
+       on every hourly digest. The brief runs once a day and is the card that
+       NAMES customers, so it is worth the forty-five seconds every time.
+
+   A cold board is left alone deliberately: osEnsureToken refuses to open a
+   window on a board that has never been connected, and that guard stays. The
+   first sign-in is the one that may genuinely need a person, and popping a
+   browser window on an unattended machine for an optional column is not a
+   trade this board makes. The brief still goes out — Sub-Intent blank, with
+   the "could not be checked" count saying so on the card itself.
+
+   Never throws. Everything here is optional; a brief that failed to post
+   because it could not get a token it does not strictly need would be a much
+   worse bug than a brief with one column missing. */
+async function briefOsPreflight(){
+  if(L.effectiveMode(undefined).mode !== "advanced") return;   // basic never asks
+
+  L.osClearHealCooldown();
+  try{
+    await L.osEnsureToken();
+    log("brief: Tesla OS session is live");
+  }catch(err){
+    log(err.neverConnected
+      ? "brief: never connected to Tesla OS — going out without Sub-Intent. " +
+        "Press Connect on the Tesla OS card once and it renews itself from then on."
+      : `brief: could not renew the Tesla OS session (${err.message}) — going out without Sub-Intent`);
+  }
+}
+
 /* ── the morning brief ──
 
    Two reports, not one, and that is the whole shape of it: yesterday supplies
@@ -226,6 +268,8 @@ async function runMorningBrief({ post = true } = {}){
   const trt  = L.savedTrtId();
   if(!trt) return { skipped: "no-trt", reason: "No centre is set on this board.", posted: false };
 
+  await briefOsPreflight();
+
   const today = L.todayLocal();
   const y = new Date();
   y.setDate(y.getDate() - 1);
@@ -242,21 +286,23 @@ async function runMorningBrief({ post = true } = {}){
     log(`brief: yesterday (${yesterday}) could not be read — ${err.message}`);
   }
 
-  const out  = await L.collectReport({ dates: [today], trtId: String(trt),
-                                       onProgress: jobUpdate });
+  /* TODAY'S APPOINTMENTS, not today's deliveries. The whole point of the card
+     is to name people before they arrive, so the population is the diary —
+     see briefAppointments in lib.js for why collectReport cannot answer this
+     and why nothing is filtered out of it. */
+  const out  = await L.briefAppointments(today, String(trt));
   const cars = A.noIntentCustomers(out.rows);
-  const sum  = L.summarise(out.rows);
   const site = (await L.trtInfo(trt).catch(() => null) || {}).name || null;
 
   /* `total` matters as much as `unknown` here: the card has to be able to tell
      "none to chase" from "none checked", and that is unknown vs total, not a
      count on its own. */
   const card = A.briefCard({ site, trtId: trt, date: today, mode: out.mode,
-                             yesterday: ySum, cars, unknown: sum.intentUnknown,
-                             total: out.rows.length, now: new Date() });
+                             yesterday: ySum, cars, unknown: out.unknown,
+                             total: out.total, now: new Date() });
 
-  const base = { total: out.rows.length, noIntent: cars.length,
-                 unknown: sum.intentUnknown, cars, card,
+  const base = { total: out.total, noIntent: cars.length,
+                 unknown: out.unknown, cars, card,
                  mode: out.mode, trtId: trt, site, date: today,
                  yesterdayDate: yesterday,
                  yesterdayDone: ySum ? ySum.adoption : null,
@@ -265,7 +311,7 @@ async function runMorningBrief({ post = true } = {}){
 
   const status = await A.postWithOneRetry(conn.alertWebhook, card);
   log(`brief: posted — yesterday ${ySum ? ySum.adoption + "%" : "unread"}, ` +
-      `${cars.length} of ${out.rows.length} today without Sub-Intent (HTTP ${status})`);
+      `${cars.length} of ${out.total} appointments today without Sub-Intent (HTTP ${status})`);
   return { ...base, posted: true, status };
 }
 
@@ -285,8 +331,12 @@ async function alertTick(){
     return;
   }
 
-  const key = A.shouldFire(L.loadConnections(), new Date(), lastAlertHour);
-  if(!key) return;
+  /* One decision, two possible cards. `kind` is "brief" only for the first
+     post of an alert day — see shouldFire. */
+  const due = A.shouldFire(L.loadConnections(), new Date(),
+                           { lastHour: lastAlertHour, briefDate: L.briefSentDate() });
+  if(!due) return;
+  const { key, kind } = due;
 
   /* Skip, do not queue — and deliberately do not record the hour, so the
      next tick retries. Logged once per stretch rather than every 30s. */
@@ -302,18 +352,32 @@ async function alertTick(){
   alertInFlight  = true;
   alertStartedAt = Date.now();
   try{
-    const out = await withReportLock("alert", () => runAlertCheck({ post: true }));
+    const brief = kind === "brief";
+    const out = brief
+      ? await withReportLock("brief", () => runMorningBrief({ post: true }))
+      : await withReportLock("alert", () => runAlertCheck({ post: true }));
+
+    /* Recorded only when a card actually went out. A brief that failed, or
+       that could not run because no centre is set, has not opened the day —
+       so the next hour tries the brief again rather than quietly demoting the
+       day to digests. It cannot post twice: the date is written here, and it
+       is written to disk. */
+    if(brief && out.posted) L.markBriefSent(due.date);
+
     lastAlertAt = new Date().toISOString();
+    lastAlertKind = kind;
     lastAlertResult = out.skipped ? out.reason
+      : brief ? `morning brief — ${out.noIntent} of ${out.total} without Sub-Intent`
       : out.posted ? `posted ${out.missing} car(s)`
       : "nothing to post — every car has driven";
     lastAlertError = null;
     if(out.skipped) log(`alerts: ${out.reason}`);
   }catch(err){
     lastAlertAt = new Date().toISOString();
+    lastAlertKind = kind;
     lastAlertResult = null;
     lastAlertError  = err.message;
-    warn("alerts:", err.message);
+    warn(kind === "brief" ? "brief:" : "alerts:", err.message);
   }finally{
     /* Recorded even on failure. A failing hour that retried every 30s would
        hammer Garage 120 times an hour and bury the console; one attempt and
@@ -410,7 +474,8 @@ const server = http.createServer(async (req, res) => {
         today      : L.todayLocal(),
         /* How the background job is getting on. Without this, "the alerts
            stopped working" is only discoverable by scrolling a console. */
-        alertStatus: { at: lastAlertAt, result: lastAlertResult, error: lastAlertError },
+        alertStatus: { at: lastAlertAt, kind: lastAlertKind,
+                       result: lastAlertResult, error: lastAlertError },
         // The page explains the vitals ceiling in its own words; it should not
         // hardcode the number that produces it.
         vitalsDays : L.VITALS_CEILING_DAYS,
@@ -962,6 +1027,16 @@ const server = http.createServer(async (req, res) => {
       }
 
       const out = await withReportLock("brief-manual", () => runMorningBrief({ post }));
+
+      /* Sending by hand DOES count as the day's brief, unlike Send now on the
+         hourly card. The difference is what a duplicate costs: a second digest
+         is noise, a second brief names the same customers in the channel
+         again. Someone who sends it at 08:00 has opened the day, so the first
+         scheduled post is a digest. */
+      if(out.posted){
+        L.markBriefSent(A.dayKey(new Date()));
+        log("brief: sent by hand — that is today's brief, the schedule will not repeat it");
+      }
       return sendJson(res, 200, { ok: true, ...out });
     }
 
@@ -1036,6 +1111,14 @@ server.listen(PORT, "127.0.0.1", () => {
   log(`  alerts ${c.alerts.armed
         ? `on the hour ${c.alerts.start}–${c.alerts.end} ${c.alerts.dayLabel} → ${c.alerts.webhook.hint}`
         : `off — ${c.alerts.why}`}`);
+  /* Which card the next fire will be. The brief is the day's first post, so
+     after a restart this is the one line that says whether today has already
+     been opened — otherwise the only way to know is to wait and see. */
+  if(c.alerts.armed){
+    log(`  brief ${c.alerts.brief.sentToday
+          ? "already sent today — the next post is a digest"
+          : `not sent today — the first post of the day is the brief (from ${c.alerts.start})`}`);
+  }
   // Started only after the port is bound. Nothing should be scheduled before
   // the thing it reports on can be reached.
   startAlertClock();

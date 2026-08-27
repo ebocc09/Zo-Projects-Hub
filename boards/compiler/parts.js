@@ -469,6 +469,163 @@ const partRequests = (token, site, partNumbers) =>
       { locationId: site.locationId, partNumberList: [].concat(partNumbers) })
     .then(r => (ok(r) ? (unwrap(r) || []) : []));
 
+/* ─────────────────────── the catalogue, for browsing ───────────────────────
+
+   `partssearch` above answers "is this part here" — a term, one model, two
+   characters minimum. It cannot answer "what parts are there", and that is
+   what Parts Catalog asks. A different API entirely, mined out of the Angular
+   bundle and then proven live; nothing else on this board uses it.
+
+   ── no VIN is needed, and the tool rests on that ──
+
+   The entry point the app itself uses is `POST partscatalog/vin`, which takes
+   {vin, modelID, productionDate, locationID}. Called with the VIN blank it
+   answers 200 / "Error retrieving Parts Catalog from EPC". But
+   `partscatalog/id/<catalogId>/US?vin=` returns the **identical object** with
+   the VIN empty, and the parts POST below takes `vin:""` and answers normally.
+   So this tool needs no car on screen — unlike the quick-add rail next door,
+   which does. Don't re-probe `partscatalog/vin`; it is a dead end for us.
+
+   ── the whole skeleton is ONE call ──
+
+   Catalogue 3115 (Model Y Feb 2025, "Opal") is 22 categories → 84
+   subcategories → 179 system groups, and all three levels come back nested in
+   a single ~400ms GET. Parts are the only level that has to be fetched, which
+   is why the page can draw the tree instantly and lazily fill the leaf.
+
+   `productTypeId` is 1 = Vehicle. 2 is Energy (25 catalogues) and 3 is Optimus
+   (4), both measured, both out of scope for a vehicle board — one parameter
+   away if that ever changes. Country is US for the same reason every other
+   call on this board hard-codes it. */
+const PRODUCT_TYPE_VEHICLE = 1;
+const CATALOG_COUNTRY      = "US";
+
+const catalogList = token =>
+  req(token, "GET",
+    `/integration/api/partscatalog/productType/${PRODUCT_TYPE_VEHICLE}/${CATALOG_COUNTRY}`)
+    .then(r => {
+      if(!ok(r)) throw new Error(`The Service App would not list the catalogues — ${why(r)}`);
+      return unwrap(r) || [];
+    });
+
+/* The `vin=` is deliberately empty — see above. It is sent rather than
+   dropped because the parameter is required and an absent one 400s. */
+const catalogTree = (token, catalogId) =>
+  req(token, "GET",
+    `/integration/api/partscatalog/id/${q(catalogId)}/${CATALOG_COUNTRY}` +
+    `?vin=&productTypeId=${PRODUCT_TYPE_VEHICLE}`)
+    .then(r => {
+      if(!ok(r)) throw new Error(`The Service App would not open that catalogue — ${why(r)}`);
+      return unwrap(r) || null;
+    });
+
+/* Answers the system group back WITH its `parts[]` filled in, not a bare
+   array — so the caller reads `.parts`, and an empty group is a group with no
+   parts rather than a call that failed. */
+/* `vin` is the one optional argument and it changes the ANSWER, not the list:
+   the same five parts come back either way, but with a VIN the ones that
+   apply to that car carry `recommendationType: "RECOMMENDED"`. Empty when
+   browsing, which is what it has always sent. */
+const catalogParts = (token, { catalogId, categoryId, subCategoryId, systemGroupId, vin }) =>
+  req(token, "POST", "/integration/api/partscatalog/parts?interceptionexcluded=true", {
+    vin          : String(vin || "").trim().toUpperCase(),
+    catalogID    : Number(catalogId),
+    categoryID   : Number(categoryId),
+    subCategoryID: Number(subCategoryId),
+    systemGroupID: Number(systemGroupId),
+    productTypeId: PRODUCT_TYPE_VEHICLE
+  }).then(r => {
+    if(!ok(r)) throw new Error(`The Service App would not list that group's parts — ${why(r)}`);
+    return unwrap(r) || null;
+  });
+
+/* The catalogue for ONE CAR, chosen by SCA from the VIN.
+
+   An earlier note in this file said the vin route was a dead end that "looks
+   like the front door". That was true of the question being asked then —
+   browsing with no VIN, where it answers 200 / "Error retrieving Parts
+   Catalog from EPC". With a real VIN it is exactly the front door, and it is
+   worth two things:
+
+     - it picks the catalogue itself. No model list, no generation to guess:
+       7SAYGDEE4TA751019 comes back as 3115, "Model Y Feb 2025", Opal.
+     - it returns the WHOLE tree in that one call, so the by-id GET is not
+       needed afterwards.
+
+   **`modelID` is ignored, and sending 0 is the safe reading of that.** 17,
+   36, 8, 1 and 0 all answer with the same catalogue for the same VIN —
+   measured. The VIN alone drives it, so nothing has to be looked up first,
+   and that matters more here than it looks: this file's own header warns
+   that `search.modelId` says 17 for a Model Y where every other call wants
+   36. Sending a real id would mean picking between two id spaces for a
+   parameter that has no effect. `productionDate: null` is fine too. Both are
+   sent because SCA sends them.
+
+   **A wrong VIN is a 200.** Truncated, fictional, a real VIN from another
+   marque, or empty — all four come back `success:false` / "Error retrieving
+   Parts Catalog from EPC". The fourth 200-that-means-no on this board, and
+   `ok()` is what catches it. */
+const catalogForVin = (token, vin) =>
+  req(token, "POST", "/integration/api/partscatalog/vin?interceptionexcluded=true", {
+    vin           : String(vin || "").trim().toUpperCase(),
+    modelID       : 0,
+    productionDate: null,
+    /* Zero, not null. Both `modelID` and `locationID` are ignored — 5171,
+       15138 and 0 all answer with the same catalogue — but they must be
+       PRESENT and numeric: `locationID: null` is refused with "Model
+       validation(s) failed", a message that names the wrong field and cost a
+       round of debugging for exactly that reason. */
+    locationID    : 0
+  }).then(r => {
+    /* SCA's own message names EPC, which is a system the person holding the
+       VIN has never heard of. What they need to know is that the VIN did not
+       resolve. */
+    if(!ok(r)) throw new Error(
+      `No catalogue for that VIN — the Service App could not match it to a model.`);
+    return unwrap(r) || null;
+  });
+
+/* Searches one catalogue by part name OR part number, and it is NOT
+   `partssearch` next door — that one demands a `Modelid` and a site, and the
+   catalogue knows neither. A catalogue carries `catalogModelId` 8 for a Model
+   Y where partssearch wants 36, a different vocabulary entirely; every
+   attempt to bridge them answered "Model validation(s) failed".
+
+   This one takes the catalogue's own id and nothing else. No VIN, no model,
+   no location — the same reason `partscatalog/id/` needs none.
+
+   **It came out of the bundle, where it is called `getPartNotesFromEPC`** — a
+   name that describes neither the arguments nor the answer. Four guessed
+   paths 404'd before it turned up (`partscatalog/search/<id>/US`,
+   `partscatalog/parts/search`, `partsearch`, `searchparts`), which is the
+   house rule earning its keep once more: mine it, don't guess it.
+
+   Every hit carries the ids of the category, subcategory and system group it
+   lives in — so a result can put the tree on that node rather than reciting a
+   part number at somebody. Proven: 10 of 10 hits for "bumper" resolved
+   against the tree AND the group really listed the part. */
+const catalogSearch = (token, { catalogId, term }) =>
+  req(token, "POST", "/integration/api/partscatalog/search?interceptionexcluded=false", {
+    catalogId  : Number(catalogId),
+    term       : String(term || "").trim(),
+    countryCode: CATALOG_COUNTRY
+  }).then(r => {
+    if(!ok(r)) throw new Error(`The Service App would not search the catalogue — ${why(r)}`);
+    return (unwrap(r) || []).map(h => ({
+      partNumber : h.partNumber,
+      name       : h.title || "",
+      notes      : h.notes || "",
+      categoryId : h.categoryId,
+      subCategoryId: h.subcategoryId,      // SCA's lower-case c, kept at the edge
+      systemGroupId: h.systemGroupId,
+      groupTitle : h.systemGroupTitle || "",
+      /* A string off the wire. Kept as a number for sorting and dropped from
+         the page — a relevance score is the search's working, not an answer
+         anybody reads. */
+      score      : Number(h.score) || 0
+    }));
+  });
+
 /* Bills the part onto the correction. payTypeID is where Transportation
    Damage actually lands. */
 async function createParts(token, part){
@@ -786,6 +943,7 @@ module.exports = {
   correctionSearch, correctionDetails, correctionLine, validateCorrection, correctionTerms, updateCorrection,
   payTypesFor, allPayTypes,
   partSearch, partsRecommended, partDetails, partPrice, partAllocation, partRequests,
+  catalogList, catalogTree, catalogParts, catalogSearch, catalogForVin,
   createParts, prnDetail, pick, partLinesOn, activityDetail, ACTIVITY_CLOSED,
   userSearch, setOwner, ownersOf,
   removeActivities,

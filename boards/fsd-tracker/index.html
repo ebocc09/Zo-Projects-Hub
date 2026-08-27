@@ -727,6 +727,10 @@ a.vin-link:hover{border-bottom-color:var(--blue);color:var(--blue)}
 .conn b{font-weight:600}
 .conn span{color:var(--ink-mute);margin-left:auto;text-align:right;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:58%}
+/* A repair button living in the card itself. Shorter than a .btn so the row
+   keeps its height, and it only ever appears on a card that needs attention —
+   see paintOsCard. */
+.conn-act{height:28px;padding:0 14px;flex:none;font-size:10.5px}
 
 .sec-title{
   margin:22px 0 12px;padding-top:18px;border-top:1px solid var(--line-soft);
@@ -1162,7 +1166,12 @@ a.vin-link:hover{border-bottom-color:var(--blue);color:var(--blue)}
       <!-- Tesla OS is advanced-only because it is keyed by reference number, and a
            basic run has none. It is never "required": without it every mileage
            figure is still right and only the Sub-Intent badge is missing. -->
-      <div class="conn adv-only" id="cOs" hidden><i class="dot"></i><b>Tesla OS</b><span>—</span></div>
+      <div class="conn adv-only" id="cOs" hidden><i class="dot"></i><b>Tesla OS</b><span>—</span>
+        <!-- Hidden while the session is there. It is the one card on this panel
+             that can go amber on its own, so the fix belongs next to the fault
+             rather than three sections away under Alerts. -->
+        <button class="btn btn-dark conn-act" id="cOsConnect" hidden>Connect</button>
+      </div>
       <button class="btn btn-ghost" id="testBtn" style="width:100%">Test connections</button>
       <div class="hub-note">
         Sign-ins live on the <b>Zo Projects Hub</b>. One session there covers every
@@ -1236,8 +1245,10 @@ a.vin-link:hover{border-bottom-color:var(--blue);color:var(--blue)}
       <p class="sec-p">The Tesla OS session behind it expires about every eighty
         minutes and the browser deletes it, so it is usually gone by the time a report
         runs. The board renews it by itself — it opens a tab, takes the new token and
-        closes the tab again — which is why there is no Connect button to press and why
-        the scheduled morning brief works with nobody at the desk.</p>
+        closes the tab again — which is why the scheduled morning brief works with
+        nobody at the desk. If the renewal cannot get through, the Tesla OS card under
+        <b>Sources</b> goes amber and grows a <b>Connect</b> button; that is the only
+        time there is anything to press.</p>
 
       <div class="sec-title">The <span class="win-h">12</span>-hour window</div>
       <p class="sec-p">Miles are counted for the first <b><span class="win-h">12</span>
@@ -1332,6 +1343,9 @@ a.vin-link:hover{border-bottom-color:var(--blue);color:var(--blue)}
       <p class="sec-p">Alerts fire <b>on the hour</b>, and the end hour is included —
         09:00 to 17:00 posts nine times, and the last one is usually the useful one.
         Minutes are ignored.</p>
+      <p class="sec-p">The <b>first</b> post of each day is the morning brief rather
+        than the hourly card, so moving the start time moves the brief with it. There
+        is nothing separate to set.</p>
       <div class="field">
         <label for="alertStart">Start and end</label>
         <div class="connect-row">
@@ -1388,9 +1402,36 @@ a.vin-link:hover{border-bottom-color:var(--blue);color:var(--blue)}
         customers who have <b>not</b> stated FSD Sub-Intent, so each advisor knows who
         to spend the day on and who they can leave alone. Always those two dates,
         whatever the dashboard happens to be showing.</p>
+      <p class="sec-p">Today's half comes from the day's <b>appointments</b>, not from
+        cars that have already been handed over. That is the difference between a
+        useful brief and an empty one: at the opening hour almost nothing has been
+        delivered yet, so a card built from deliveries would open every morning with
+        "nobody to chase" while the entire day was still ahead of it. Every booked
+        appointment counts, whether the customer has collected yet or not — the
+        hourly card is the one that tracks what has actually happened.</p>
       <p class="sec-p">Customers whose order could not be read are counted and
         mentioned, never named as uninterested — not asked and not interested are
         different answers.</p>
+
+      <p class="sec-p">The list is headed <b>Customers without FSD Sub-Intent</b>
+        once, and then it is one line each: <b>advisor | customer delivering at
+        time</b>. Nothing else on the line — no model, no VIN, no reference number.
+        The card is read on a phone at the start of a shift, and repeating "no
+        Sub-Intent" on every row would bury the only part that differs between
+        them. Anything to look up is on the dashboard.</p>
+      <p class="sec-p"><b>Every</b> name is listed; there is no "and 12 more". A name
+        held back is a customer nobody chases, which is the thing this card exists to
+        prevent.</p>
+
+      <p class="sec-p"><b>It goes out on its own, as the first post of the day.</b>
+        There is no separate time to set: whatever the opening hour above is, that
+        post is the brief, and every post after it that day is the hourly card. Open
+        at 13:00 and the brief lands at 13:00. If the board was asleep or busy through
+        the opening hour it still opens the day with a brief at the first hour it does
+        manage — a late brief beats no brief — and it can only go once, because the
+        day it was sent is written to disk and survives a restart.</p>
+      <div class="conn" id="cBrief"><i class="dot"></i><b>Today</b><span>—</span></div>
+
       <div class="field">
         <div class="connect-row">
           <button class="btn btn-ghost" id="briefPreview" style="flex:1">Preview</button>
@@ -1400,6 +1441,10 @@ a.vin-link:hover{border-bottom-color:var(--blue);color:var(--blue)}
           and today for the list — so it takes a little longer than the hourly preview.
           Yesterday's windows have all closed, so most of it comes from cache.</div>
       </div>
+      <p class="sec-p"><b>Send now counts as today's brief</b> — unlike Send now on the
+        hourly card, which changes nothing about the schedule. A second digest is
+        noise; a second brief names the same customers in the channel twice. Preview
+        posts nothing and counts as nothing.</p>
       <div class="hint" id="briefPreviewBox" hidden></div>
 
       <div class="sec-title">Tesla OS session</div>
@@ -2042,16 +2087,38 @@ function progHide(){
   $("prog").innerHTML = "";
 }
 
+/* Runs that are NOT yours. The board reports for itself as well as for you,
+   and a user run queues behind whatever it is doing — so pressing Load on the
+   hour leaves you watching a job you did not ask for.
+
+   Keyed by every lock kind server.js can hold. Miss one and its progress gets
+   painted as though it were yours: the morning brief never calls jobUpdate,
+   so a Load during a brief showed "starting" and an idle bar for a minute and
+   a half, which reads as a hung page. That is exactly what happened when the
+   brief kinds were added here and this table was not. If you add a
+   withReportLock kind, add it here in the same commit. */
+const NOT_YOURS = {
+  "alert"       : { t: "Waiting for the hourly FSD check",
+                    s: "The board is running its own report for the Teams alert. "
+                     + "Yours starts the moment it finishes." },
+  "alert-manual": { t: "Waiting for the hourly FSD check",
+                    s: "The board is running its own report for the Teams alert. "
+                     + "Yours starts the moment it finishes." },
+  "brief"       : { t: "Waiting for the morning brief",
+                    s: "The board is building the day's brief — two report runs, "
+                     + "so it takes a minute or two. Yours starts the moment it finishes." },
+  "brief-manual": { t: "Waiting for the morning brief",
+                    s: "The board is building the day's brief — two report runs, "
+                     + "so it takes a minute or two. Yours starts the moment it finishes." }
+};
+
 function progPaint(p){
-  /* The run in flight may not be yours. Since the board started running its
-     own hourly report, pressing Load on the hour can leave you watching a
-     bar count cars you did not ask for and then jump back to zero. Say whose
-     it is instead. */
-  const meta = (p.kind === "alert" || p.kind === "alert-manual")
-    ? { t: "Waiting for the hourly FSD check",
-        s: "The board is running its own report for the Teams alert. Yours starts the moment it finishes." }
-    : (PHASE[p.phase] || { t: "Working", s: "" });
-  const known = p.total > 0 && p.done != null && p.phase !== "enumerate";
+  const theirs = NOT_YOURS[p.kind] || null;
+  const meta   = theirs || PHASE[p.phase] || { t: "Working", s: "" };
+  /* Never a determinate bar or a count for someone else's job — those cars
+     are not the ones you asked for, and watching them tick up and then reset
+     to zero is worse than an honest indeterminate bar. */
+  const known = !theirs && p.total > 0 && p.done != null && p.phase !== "enumerate";
   const pct   = known ? Math.min(100, Math.round(p.done / p.total * 100)) : 0;
 
   // Only worth an estimate once there is enough of a sample to divide by.
@@ -2062,9 +2129,13 @@ function progPaint(p){
                     : (left > 5 ? ` · about ${left}s left` : "");
   }
 
-  const count = p.phase === "enumerate"
-    ? (p.got ? p.got.toLocaleString(ZoI18n.locale()) + " found" : "")
-    : (known ? `${p.done.toLocaleString(ZoI18n.locale())} / ${p.total.toLocaleString(ZoI18n.locale())}` : "");
+  /* `theirs` suppresses the count for the same reason it suppresses the bar:
+     "1 found" from the board's own run, sitting next to your spinner, reads
+     as the answer to YOUR question. */
+  const count = theirs ? ""
+    : p.phase === "enumerate"
+      ? (p.got ? p.got.toLocaleString(ZoI18n.locale()) + " found" : "")
+      : (known ? `${p.done.toLocaleString(ZoI18n.locale())} / ${p.total.toLocaleString(ZoI18n.locale())}` : "");
 
   $("prog").innerHTML = `
     <div class="prog">
@@ -2086,7 +2157,12 @@ function progWatch(){
   progTimer = setInterval(async () => {
     try{
       const p = await api("/api/progress");
-      if(p.running) progPaint(p);
+      /* Not running does NOT mean finished — runLoad hides the bar itself when
+         the answer lands. It means your request is queued and nothing has
+         picked it up yet. Repainting "starting" rather than skipping the frame
+         is what stops the last picture freezing on screen and reading as a
+         hang, which is how the brief's dead progress was first noticed. */
+      progPaint(p.running ? p : { phase: "starting", elapsed: 0 });
     }catch{ /* a missed poll is not worth surfacing */ }
   }, 1200);
 }
@@ -3140,6 +3216,41 @@ function setMode(mode, { paint = true } = {}){
   paintHosts();
 }
 
+/* The card's status line, which ellipsises at 58% of the row — the title puts
+   the whole of a long message within reach. */
+function osCardMsg(msg){
+  const sp = $("cOs").querySelector("span");
+  sp.textContent = msg;
+  sp.title = msg;
+}
+
+/* The Tesla OS card, painted from either source: the state summary repaints it
+   with everything else, and paintOs repaints it alone after a connect made from
+   the card — /api/os carries the same connection block, so the dot the button
+   sits on turns green without waiting for the next full refresh.
+
+   Amber rather than red when it is missing: the report is complete without it
+   and only the Sub-Intent badge goes away, so a red dot here would say "this
+   board is broken" about a board that is working.
+
+   keepMsg: after a failed or cancelled sign-in the card is already showing why,
+   which is more use than repeating "not connected". */
+function paintOsCard(o, { keepMsg = false } = {}){
+  const set = Boolean(o && o.set);
+  const co  = $("cOs");
+  co.className = "conn adv-only " + (set ? "ok" : "warn");
+  co.hidden = S.mode !== "advanced";
+  // While a flow is running the status line belongs to the flow, so a report
+  // refreshing the panel underneath cannot wipe out the progress message.
+  if(!keepMsg && !osBusy) osCardMsg(set
+    ? `signed in as ${o.name || o.user}` + (o.title ? ` · ${o.title}` : "")
+    : "not connected — press Connect, or wait for a run to renew it");
+  /* The button only exists while there is something to fix, so it is never a
+     thing people press when nothing is wrong. Mid-flow it stays put whatever
+     the summary says, because it is the button showing Cancel. */
+  if(!osBusy) $("cOsConnect").hidden = set;
+}
+
 function fillConnections(c){
   if(c.mode) setMode(c.mode);
   if(c.droveThreshold != null){
@@ -3177,20 +3288,7 @@ function fillConnections(c){
   ct.className = "conn";
   ct.querySelector("span").textContent = "delivered-vehicle access — press Test to check";
 
-  /* Tesla OS. Amber rather than red when it is missing: the report is complete
-     without it and only the Sub-Intent badge goes away, so a red dot here
-     would say "this board is broken" about a board that is working.
-
-     No Connect button. The board renews this session by itself whenever a run
-     needs one — see os.js — so a button would mostly be a thing people press
-     when nothing is wrong. Forget is offered because undoing is the action a
-     person genuinely cannot take any other way. */
-  const co = $("cOs");
-  co.className = "conn adv-only " + (c.os && c.os.set ? "ok" : "warn");
-  co.hidden = S.mode !== "advanced";
-  co.querySelector("span").textContent = c.os && c.os.set
-    ? `signed in as ${c.os.name || c.os.user}` + (c.os.title ? ` · ${c.os.title}` : "")
-    : "not connected — Sub-Intent will be blank until a run renews it";
+  paintOsCard(c.os);
 
   // Rail dot: red only when something is actually missing, so it means
   // "attend to this" rather than decorating the rail permanently. Basic mode
@@ -3338,6 +3436,17 @@ function fillAlerts(a){
         : `on, but that webhook looks truncated — nothing will get through`)
     : `not posting — ${a.why}`;
 
+  /* Whether today has been opened yet. Green once the brief has gone, so the
+     card reads as done rather than as a fault — an unsent brief at 08:00 on a
+     board that opens at 13:00 is simply the normal state of the morning. */
+  const cb = $("cBrief");
+  const sent = a.brief && a.brief.sentToday;
+  cb.className = "conn " + (sent ? "ok" : "");
+  cb.querySelector("span").textContent = !a.armed
+    ? `nothing is scheduled — ${a.why}`
+    : sent ? `brief sent — the rest of today posts the hourly card`
+           : `not sent yet — the first post from ${a.start} will be the brief`;
+
   hookNote(a.webhook.set
     ? (a.webhook.looksOk
         ? `Posting to <b>${esc(a.webhook.hint)}</b>. Save a new one to replace it.`
@@ -3467,6 +3576,15 @@ const briefNote = (msg, bad) => {
   el.style.color = bad ? "var(--red)" : "";
 };
 
+/* A deliberate copy of hhmm() in alerts.js, NOT toLocaleTimeString. The card
+   prints a fixed zero-padded 24-hour time, and a preview that localised it
+   would show a different string from the one about to be posted. */
+const hhmmLocal = iso => {
+  const d = new Date(iso);
+  return isNaN(d) ? "" : `${String(d.getHours()).padStart(2, "0")}:` +
+                         `${String(d.getMinutes()).padStart(2, "0")}`;
+};
+
 async function runBriefNow(post){
   const btn = post ? $("briefSend") : $("briefPreview");
   const box = $("briefPreviewBox");
@@ -3490,16 +3608,24 @@ async function runBriefNow(post){
         : `No cars delivering today.`) +
         (d.unknown ? `<br>${d.unknown} could not be checked.` : "");
     }else{
-      const lines = d.cars.slice(0, 25).map(c =>
-        `${esc(c.advisor || "Unassigned")} — ${esc(c.customer || "unnamed customer")}` +
-        (c.vin ? ` · ${esc(c.vin)}` : "")).join("<br>");
+      /* The same heading and the same lines the card builds, and all of them —
+         a preview that reworded or truncated what is about to be posted is not
+         a preview. See customerLine in alerts.js; the two change together. */
+      const lines = d.cars.map(c => {
+        const who = esc(c.advisor || "Unassigned");
+        return (c.customer ? `${who} | ${esc(c.customer)}` : who) +
+               (c.at ? ` delivering at ${esc(hhmmLocal(c.at))}` : "");
+      }).join("<br>");
       box.hidden = false;
-      box.innerHTML = head + `<br>${d.noIntent} without Sub-Intent:<br>${lines}` +
-        (d.noIntent > 25 ? `<br>…and ${d.noIntent - 25} more` : "") +
+      box.innerHTML = head + `<br><b>Customers without FSD Sub-Intent</b><br>${lines}` +
         (d.unknown ? `<br><i>${d.unknown} could not be checked — not listed either way.</i>` : "");
     }
-    briefNote(post ? `Posted to Teams (HTTP ${d.status}).`
+    briefNote(post ? `Posted to Teams (HTTP ${d.status}). That is today's brief — the `
+                   + `next scheduled post is the hourly card.`
                    : `Preview only — nothing was posted.`);
+    /* A hand-sent brief has just changed what the schedule will do next, so
+       the card above has to stop saying the day is still unopened. */
+    if(post){ try{ const st = await api("/api/state"); fillAlerts(st.connections.alerts); }catch{} }
   }catch(err){
     box.hidden = true;
     briefNote(err.message, true);
@@ -3517,7 +3643,19 @@ const osNote = (msg, bad) => {
   const el = $("osHint");
   el.textContent = msg;
   el.style.color = bad ? "var(--red)" : "";
+  /* Sources cannot see the hint in Alerts, so while a flow is running the card
+     borrows its own status line for the same message — pressing Connect there
+     has to show something happening. */
+  if(osBusy) osCardMsg(msg);
 };
+
+/* Two buttons, one session: the card in Sources and the paragraph in Alerts.
+   Whichever is pressed, both have to say the same thing — a card still
+   offering Connect while the other reads Cancel would look like two
+   independent sign-ins. */
+const osBtns  = () => [$("osConnect"), $("cOsConnect")];
+const osLabel = t => osBtns().forEach(b => { b.textContent = t; });
+const osBusyUi = on => osBtns().forEach(b => { b.disabled = on; });
 
 /* keepHint: after a failed or cancelled sign-in the hint already says what
    happened, and that is more use than "Not connected." The button label still
@@ -3530,7 +3668,10 @@ async function paintOs({ keepHint = false } = {}){
        that has never been connected is the one action that genuinely has to be
        taken by hand; on a connected board the same button is just a way to
        force a renewal early. */
-    $("osConnect").textContent = c.set ? "Reconnect" : "Connect";
+    osLabel(c.set ? "Reconnect" : "Connect");
+    /* The card carries the same answer, and after a connect made from the card
+       this is the only call that has been anywhere near the server. */
+    paintOsCard(c, { keepMsg: keepHint });
     if(keepHint) return;
     osNote(c.set
       ? (d.live ? `Signed in as ${c.name || c.user}. Renews itself from here on.`
@@ -3554,8 +3695,7 @@ let osBusy = false;
    tidying up itself. Two owners is how you get a button that says Cancel with
    nothing running behind it. */
 async function osCancel(){
-  const btn = $("osConnect");
-  btn.disabled = true; btn.textContent = "Cancelling…";
+  osBusyUi(true); osLabel("Cancelling…");
   try{ await api("/api/os/cancel", { password: S.password }); }
   catch(err){ osNote(err.message, true); }
 }
@@ -3563,10 +3703,13 @@ async function osCancel(){
 async function osButton(){
   if(osBusy) return osCancel();
 
-  const btn = $("osConnect");
   let told = false;                    // did we already leave a message worth keeping?
   osBusy = true;
-  btn.textContent = "Cancel";
+  /* Whichever button was pressed keeps its place for the whole flow — it is now
+     the Cancel. Nothing is revealed here: a forced reconnect from Alerts must
+     not put a Cancel on a card that is perfectly green. paintOsCard leaves the
+     card button alone while osBusy for the same reason. */
+  osLabel("Cancel");
   try{
     await api("/api/os/connect", { password: S.password });
 
@@ -3586,14 +3729,16 @@ async function osButton(){
   }catch(err){ osNote(err.message, true); told = true; }
   finally{
     osBusy = false;
-    btn.disabled = false;
+    osBusyUi(false);
     /* Never restore a remembered label — the whole point of the press was to
-       change which of Connect/Reconnect is correct. Ask the server. */
-    try{ await paintOs({ keepHint: told }); }catch{ btn.textContent = "Connect"; }
+       change which of Connect/Reconnect is correct. Ask the server; that call
+       also decides whether the card button has any further business on screen. */
+    try{ await paintOs({ keepHint: told }); }catch{ osLabel("Connect"); }
   }
 }
 
 $("osConnect").addEventListener("click", osButton);
+$("cOsConnect").addEventListener("click", osButton);
 
 $("osForget").addEventListener("click", async () => {
   try{
@@ -3601,7 +3746,8 @@ $("osForget").addEventListener("click", async () => {
     /* Forgetting takes the board back to cold, and a cold board does NOT sign
        itself in — that is the whole point of the first connect being manual.
        Saying "the next run will sign in again" here would be untrue. */
-    $("osConnect").textContent = "Connect";
+    osLabel("Connect");
+    paintOsCard(null);                 // amber dot, and the card's Connect back
     osNote("Forgotten. Sub-Intent stays blank until you press Connect again.");
   }catch(err){ osNote(err.message, true); }
 });

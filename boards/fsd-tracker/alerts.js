@@ -168,8 +168,27 @@ function hourKey(d){
   return `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}T${p(t.getHours())}`;
 }
 
-/* The whole scheduling decision, as one pure function. Returns the hour key
-   to post for, or null to do nothing.
+/* The day the brief is remembered by. Sliced off hourKey rather than built
+   again, so the date an alert belongs to and the hour it fired in can never
+   come from two different notions of "local" — and so this matches
+   todayLocal() in lib.js, which is the date the report itself covers. */
+const dayKey = d => hourKey(d).slice(0, 10);
+
+/* The whole scheduling decision, as one pure function. Returns null to do
+   nothing, or `{ key, date, kind }` — the hour key to post for, the day it
+   belongs to, and WHICH card this is.
+
+   `kind` is the morning-brief rule: **the first post of any alert day is the
+   brief, and everything after it that day is the hourly digest.** Not "the
+   brief fires at 09:00" — the opening hour is a setting, and a centre that
+   opens at 13:00 wants its brief at 13:00, not at a time baked into this file.
+
+   Keyed on the DATE the brief last went out rather than on the start hour, so
+   a board that was asleep, restarted, or busy with a report through the
+   opening hour still opens its day with a brief at whatever hour it does
+   manage to post. The brief can therefore land late; a day that misses it
+   entirely is the worse outcome, so that is the trade taken. It cannot post
+   twice, because the caller stores the date on disk.
 
    Because it compares a NAME rather than counting from a previous fire:
 
@@ -183,7 +202,7 @@ function hourKey(d){
 
    `!==` rather than `<`, so a clock set backwards costs at most one extra
    card instead of silencing the board until it catches up. */
-function shouldFire(conn, now, lastHour){
+function shouldFire(conn, now, state){
   const s = normaliseSettings(conn);
   if(!s.on)      return null;
   if(!s.webhook) return null;
@@ -195,7 +214,11 @@ function shouldFire(conn, now, lastHour){
   if(h < s.startHour || h > s.endHour) return null;
 
   const key = hourKey(now);
-  return key === lastHour ? null : key;
+  const st  = state || {};
+  if(key === st.lastHour) return null;
+
+  const date = dayKey(now);
+  return { key, date, kind: st.briefDate === date ? "digest" : "brief" };
 }
 
 /* ──────────────────────────── who is missing ────────────────────────────
@@ -453,7 +476,11 @@ function noIntentCustomers(rows){
       model   : modelLabel(r.model || ""),
       customer: r.customer || "",
       advisor : r.advisor || r.host || r.hostUser || "",
-      at      : r.deliveredAt || null
+      /* `at` is the appointment slot briefAppointments carries; `deliveredAt`
+         is the delivery timestamp a collectReport row carries. Both are read
+         so this works whichever built the row — and the appointment wins,
+         because a booked slot is what the brief is about. */
+      at      : r.at || r.deliveredAt || null
     });
   }
   /* In the order the day happens, so the brief reads like a schedule. A car
@@ -466,46 +493,49 @@ function noIntentCustomers(rows){
 
 const DAY_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-/* One line per customer, addressed to the advisor who owns them. The VIN
-   rides along in the subtle line because it is still what the team looks a
-   car up by, and the handover time because "before 10:00" changes the plan. */
+/* One line per customer and NOTHING else on it:
+
+     advisor | <Customer> delivering at <time>
+
+   What it does NOT say is "no FSD Sub-Intent" — the heading above the list
+   already said that, once, for all of them. Twenty lines each repeating the
+   one fact they have in common is twenty chances to skim past the part that
+   differs, which is the name and the time.
+
+   Model, VIN and reference number are gone for the same reason. They were a
+   subtle second line under each name, and the card is read on a phone at the
+   start of a shift — the answer to "who do I talk to and when" should not
+   arrive with a VIN attached to it. Anyone who needs to look a car up opens
+   the dashboard, where every one of those fields already is.
+
+   The time is `deliveredAt`, Garage's delivery timestamp for the car, which
+   is the only per-car time on a row — hence "delivering at" rather than a
+   promise about an appointment slot this board never reads.
+
+   Missing pieces are DROPPED, never padded with a placeholder, and the
+   separator goes with them so a nameless row cannot leave a dangling pipe. An
+   order that has not reached Garage yet has no name and a basic-mode run has
+   none at all; "unnamed customer delivering at unknown time" reads like a
+   broken mail merge, where the same line with the clause simply absent still
+   says the true and useful part. */
 function customerLine(c){
-  const who = c.advisor || "Unassigned";
-  const sub = [c.model, c.vin, c.at ? "handover " + hhmm(c.at) : null]
-              .filter(Boolean).join(" · ");
-
-  /* A name is not always resolvable — the order may not have reached Garage
-     yet, or the lookup may have come back empty. The line is REWORDED rather
-     than padded with a placeholder: "your customer this customer" is what
-     a fallback string produces and it reads like a broken mail merge. The
-     handover time identifies the person perfectly well to the one advisor
-     this line is addressed to. */
-  const subject = c.customer
-    ? `your customer **${c.customer}**`
-    : (c.at ? `your **${hhmm(c.at)}** handover` : "one of your handovers");
-
+  const who  = c.advisor || "Unassigned";
+  const when = hhmm(c.at);
+  const head = c.customer ? `**${who}** | **${c.customer}**` : `**${who}**`;
   return {
-    type: "ColumnSet", separator: true, spacing: "Small",
-    columns: [{ type: "Column", width: "stretch", items: [
-      { type: "TextBlock", wrap: true, spacing: "None",
-        text: `**${who}** — ${subject} does NOT have FSD Sub-Intent` },
-      ...(sub ? [{ type: "TextBlock", text: sub, isSubtle: true, size: "Small",
-                   wrap: true, spacing: "None" }] : [])
-    ]}]
+    type: "TextBlock", wrap: true, separator: true, spacing: "Small",
+    text: head + (when ? ` delivering at ${when}` : "")
   };
 }
 
-/* Deliberately higher than the digest's twelve. This list is the reason the
-   card exists rather than a supporting detail, and a centre with twenty
-   deliveries wants all twenty names. Teams still collapses a tall card behind
-   "Show more", which is an acceptable trade for not truncating the point. */
-const BRIEF_MAX = 25;
-
+/* NO CAP, and no "…and N more". The digest truncates because it is a nudge
+   and the dashboard is the record; this card IS the record for the morning —
+   a name held back is a customer nobody chases, which is the one failure the
+   brief exists to prevent. Teams collapses a tall card behind "Show more",
+   which is a reader's choice rather than the board making it for them. */
 function briefCard({ site, trtId, date, yesterday, cars, unknown, total, now, mode }){
-  const list   = cars || [];
-  const shown  = list.slice(0, BRIEF_MAX);
-  const hidden = list.length - shown.length;
-  const day    = DAY_FULL[(now || new Date()).getDay()];
+  const list = cars || [];
+  const day  = DAY_FULL[(now || new Date()).getDay()];
 
   const y   = yesterday || {};
   const pct = Number(y.adoption) || 0;
@@ -524,16 +554,28 @@ function briefCard({ site, trtId, date, yesterday, cars, unknown, total, now, mo
   const unchecked   = cars_ > 0 && unknown_ >= cars_;
   const checked     = Math.max(cars_ - unknown_, 0);
 
+  /* The list case is a HEADING, not a sentence. "No FSD Sub-Intent" used to
+     be repeated on every line, which is the same fact said twenty times; said
+     once above the list it costs one line instead of twenty and every line
+     below it gets shorter. The other cases are not lists and keep their
+     sentences — they each say something different, and the `unchecked` one in
+     particular has to explain itself.
+
+     APPOINTMENTS, not deliveries. This card counts the day's diary, so an
+     empty one means nobody is booked in — not that nobody has driven off the
+     forecourt yet, which is true of every morning and would be worthless. */
   const headline =
     list.length
-      ? `**${list.length}** of today's ${list.length === 1 ? "customers has" : "customers have"} `
-        + "not stated FSD Sub-Intent. These are the ones worth your time:"
+      ? "**Customers without FSD Sub-Intent**"
+    : mode !== "advanced"
+      ? "Today's appointments could not be read — this ran in basic mode, "
+        + "which never calls Intrepid. No list this morning."
     : unchecked
       ? `Sub-Intent could not be read for **any** of today's ${cars_} `
-        + `${cars_ === 1 ? "car" : "cars"}, so this morning has no list — `
+        + `${cars_ === 1 ? "appointment" : "appointments"}, so this morning has no list — `
         + "assume nothing until the dashboard can reach Tesla OS again."
     : cars_ === 0
-      ? "No deliveries on the board today."
+      ? "No appointments booked today."
     : unknown_
       ? `Nothing to chase among the ${checked} we could check.`
       : "Every one of today's customers already has FSD or has said they intend to subscribe. "
@@ -568,10 +610,8 @@ function briefCard({ site, trtId, date, yesterday, cars, unknown, total, now, mo
       ...(unchecked ? { color: "Warning", weight: "Bolder" } : {}),
       text: headline },
 
-    ...shown.map(customerLine),
-
-    ...(hidden ? [{ type: "TextBlock", isSubtle: true, wrap: true, spacing: "Small",
-                    text: `…and ${hidden} more. Open the dashboard for the full list.` }] : []),
+    // Every one of them. See the note above briefCard.
+    ...list.map(customerLine),
 
     /* Said out loud rather than folded into the count. A morning where the
        order service could not be reached must not read as a morning where
@@ -579,8 +619,8 @@ function briefCard({ site, trtId, date, yesterday, cars, unknown, total, now, mo
     ...(unknown_ && !unchecked
         ? [{ type: "TextBlock", isSubtle: true, size: "Small", wrap: true,
              spacing: "Small",
-             text: `${unknown_} of today's cars could not be checked for Sub-Intent, `
-                 + "so they are not listed either way." }] : []),
+             text: `${unknown_} of today's appointments could not be checked for `
+                 + "Sub-Intent, so they are not listed either way." }] : []),
 
     { type: "TextBlock", isSubtle: true, size: "Small", wrap: true, spacing: "Medium",
       text: mode === "advanced" ? "Have a great day."
@@ -724,8 +764,8 @@ module.exports = {
   DEFAULTS, DAY_NAMES, DIGEST_MAX,
   normaliseTime, normaliseDays, normaliseSettings, hourOf, looksLikeFlowUrl,
   validateSettings, cleanSettings, dayLabel,
-  hourKey, shouldFire,
+  hourKey, dayKey, shouldFire,
   modelLabel, missingCars, digestCard, sampleDigestCard,
-  BRIEF_MAX, assertNoPii, noIntentCustomers, briefCard, sampleBriefCard,
+  assertNoPii, noIntentCustomers, briefCard, sampleBriefCard,
   postToTeams, postWithOneRetry
 };

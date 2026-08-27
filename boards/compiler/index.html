@@ -943,6 +943,11 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 }
 .sug:hover,.sug.first{background:var(--paper-alt)}
 .sug:hover{color:var(--ink)}
+/* `.on` is the row the arrow keys are sitting on, and it has to read as
+   stronger than hover — with a mouse in the panel both are on screen at once
+   and the one Enter takes is `.on`. Same weight as the rule above it, so
+   order decides: this comes second on purpose. */
+.sug.on{background:var(--ink);color:var(--paper)}
 .suggest .inv-more{padding:5px 9px;margin:0}
 
 .kinds{display:flex;flex-direction:column;gap:8px}
@@ -1169,12 +1174,26 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 .pnode-k{font-size:10px;font-weight:600;letter-spacing:.14em;
   text-transform:uppercase;color:var(--ink-mute)}
 .pnode-v{margin-top:3px;font-size:13.5px;font-weight:500;line-height:1.35}
-.pnode-v.empty{color:var(--ink-mute);font-weight:400;font-style:italic}
+/* `padding` and `text-align` are here to UNDO the board's own `.empty`, which
+   is the list's empty state — `padding:70px 22px; text-align:center` — and
+   matches this element too. An unset node card was 198px tall with "not set"
+   floating in the middle of it, and the stylesheet said nothing about either.
+   Same shape as `.chip.on` losing to `.trk-base .chip` on the Tracker: a
+   state class colliding with an unrelated global. It affected Part Picker
+   from the start and only showed up on Parts Catalog, where four cards are
+   unset at once. Found by measuring the box, not by reading the rule. */
+.pnode-v.empty{color:var(--ink-mute);font-weight:400;font-style:italic;
+  padding:0;text-align:left}
 .pnode-sub{margin-top:3px;font-size:11.5px;color:var(--ink-mute);line-height:1.45}
 .pnode-sub.amber{color:#8a6200}
 .pnode-row{display:flex;align-items:flex-start;gap:10px}
 .pnode-row .pnode-main{flex:1;min-width:0}
 .pnode-act{display:flex;gap:6px;flex:none;align-items:center}
+/* Change and Clear stack, Ed's placement — "below change". Side by side they
+   would widen every node card by a whole button to carry a control you touch
+   once in a session, and the cards are 240–330px in the Catalog. */
+.cat-page .pnode-act{flex-direction:column;align-items:stretch;gap:5px}
+.cat-page .pnode-act .mini{height:28px;padding:0 12px}
 
 /* Stock. The number Ed reads is FREE — on hand minus allocated — so it is the
    one in the pill, and on-hand only appears in the quieter line beside it.
@@ -1264,6 +1283,233 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 /* The run sits under the tree now instead of replacing it, so it needs the
    gap the tree used to get by being the only thing there. */
 #partsRun{margin-top:20px}
+
+/* ═══════════════════ Parts Catalog — the same tree, browsing ═══════════════
+
+   Everything structural is Part Picker's: `.ptree`, `.pnode`, `.psearch`,
+   `.pstock` and the wires are shared outright rather than copied, so the two
+   tools cannot drift into looking like different products. What is below is
+   only what browsing needs and building did not.
+
+   No quick-add rail on this page, so the indent Part Picker's tree carries to
+   clear that rail is taken back — otherwise the catalogue would sit 232px in
+   from the board's edge with nothing in the gap. */
+.cat-page #catTreeWrap,.cat-page #catNote{margin-left:0}
+.cat-page .pp-head{padding-right:0}
+
+/* ── the columns are the other way round from Part Picker, on purpose ──
+
+   Over there the left column IS the work — five cards you fill in — and the
+   car is a 340px plaque to drop on. Here the left column is navigation
+   holding "10 - BODY", and the panel holds every part number and every stock
+   figure in the group. Shipped at Part Picker's proportions first and the
+   screenshot settled it: 700px of column saying "10 - BODY" beside a 340px
+   panel wrapping the part descriptions. The wide side belongs to whichever
+   column carries the answer. */
+.cat-page .ptree{grid-template-columns:minmax(240px,330px) 96px minmax(0,1fr)}
+
+/* **Top-aligned, unlike Part Picker's, and that is Ed's placement.** The
+   inherited `align-items:center` hung the four node cards halfway down a
+   panel that is twice their height, which put 400px of nothing between Find
+   a part and the Model card it is meant to sit on top of. Aligned to the
+   start, the search field and the card it feeds are 16px apart and read as
+   one control. The empty column below is not waste — it is where the hover
+   preview lands. */
+.cat-page .ptree{align-items:start}
+
+/* VIN and its button on one line. Not `.row2` — that splits fifty-fifty and
+   would give "Open" as much room as a 17-character VIN. */
+.pc-vin{display:grid;grid-template-columns:1fr auto;gap:10px}
+.pc-vin input{text-transform:uppercase;letter-spacing:.04em;
+  font-variant-numeric:tabular-nums}
+
+/* The car the catalogue was opened for. A banner rather than a node card:
+   the VIN is not a level of the tree, it is the reason the tree looks the
+   way it does. */
+.cat-vin{display:flex;align-items:center;flex-wrap:wrap;gap:10px;
+  margin:0 0 16px;padding:9px 13px;border:1px solid var(--ink);
+  border-radius:var(--r-md);background:var(--paper);max-width:var(--cat-input)}
+.cat-vin-k{font-size:10px;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-mute)}
+.cat-vin-v{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+.cat-vin-m{font-size:11.5px;color:var(--ink-mute)}
+.cat-vin .mini{margin-left:auto}
+/* Said once, on the banner, rather than on every part row. Full width so it
+   drops below the VIN rather than squeezing it. */
+.cat-vin-no{flex-basis:100%;font-size:11.5px;line-height:1.45;color:#8a6200}
+
+/* Which parts are shown at the leaf. Only ever rendered with a VIN — with no
+   car there is nothing to fit. */
+.cat-fits{display:flex;align-items:center;gap:6px;padding:9px 14px;
+  border-bottom:1px solid var(--line-soft);background:var(--paper-alt)}
+.cat-fits .chip{height:26px;padding:0 11px;font-size:11px}
+.cat-fits-n{margin-left:auto;font-size:11px;color:var(--ink-mute)}
+/* The mark on a part that fits. Quiet — most of them do, so it is the
+   ABSENCE that has to be findable, and that is what the filter is for. */
+.cat-part-fit{display:inline-block;margin-left:7px;padding:0 6px;
+  border-radius:999px;font-size:9.5px;font-weight:600;letter-spacing:.08em;
+  text-transform:uppercase;background:var(--ink);color:var(--paper);
+  vertical-align:1px}
+
+/* Find a part. **The same width as the locations box, and that is the
+   point** — two search fields stacked one above the other at 640 and 520
+   read as a mistake rather than as a hierarchy. One measure, shared, so they
+   cannot drift apart again the next time either is touched. */
+.cat-find{position:relative;margin:0 0 16px;max-width:var(--cat-input)}
+.cat-find .facet-head{display:flex;align-items:baseline;justify-content:space-between;
+  gap:10px;margin-bottom:7px}
+.cat-find .facet-head span{font-size:10px;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-mute)}
+.cat-hits{margin-top:8px;border:1px solid var(--line);border-radius:var(--r-sm);
+  background:var(--paper);overflow:hidden}
+/* Capped at five rows tall and scrolling. The whole point of this control is
+   that it is quicker than the tree; a list that pushes the tree off the
+   screen would undo that. */
+.cat-hits-body{max-height:270px;overflow:auto}
+.cat-hit{display:flex;width:100%;align-items:center;gap:12px;text-align:left;
+  padding:9px 13px;border-bottom:1px solid var(--line-soft);
+  background:none;font:inherit;color:var(--ink);cursor:pointer}
+.cat-hit:last-child{border-bottom:0}
+.cat-hit:hover{background:var(--paper-alt)}
+.cat-hit-m{flex:1;min-width:0}
+.cat-hit-t{font-size:12.5px;font-weight:500;line-height:1.3}
+.cat-hit-n{margin-top:2px;font-size:11.5px;color:var(--ink-mute);
+  font-variant-numeric:tabular-nums}
+/* Where it lives, right-aligned and quiet — it is the reason the row is a
+   button, but it is not what you searched for. */
+.cat-hit-w{flex:none;max-width:210px;font-size:11px;color:var(--ink-soft);
+  text-align:right;line-height:1.3}
+
+/* An all-models row stacks instead of sitting in one line: it is not a
+   single destination, so it does not get a single destination's shape. */
+.cat-hit.wide{display:block;cursor:default}
+.cat-hit.wide:hover{background:none}
+/* Its own line. Inline, the figure ran straight on from the part number —
+   "1044464-00-C Houston-Cypress 0" reads as one string and the number you
+   came for is the one that disappears into it. */
+.cat-hit-stock{display:flex;flex-wrap:wrap;gap:4px 8px;margin-top:5px}
+.cat-hit-stock .cat-stock-at{gap:4px}
+.cat-hit-stock .pstock{padding:0 5px;font-size:10.5px}
+.cat-hit-models{display:flex;flex-wrap:wrap;align-items:center;gap:5px;
+  margin-top:6px}
+.cat-hit-in{font-size:10px;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-mute);margin-right:2px}
+/* Each model is a button because each is a different place to land. Bordered
+   rather than filled: they are navigation, not state. */
+.cat-model{padding:2px 8px;border:1px solid var(--line);border-radius:999px;
+  background:var(--paper);font:inherit;font-size:11px;color:var(--ink);
+  cursor:pointer;line-height:1.5}
+.cat-model:hover{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.cat-model-n{margin-left:4px;font-size:9.5px;color:var(--ink-mute);
+  font-variant-numeric:tabular-nums}
+.cat-model:hover .cat-model-n{color:var(--paper)}
+
+/* The hover preview. It lands in the empty column to the LEFT of the panel —
+   the tree only fills the lower half of it, and putting the picture over the
+   list would cover the very rows you are choosing between. Fixed, because it
+   is positioned against a row's viewport rectangle, and pointer-events:none
+   so it can never eat the click it exists to inform. */
+.cat-prev{position:fixed;z-index:60;width:360px;pointer-events:none;
+  border:1px solid var(--ink);border-radius:var(--r-md);background:var(--paper);
+  box-shadow:0 18px 40px rgba(0,0,0,.18);overflow:hidden;
+  opacity:0;transition:opacity .12s ease}
+.cat-prev.on{opacity:1}
+.cat-prev-img{background:#fff;padding:8px;min-height:120px;
+  display:flex;align-items:center;justify-content:center}
+.cat-prev-img img{display:block;max-width:100%;max-height:250px;
+  width:auto;height:auto}
+.cat-prev-tile{margin:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:4px;min-width:0}
+/* Two across whatever the count. Three drawings in a row are too small to
+   tell apart, which is the one thing this preview exists to let you do. */
+.cat-prev-img.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;
+  align-items:stretch}
+.cat-prev-img.grid img{max-height:118px}
+.cat-prev-tile figcaption{font-size:9.5px;line-height:1.25;text-align:center;
+  color:var(--ink-mute);overflow:hidden;display:-webkit-box;
+  -webkit-line-clamp:2;-webkit-box-orient:vertical}
+.cat-prev-c{padding:8px 11px;border-top:1px solid var(--line-soft);
+  font-size:11px;color:var(--ink-mute);line-height:1.35}
+.cat-prev-c b{color:var(--ink);font-weight:600}
+.cat-prev-load{font-size:11.5px;color:var(--ink-mute)}
+
+/* The exploded view. White plate regardless of the page, because these are
+   line drawings on transparency and on anything but white they read as
+   smudges. */
+.cat-dia{border-bottom:1px solid var(--line-soft);background:#fff;
+  padding:10px;text-align:center}
+.cat-dia img{display:block;width:100%;height:auto;max-height:340px;
+  object-fit:contain;margin:0 auto}
+.cat-dia-a{display:flex;align-items:center;justify-content:space-between;
+  gap:10px;margin-top:7px;padding:0 3px}
+.cat-dia-a span{font-size:11px;color:var(--ink-mute)}
+
+/* The part a search hit sent us to. Marked rather than filtered — the group
+   it lives in is the answer, and hiding its neighbours would throw away the
+   context that made the jump worth making. */
+.cat-part.hit{background:var(--paper-alt);
+  box-shadow:inset 3px 0 0 var(--ink)}
+
+/* The locations, first on the page: they qualify every stock figure under
+   them, so they read as a heading rather than as a filter tucked in a panel.
+   `--cat-input` is the one measure both this and Find a part are cut to. */
+.cat-page{--cat-input:520px}
+.cat-locs{margin:0 0 18px;max-width:var(--cat-input)}
+.cat-locs .facet-head{display:flex;align-items:baseline;justify-content:space-between;
+  gap:10px;margin-bottom:7px}
+.cat-locs .facet-head span{font-size:10px;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-mute)}
+.cat-locs .cat-loc-note{font-size:11.5px;color:var(--ink-mute);margin-top:6px}
+.cat-locs .cat-loc-note.warn{color:#8a6200}
+
+/* The panel the wires arrive at. Heavier than the node cards for the same
+   reason the car card is on the other tool — it is what everything points at.
+   Capped and scrolling because a system group can hold forty parts and the
+   tree beside it is four cards tall; without this the page grows to the
+   length of the longest group and the nodes float off the top. */
+.cat-panel{border:1px solid var(--ink);border-radius:var(--r-lg);
+  background:var(--paper);box-shadow:var(--shadow);overflow:hidden}
+.cat-panel-h{padding:13px 16px;border-bottom:1px solid var(--line-soft)}
+.cat-panel-k{font-size:10px;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-mute)}
+.cat-panel-t{margin-top:3px;font-size:14.5px;font-weight:600;letter-spacing:-.01em}
+.cat-panel-body{max-height:min(62vh,560px);overflow:auto}
+
+/* A child of the current level — click to go one deeper. A button, not a
+   div: it is the whole navigation of this tool and it has to be reachable
+   from the keyboard. */
+.cat-row{display:flex;width:100%;align-items:center;gap:10px;text-align:left;
+  padding:10px 16px;border-bottom:1px solid var(--line-soft);
+  background:none;font:inherit;color:var(--ink);cursor:pointer}
+.cat-row:last-child{border-bottom:0}
+.cat-row:hover{background:var(--paper-alt)}
+.cat-row-t{flex:1;min-width:0;font-size:13px;font-weight:500;line-height:1.35}
+.cat-row-n{flex:none;font-size:11.5px;color:var(--ink-mute)}
+.cat-row-go{flex:none;color:var(--ink-mute);font-size:13px}
+
+/* A part. Not clickable — this is the leaf and the tool ends here. The number
+   is the point of the row, so it gets its own line under the part number
+   rather than being squeezed to the right of a 40-character description. */
+.cat-part{padding:11px 16px;border-bottom:1px solid var(--line-soft)}
+.cat-part:last-child{border-bottom:0}
+.cat-part-t{font-size:13px;font-weight:500;line-height:1.35}
+.cat-part-n{margin-top:2px;font-size:12px;color:var(--ink-mute);
+  font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.cat-part-meta{margin-top:2px;font-size:11px;color:var(--ink-soft)}
+/* The way through to Part Picker, in the corner Ed asked for. Right-aligned
+   under the stock figures, because those are what decide whether it is there
+   at all. */
+.cat-part-go{display:flex;justify-content:flex-end;margin-top:8px}
+.cat-part-go .mini{height:28px;padding:0 12px}
+.cat-stock{display:flex;flex-wrap:wrap;gap:6px 10px;margin-top:7px}
+/* Location name and figure travel together — with three centres on screen a
+   bare pill row would be three numbers and no way to tell whose. */
+.cat-stock-at{display:inline-flex;align-items:center;gap:6px}
+.cat-stock-at .cat-at{font-size:11px;color:var(--ink-mute);font-weight:500}
+.pstock.unknown{background:var(--paper-alt);border-color:var(--line-soft);
+  color:var(--ink-mute)}
+
+.cat-empty{padding:16px;font-size:12.5px;color:var(--ink-mute)}
 
 /* ── cancel, far top right ──
    Mirrors the quick-add rail on the other side and is the furthest thing on
@@ -1468,6 +1714,16 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
            and forty identifiers across three files are not worth churning for
            a label. -->
       <button class="btn btn-primary" id="partsBtn">Part Picker</button>
+      <!-- Beside Part Picker because it is the same catalogue read the other
+           way round: that one searches it a term at a time to bill one part,
+           this one browses the whole of it and bills nothing.
+
+           No modal, same call as Cars on Ground — there is nothing to ask
+           first. It needs no VIN either, which is not obvious: SCA's own
+           entry point wants one and the tool got out of it. See parts.js.
+
+           The ONLY tool on this board with no write path at all. -->
+      <button class="btn btn-primary" id="catalogBtn">Parts Catalog</button>
       <button class="btn btn-primary" id="cogBtn">Cars on Ground</button>
       <!-- No modal behind this one: the bucket is the bucket and the centre is
            already picked, so there is nothing to choose before it runs.
@@ -1667,6 +1923,59 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
 
     <div id="partsRun" hidden></div>
   </section>
+
+  <!-- ═══ Parts Catalog — the workspace ═══
+       Part Picker's tree, browsing instead of building. Four node cards down
+       the left — Model, Category, Subcategory, System Group — wired to one
+       card on the right that holds whatever the deepest pick has under it:
+       the next level's children, and at the leaf the parts themselves.
+
+       Same section shape as Part Picker but none of its furniture: no cancel
+       lever, no quick-add rail, no slide. Nothing here can be undone because
+       nothing here does anything. -->
+  <section class="parts-page cat-page" id="catalogPage" hidden>
+    <div class="pp-head">
+      <h3>Parts Catalog</h3>
+      <span class="modal-sub" id="catCtx"></span>
+      <span class="modal-sub" id="catFoot"></span>
+    </div>
+
+    <!-- The car, when the catalogue was opened for one. Empty otherwise. -->
+    <div id="catVin"></div>
+
+    <!-- The locations the stock figures are read at. A tag input rather than
+         chips, by the rule the Open Inventory filters set: places you already
+         know, vocabularies you browse. Seeded with the nav's own centre, so
+         the tool opens answering the question it is usually asked.
+
+         First on the page, Ed's placement: it qualifies every stock figure
+         below it, so it belongs where a heading belongs. -->
+    <div class="cat-locs" id="catLocs"></div>
+
+    <!-- Find a part by name or number without walking the tree. Directly
+         above the model selector, and that is the whole argument for the
+         position: it is the other way of answering the same question the
+         tree below it answers, so the two sit together and you choose
+         between them. A hit puts the tree on the group that holds the part,
+         so the search is a shortcut THROUGH the navigation rather than a
+         second way to read the answer.
+
+         (It sat above the locations first. Ed moved it; the reason recorded
+         here then — "the question the tool is opened with most often" — was
+         an argument for being high on the page, and this is still that.) -->
+    <div class="cat-find" id="catFind"></div>
+
+    <div id="catNote"></div>
+
+    <div id="catTreeWrap" class="ptree-wrap" hidden>
+      <svg class="ptree-wires" id="catWires" aria-hidden="true"></svg>
+      <div class="ptree">
+        <div class="ptree-col" id="catNodes"></div>
+        <div></div>
+        <div id="catPanelCol"></div>
+      </div>
+    </div>
+  </section>
 </main>
 
 <footer class="foot">
@@ -1811,6 +2120,77 @@ a.svl:hover{color:var(--blue);border-bottom-color:var(--blue)}
                 be widened to anywhere.</span>
         </button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Parts Catalog — which catalogue ═══
+
+     Same shape as Pending Inventory's chooser and for the same reason: the
+     button used to mean one thing and now means two. They are not two
+     settings of one scan — one of them has a car in it and the other does
+     not — so the button asks before it opens anything.
+
+     The VIN is a field rather than a third pick-opt because Ed described it
+     as one: "lets you input a VIN … OR you can just click View whole
+     catalog". Typing is the answer, not a step after choosing to type. -->
+<div class="modal" id="pcModal" role="dialog" aria-label="Parts Catalog">
+  <div class="modal-head"><h3>Parts Catalog</h3>
+    <span class="modal-sub" id="pcCtx"></span>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body">
+    <div class="field">
+      <label>Parts for one car</label>
+      <div class="pc-vin">
+        <input id="pcVin" maxlength="17" autocomplete="off" spellcheck="false"
+               placeholder="VIN" aria-label="VIN">
+        <button class="btn btn-dark" id="pcGo">Open</button>
+      </div>
+      <div class="hint">The Service App picks the catalogue from the VIN, so there is
+        no model to choose — and it marks the parts that fit that car.</div>
+      <div class="hub-note" id="pcErr" style="margin-top:9px" hidden></div>
+    </div>
+
+    <div class="facet">
+      <div class="opts pick">
+        <button class="opt pick-opt" id="pcAll">
+          <b>View whole catalogue</b>
+          <span>Every model, browsed or searched, with stock at any centre.
+                Exactly what the tool has always done.</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Parts Catalog → Part Picker ═══
+
+     The one place the read-only tool hands over to the one that writes. A
+     slide rather than a button because that is what this board does when the
+     next thing is a real record — and the card names the three things the
+     slide actually causes, in the order they happen, before it can be pulled.
+
+     It stops at the selected part. Billing is still the drag and closing is
+     still the slide, over on Part Picker, because those are the two gestures
+     that spend money and shut a ticket. -->
+<div class="modal" id="pcTicketModal" role="dialog" aria-label="Open a ticket with this part">
+  <div class="modal-head"><h3>Part selected</h3>
+    <span class="modal-sub" id="pcTicketCtx"></span>
+    <button class="btn-x" data-close><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="modal-body">
+    <div class="facet">
+      <div class="facet-head"><span id="pcTicketPart"></span></div>
+      <dl id="pcTicketDl"></dl>
+      <div class="hint" style="margin:10px 0 12px">You are now going to be switched
+        to the <b>Part Picker</b> tool. It opens a service visit on this car,
+        switches the contacts to <b>Tesla Motors Inventory</b>, adds the activity
+        and puts <b>this part</b> on the part card instead of the one the
+        correction suggests. <b>Nothing is billed</b> — the drag still does that,
+        and the slide still closes the ticket.</div>
+      <div class="hub-note" id="pcTicketErr" style="margin-bottom:12px" hidden></div>
+      <div id="pcTicketSlide"></div>
     </div>
   </div>
 </div>
@@ -3114,6 +3494,44 @@ function emptyModal(el){
   if(el.id === "trkMapModal"){ trkDestroyMap(); $("trkMapBody").innerHTML = ""; }
 }
 
+/* ── one tool on screen at a time ──
+
+   Ed: "compiler doesnt close part picker or replace it when used, it keeps it
+   open and stacks it with whatever other tool you use".
+
+   It did, and the reason is the shape the bug always takes here: FIVE places
+   each unhid its own surface and none of them hid anybody else's. The scans,
+   Part Picker and the catalogue all wrote `hidden = false` on their own div
+   and left the rest of the page exactly as they found it, so whichever two
+   you opened, you got both.
+
+   One call now owns which surface is up, so a seventh tool cannot bring the
+   bug back by forgetting the other six. Adding one means adding a line here,
+   which is the point.
+
+   **Hiding, not resetting.** An open Part Picker ticket keeps its state and
+   its ZO004 marker while something else is on screen, so coming back by VIN
+   picks it up rather than opening a second one beside it. */
+const TOOL_SURFACES = {
+  list   : ["listHead", "list"],   // the scans: Service Visits, Cars on Ground, …
+  parts  : ["partsPage"],
+  catalog: ["catalogPage"],
+  empty  : ["empty"]               // the "choose a tool" placeholder
+};
+
+function showTool(which){
+  for(const name of Object.keys(TOOL_SURFACES))
+    for(const id of TOOL_SURFACES[name]){
+      const el = $(id);
+      if(el) el.hidden = name !== which;
+    }
+  /* The catalogue's hover preview is fixed-position and lives on <body>, not
+     inside the section — hiding the section does not take it with it, and a
+     drawing left floating over the next tool is exactly the stacking Ed is
+     describing. */
+  if(which !== "catalog") catPrevHide();
+}
+
 function showModal(el, over){
   const top = modalStack[modalStack.length - 1];
   if(top === el) return;
@@ -4076,7 +4494,7 @@ function renderInv(data){
 
   S.listSub = `${(mdl && mdl.name) || data.model} · ${data.condition === "used" ? "used" : "new"} · ${where}`;
   $("listTitle").textContent = "Open Inventory";
-  $("listHead").hidden = false;
+  showTool("list");
   paintList();
 
   if(S.rows.length) requestAnimationFrame(() => {
@@ -7577,7 +7995,11 @@ function paintList(){
      screen, so it has to be told the same story the list is about to be. */
   paintCtSwitch();
   const rows = visibleRows();
-  $("empty").hidden = rows.length > 0 || S.rows.length > 0;
+  /* Only while the list is the tool on screen. This line is what puts the
+     "choose a tool" placeholder back when a filter empties the rows, and
+     unguarded it would post that placeholder underneath Part Picker or the
+     catalogue — the same stacking, arriving by a different door. */
+  if(!$("listHead").hidden) $("empty").hidden = rows.length > 0 || S.rows.length > 0;
   if(deck){
     /* The focused card has to survive a filter that shortened the list under
        it — and land somewhere real if it cannot. paintDeck() does the
@@ -8030,8 +8452,7 @@ function render(data){
     (chosen ? ` · ${chosen} filter${chosen === 1 ? "" : "s"}` : "");
 
   $("listTitle").textContent = "Vehicles";
-  $("listHead").hidden = false;
-  $("empty").hidden = true;
+  showTool("list");
   S.view = "flagged";
   /* Cleared with the rows, all four of them. The concerns and the locations
      are properties of what was just fetched, so a selection carried over from
@@ -8097,8 +8518,7 @@ function renderCog(data){
     S.cogTotal.toLocaleString(ZoI18n.locale())} on ground`;
 
   $("listTitle").textContent = "Cars on Ground";
-  $("listHead").hidden = false;
-  $("empty").hidden = true;
+  showTool("list");
   paintList();
 
   /* An empty result is the common case on a healthy lot and should read as an
@@ -8171,7 +8591,7 @@ function renderExp(data){
      the subtitle — that is Tesla OS's own wording and it is worth keeping
      where it can be checked against the pipeline screen. */
   $("listTitle").textContent = "Pending Inventory";
-  $("listHead").hidden = false;
+  showTool("list");
   paintList();
 
   /* Brought to the reader rather than left under the fold. This tool's answer
@@ -8351,8 +8771,7 @@ function renderTrk(data){
     : `delivering ${fmtDate((S.trkScope && S.trkScope.date) || "")}`;
 
   $("listTitle").textContent = "Tracker";
-  $("listHead").hidden = false;
-  $("empty").hidden = true;
+  showTool("list");
   paintList();
 
   if(S.notes.length) note(S.notes.join("  ")); else clearNotes();
@@ -9736,7 +10155,6 @@ function partsReset(){
                       correction:null, part:null, tech:null, editing:null,
                       built:null, payType:null, filled:false, locked:false,
                       cancelled:false, done:false, busy:false, slide:null });
-  $("partsPage").hidden        = true;
   $("partsTreeWrap").hidden    = true;
   lockTree(false);
   $("partsRun").hidden         = true;
@@ -9750,9 +10168,10 @@ function partsReset(){
   $("partsCtx").textContent    = "";
   $("partsFoot").textContent   = "";
   $("partsVin").value = "";
-  /* Put the page's own empty state back the way paintList would have it —
-     the workspace borrowed the space, it does not own it. */
-  $("empty").hidden = S.rows.length > 0;
+  /* Put back whatever the workspace borrowed the space FROM — the scan that
+     was on screen if there was one, the placeholder if there was not. It
+     borrowed the space, it does not own it. */
+  showTool(S.rows.length ? "list" : "empty");
   /* Hides the rail; the saved parts behind it are untouched. They are the
      point of the feature and outlive every ticket. */
   syncQuickAdd();
@@ -10245,8 +10664,7 @@ function partsResume(r){
   PS.filled = Boolean(r.billed);
 
   hideModal();
-  $("empty").hidden         = true;
-  $("partsPage").hidden     = false;
+  showTool("parts");
   $("partsTreeWrap").hidden = false;
   syncQuickAdd();
   $("partsPageCtx").textContent =
@@ -10287,8 +10705,7 @@ async function partsOpenTicket(){
                  activityNumber: out.activityNumber, activityCorrectionId: null };
 
     hideModal();
-    $("empty").hidden     = true;
-    $("partsPage").hidden = false;
+    showTool("parts");
     $("partsTreeWrap").hidden = false;
     syncQuickAdd();
     $("partsPageCtx").textContent =
@@ -10311,8 +10728,7 @@ async function partsOpenTicket(){
       /* Something was written. The dialog is the wrong place to say so — it
          still has a VIN box in it, which reads as "try again". */
       hideModal();
-      $("empty").hidden     = true;
-      $("partsPage").hidden = false;
+      showTool("parts");
       paintRun("The ticket did not finish opening",
         landed.concat([{ name: err.message, bad: true }]),
         `<div class="hub-note" style="margin-top:10px">Everything above actually
@@ -10510,10 +10926,16 @@ function paintTree(){
 /* ── the wires ──
    Measured, not guessed: every card is a different height and they change as
    they fill in. One path per node, from its right edge to the car's left. */
-function drawWires(){
-  const svg  = $("partsWires");
-  const wrap = $("partsTreeWrap");
-  const car  = $("partsCar");
+/* The geometry, with the ids and the state lifted out — Parts Catalog draws
+   the identical cables from four nodes to one panel, and a second copy of
+   this would be the estate's "copied, never imported" trap one file in, where
+   a fix would have to be found twice instead of once. `ready` is a predicate
+   per node rather than a lookup because the two tools decide liveness on
+   completely different grounds. */
+function drawWiresIn(wrapId, nodesId, targetId, ready){
+  const svg  = $(wrapId === "partsTreeWrap" ? "partsWires" : "catWires");
+  const wrap = $(wrapId);
+  const car  = $(targetId);
   if(!svg || !wrap || !car) return;
   const W = wrap.getBoundingClientRect();
   svg.setAttribute("viewBox", `0 0 ${W.width} ${W.height}`);
@@ -10521,19 +10943,22 @@ function drawWires(){
   const cb = car.getBoundingClientRect();
   const cx = cb.left - W.left, cy = cb.top - W.top + cb.height / 2;
 
-  const ready = { symptom: Boolean(PS.symptom), correction: Boolean(PS.correction),
-                  paytype: true, tech: Boolean(PS.tech),
-                  part: Boolean(PS.part && Number(PS.part.free) > 0) };
-
-  svg.innerHTML = [...$("partsNodes").children].map(n => {
+  svg.innerHTML = [...$(nodesId).children].map(n => {
     const b = n.getBoundingClientRect();
     const x = b.right - W.left, y = b.top - W.top + b.height / 2;
     // Horizontal control arms, so it leaves and arrives flat — a cable, not
     // an elbow. Half the gap on each side is what keeps the sag even.
     const m = Math.max(28, (cx - x) / 2);
-    const state = ready[n.dataset.node] ? "live" : "pending";
+    const state = ready(n.dataset.node) ? "live" : "pending";
     return `<path class="${state}" d="M${x} ${y} C ${x + m} ${y}, ${cx - m} ${cy}, ${cx} ${cy}"/>`;
   }).join("");
+}
+
+function drawWires(){
+  const ready = { symptom: Boolean(PS.symptom), correction: Boolean(PS.correction),
+                  paytype: true, tech: Boolean(PS.tech),
+                  part: Boolean(PS.part && Number(PS.part.free) > 0) };
+  drawWiresIn("partsTreeWrap", "partsNodes", "partsCar", k => ready[k]);
 }
 window.addEventListener("resize", () => { if(!$("partsTreeWrap").hidden) drawWires(); });
 
@@ -10876,6 +11301,1628 @@ async function partsRunClose(){
          <b>${esc(String(b.serviceVisitId))}</b> is open and part-closed. The steps
          above are the ones that landed.</div>`);
   }finally{ PS.busy = false; }
+}
+
+/* ════════════════════════ Parts Catalog ════════════════════════
+
+   Part Picker's tree with the gesture taken out. Four nodes down the left —
+   Model, Category, Subcategory, System Group — wired to one panel that holds
+   whatever is under the deepest pick: the next level's children until a
+   system group is chosen, then the parts.
+
+   ── the tool has no write half, and that is structural ──
+
+   There is no drag, no slide, no ticket and no POST route behind it. The
+   guarantee is the absence of the code rather than a guard inside it, which
+   is the only kind that cannot be got round by a stale tab.
+
+   ── picking a level clears the ones under it ──
+
+   Changing the category has to drop the subcategory and the group, because a
+   subcategory id means nothing under a different category. Doing it any other
+   way is how the panel would end up drawn from a path that does not exist.
+   `catPick` is the one place levels are set, so that cascade is written once. */
+const CAT = {
+  catalogs: null,          // the 15, fetched once and kept
+  home: null, homeWhy: "", // the nav's centre, and why not if not
+  locs: [],                // the centres stock is read at
+  /* The location drop-down. `locHits` is what SCA answered for `locBase`;
+     every longer term is narrowed out of it locally. `locWant` is the term a
+     request is in flight for, which is what stops the next keystroke
+     abandoning a fetch that was already going to cover it. */
+  locSearch: "", locHits: [], locSeq: 0,
+  locBase: "", locWant: "", locBusy: false, locErr: "",
+  locOpen: false, locMark: 0, locTimer: null,
+  catalog: null,           // {id,name,...} picked
+  tree: null,              // its stripped skeleton
+  category: null, sub: null, group: null,
+  parts: null,             // the leaf, once fetched
+  stock: {},               // partNumber -> [per location]
+  busy: false, err: "", partsErr: "", stockErr: "",
+  open: null,              // which node's editor is open
+  /* The part search. `hit` is the part number a jump landed on, kept so the
+     row can be marked once its group's parts arrive — the jump and the parts
+     read are two moments and the mark belongs to the second one. */
+  find: "", hits: null, findErr: "", findBusy: false, findTimer: null,
+  findSeq: 0, findFor: "", hit: "",
+  /* `hitsAll` records how the results in hand were FETCHED, not what is
+     picked now — jumping into a model from a wide result leaves a model
+     selected with wide rows still on screen, and the rows must keep the
+     shape they were built for. */
+  hitsAll: false, hitsSearched: 0, hitsOf: 0, hitsFailed: [],
+  hitStock: {}, hitStockErr: "",
+  /* The car, when the catalogue was opened for one. `fitsOnly` is the leaf
+     filter and only means anything while `vin` is set. */
+  vin: "", fitsOnly: true,
+  /* Whether Part Picker may be reached from this car. A DISPLAY flag: the
+     catalogue itself opens for anybody's VIN. */
+  ticketable: false, ticketWhy: ""
+};
+
+/* The levels, in order, so the cascade and the node column are both written
+   from one list rather than from two that can disagree. */
+const CAT_LEVELS = ["catalog", "category", "sub", "group"];
+
+/* The button asks first now. Ed: "when you click it it lets you input a VIN
+   to check parts specifically for that car, OR you can just click View whole
+   catalog". */
+$("catalogBtn").addEventListener("click", () => {
+  $("pcCtx").textContent = (S.trt && S.trt.name) || (S.trtId ? "TRT " + S.trtId : "");
+  $("pcErr").hidden = true;
+  $("pcVin").value = CAT.vin || "";
+  showModal($("pcModal"));
+  setTimeout(() => $("pcVin").focus(), 60);
+});
+
+$("pcAll").addEventListener("click", () => {
+  hideModal();
+  /* Leaving the VIN behind is the point of this button, and everything it
+     decided goes with it — the catalogue it chose included. */
+  if(CAT.vin) catClearVin();
+  catalogOpen();
+});
+
+$("pcGo").addEventListener("click", catVinGo);
+$("pcVin").addEventListener("keydown", e => { if(e.key === "Enter") catVinGo(); });
+
+async function catVinGo(){
+  const vin = $("pcVin").value.trim().toUpperCase();
+  const err = $("pcErr");
+  if(vin.length !== 17){
+    err.textContent = "A VIN is 17 characters.";
+    err.hidden = false; return;
+  }
+  err.hidden = true;
+  const btn = $("pcGo");
+  btn.disabled = true; btn.textContent = "Opening…";
+  try{
+    const d = await api(`/api/catalog/vin?vin=${encodeURIComponent(vin)}`);
+    /* Everything the VIN decides is set together — the car, its catalogue and
+       its tree came from one call, and setting them one at a time would let
+       a paint land on a half-built state. */
+    CAT.vin      = vin;
+    CAT.catalog  = d.catalog;
+    CAT.tree     = d.tree;
+    CAT.ticketable = Boolean(d.ticketable);
+    CAT.ticketWhy  = d.why || "";
+    CAT.category = null; CAT.sub = null; CAT.group = null;
+    CAT.parts = null; CAT.stock = {}; CAT.hit = ""; CAT.open = null;
+    CAT.fitsOnly = true;
+    catFindClear(); CAT.find = "";
+    hideModal();
+    catalogOpen();
+  }catch(e){
+    err.textContent = e.message;
+    err.hidden = false;
+  }finally{
+    btn.disabled = false; btn.textContent = "Open";
+  }
+}
+
+/* Back to browsing. The catalogue the VIN chose goes with it: keeping it
+   would leave a model selected that nobody picked, and the parts underneath
+   would quietly stop being marked. */
+function catClearVin(){
+  CAT.vin = ""; CAT.fitsOnly = true;
+  CAT.ticketable = false; CAT.ticketWhy = "";
+  CAT.catalog = null; CAT.tree = null;
+  CAT.category = null; CAT.sub = null; CAT.group = null;
+  CAT.parts = null; CAT.stock = {}; CAT.hit = ""; CAT.open = null;
+  if(!CAT.hitsAll) catFindClear();
+}
+
+async function catalogOpen(){
+  showTool("catalog");
+  $("catTreeWrap").hidden = false;
+  paintCatVin();
+  paintCatFind();
+  paintCatLocs();
+  paintCatTree();
+  $("catalogPage").scrollIntoView({ behavior: "smooth", block: "start" });
+
+  if(CAT.catalogs) return;           // already loaded; the tree is still there
+  CAT.busy = true; CAT.err = "";
+  paintCatTree();
+  try{
+    const d = await api("/api/catalog/list");
+    CAT.catalogs = d.catalogs || [];
+    CAT.home     = d.home || null;
+    CAT.homeWhy  = d.homeWhy || "";
+    /* Seeded, not defaulted-at-read-time: the box is a tag input and the
+       centre is a tag in it like any other, so it can be taken out. */
+    if(CAT.home && !CAT.locs.length) CAT.locs = [{ ...CAT.home }];
+  }catch(err){
+    CAT.err = err.message;
+  }finally{
+    CAT.busy = false;
+    paintCatFind();
+    paintCatLocs();
+    paintCatTree();
+  }
+}
+
+/* ── the levels ──
+
+   One entry point for every pick, so the cascade below it is unmissable. */
+async function catPick(level, value){
+  const i = CAT_LEVELS.indexOf(level);
+  for(const k of CAT_LEVELS.slice(i)) CAT[k] = null;
+  CAT[level] = value;
+  CAT.parts = null; CAT.stock = {}; CAT.partsErr = ""; CAT.stockErr = "";
+  CAT.open = null;
+  /* Moving the tree by hand ends the jump. Leaving the mark on would put a
+     highlight on a part in a group nobody searched for. */
+  CAT.hit = "";
+
+  /* Changing OR clearing the model both invalidate the tree and the scoped
+     hits, so they are one branch rather than two — a clear that forgot the
+     tree would leave the old catalogue's categories loaded behind a Model
+     card reading "not set". */
+  if(level === "catalog"){
+    CAT.tree = null; CAT.err = "";
+    /* SCOPED hits belong to the catalogue they were found in, and keeping
+       them across a model change would offer a row whose ids cannot resolve
+       in the tree now loaded — a click that lands nowhere. Hits from the
+       all-models search carry a set of ids PER model, so they survive: they
+       are how you got here, and clearing them would take the other six
+       models off the screen the moment you looked at the first. */
+    if(!CAT.hitsAll) catFindClear();
+
+    if(value){
+      CAT.busy = true;
+      paintCatTree();
+      try{ CAT.tree = await api(`/api/catalog/tree?id=${encodeURIComponent(value.id)}`); }
+      catch(err){ CAT.err = err.message; }
+      finally{ CAT.busy = false; }
+    }
+    /* Either way the search's scope has changed — to this model, or back to
+       every model — and the box says which. */
+    paintCatFind();
+
+    /* A term still sitting in the box is still a question, and the scope it
+       was asked in has just changed, so it is asked again rather than left
+       showing an answer to the old one — or, after a clear, nothing at all.
+       Only when the hits were SCOPED: wide hits survive a model change on
+       purpose, and re-running here would replace them with the narrow set
+       the moment somebody followed one of their own model chips. */
+    const term = CAT.find.trim();
+    if(!CAT.hitsAll && term.length >= 2) catFindRun(term);
+  }
+  paintCatTree();
+  if(level === "group" && value) loadCatParts();
+}
+
+/* The leaf. Parts first, then their stock — two paints rather than one wait,
+   because the part numbers are the answer to "what is in this group" and the
+   stock is the answer to a second question. Holding the list back until every
+   centre has replied would make the tool feel like it was chewing. */
+async function loadCatParts(){
+  const path = catPath();
+  if(!path) return;
+  CAT.parts = null; CAT.partsErr = ""; CAT.stock = {}; CAT.stockErr = "";
+  paintCatTree();
+  try{
+    const d = await api(`/api/catalog/parts?catalogId=${path.catalogId}` +
+      `&categoryId=${path.categoryId}&subCategoryId=${path.subCategoryId}` +
+      `&systemGroupId=${path.systemGroupId}` +
+      /* The VIN does not change WHICH parts come back, only which are marked
+         as fitting the car — so it rides on the same call rather than
+         needing one of its own. */
+      (CAT.vin ? `&vin=${encodeURIComponent(CAT.vin)}` : ""));
+    CAT.parts = d.parts || [];
+  }catch(err){
+    CAT.partsErr = err.message; CAT.parts = [];
+  }
+  paintCatTree();
+  loadCatStock();
+}
+
+/* Re-read on every paint of a group and again whenever the locations change —
+   never cached across either. A stock figure is the one thing on this page
+   that is true for minutes rather than for months, and a stale one is worse
+   than none: it is the number somebody would drive to another centre on.
+   Same rule the quick-add rail follows next door. */
+async function loadCatStock(){
+  const parts = CAT.parts || [];
+  if(!parts.length || !CAT.locs.length){ CAT.stock = {}; paintCatTree(); return; }
+  const want = catPath();
+  CAT.stockErr = "";
+  try{
+    const d = await api(`/api/catalog/stock?parts=` +
+      encodeURIComponent(parts.map(p => p.partNumber).join(",")) +
+      `&locs=` + encodeURIComponent(CAT.locs.map(l => l.locationId).join(",")));
+    /* The group may have been changed while this was in flight. Dropping a
+       late reply is the difference between slow and wrong. */
+    if(JSON.stringify(catPath()) !== JSON.stringify(want)) return;
+    CAT.stock = d.stock || {};
+  }catch(err){
+    CAT.stockErr = err.message;
+  }
+  paintCatTree();
+}
+
+const catPath = () => (CAT.catalog && CAT.category && CAT.sub && CAT.group)
+  ? { catalogId: CAT.catalog.id, categoryId: CAT.category.id,
+      subCategoryId: CAT.sub.id, systemGroupId: CAT.group.id }
+  : null;
+
+/* What each node offers when it is opened, and what the panel shows when it
+   is the deepest thing picked. One function, because those are the same list
+   at different moments and two copies would let the panel offer something the
+   editor did not. */
+function catChildren(level){
+  /* The generation alone, not the model beside it: the title is already
+     "Model Y Feb 2025", so "ModelY · Opal" repeats a word and adds one. On a
+     catalogue with no generation — Roadster, Cybertruck, Cybercab — this is
+     empty and the row is just the name, rather than "Cybertruck Cybertruck". */
+  if(level === "catalog") return (CAT.catalogs || []).map(c => ({
+    id: c.id, title: c.name, sub: c.generation || "", value: c }));
+  if(level === "category") return ((CAT.tree && CAT.tree.categories) || []).map(c => ({
+    id: c.id, title: c.title, n: (c.subCategories || []).length, unit: "subcategories",
+    value: c, ...catRowPic("category", c) }));
+  if(level === "sub") return ((CAT.category && CAT.category.subCategories) || []).map(s => ({
+    id: s.id, title: s.title, n: (s.systemGroups || []).length, unit: "groups",
+    value: s, ...catRowPic("sub", s) }));
+  if(level === "group") return ((CAT.sub && CAT.sub.systemGroups) || []).map(g => ({
+    id: g.id, title: g.title, value: g, ...catRowPic("group", g) }));
+  return [];
+}
+
+/* What pictures stand for a row, and what to call them. The caption is not
+   decoration: at one of the three levels the image is the row's own and at
+   another it is borrowed, and a preview that did not say which would be
+   quietly lying about what is on screen.
+
+   **Subcategories have no image in SCA.** `imageUrl` is on every one of them
+   and null on all 368 measured — in the tree, and in the `systemgroup` reply
+   SCA's own UI uses. So the picture of a subcategory is the pictures of what
+   is inside it:
+
+     44 of 84 hold exactly ONE system group, and that group's drawing simply
+       IS the subcategory's, named as the group's so nobody is misled;
+     40 hold more — 22 of them two, and only three hold more than seven — so
+       up to four are shown together. That answers "which of these is the one
+       I want" better than a single drawing lifted out of the set would.
+
+   Coverage goes from 44 of 84 to **83 of 84** that way, and the one that
+   shows nothing is the one subcategory whose groups have no drawings at all.
+   `10 - BODY` is the case that made this necessary: its subcategories hold
+   6, 11 and 3 groups, so the single-group rule alone offered nothing at all
+   in the category people open most. */
+const CAT_PREV_TILES = 4;
+
+function catRowPic(level, o){
+  const pic = (g, label) => {
+    const i = (g && g.img) || {};
+    const url = i.png || i.svg;
+    return url ? { url, label: label || g.title || "" } : null;
+  };
+
+  if(level === "category")
+    return o.image ? { pics: [{ url: o.image, label: "" }], picNote: "Category" } : {};
+
+  if(level === "group"){
+    const p = pic(o);
+    return p ? { pics: [p], picNote: "Exploded view" } : {};
+  }
+
+  if(level === "sub"){
+    /* Read it anyway rather than assuming the null holds — the day SCA fills
+       this field in, the row should show the real thing without an edit. */
+    if(o.image) return { pics: [{ url: o.image, label: "" }], picNote: "Subcategory" };
+
+    const gs = (o.systemGroups || []);
+    const pics = gs.map(g => pic(g)).filter(Boolean);
+    if(!pics.length) return {};
+    if(gs.length === 1)
+      return { pics, picNote: `Its only system group · ${gs[0].title || ""}` };
+    return {
+      pics: pics.slice(0, CAT_PREV_TILES),
+      picNote: pics.length > CAT_PREV_TILES
+        ? `${gs.length} system groups · first ${CAT_PREV_TILES}`
+        : `${gs.length} system groups`
+    };
+  }
+  return {};
+}
+
+const CAT_LABEL = { catalog: "Model", category: "Category",
+                    sub: "Subcategory", group: "System group" };
+/* The level BELOW each one — what the panel is showing while that node is the
+   deepest pick. `group` has no next level; its panel is the parts. */
+const CAT_NEXT = { catalog: "category", category: "sub", sub: "group", group: null };
+
+function paintCatTree(){
+  const nodes = $("catNodes"), panel = $("catPanelCol"), note = $("catNote");
+  if(!nodes) return;
+
+  note.innerHTML = CAT.err
+    ? `<div class="hub-note" style="margin-bottom:14px">${esc(CAT.err)}</div>` : "";
+
+  nodes.innerHTML = CAT_LEVELS.map(level => {
+    const picked = CAT[level];
+    /* A level is only reachable once the one above it is set — offering
+       subcategories with no category chosen would be a list of nothing that
+       looked like a list of none. */
+    const i = CAT_LEVELS.indexOf(level);
+    const ready = i === 0 || Boolean(CAT[CAT_LEVELS[i - 1]]);
+    const title = picked ? (picked.name || picked.title || "") : "";
+    const sub = level === "catalog" && picked ? (picked.generation || "") : "";
+    return `
+    <div class="pnode ${picked ? "set" : ""}" data-node="${level}">
+      <div class="pnode-row">
+        <div class="pnode-main">
+          <div class="pnode-k">${esc(CAT_LABEL[level])}</div>
+          <div class="pnode-v${title ? "" : " empty"}">${
+            title ? esc(title) : (ready ? "not set" : "—")}</div>
+          ${sub ? `<div class="pnode-sub">${esc(sub)}</div>` : ""}
+        </div>
+        <div class="pnode-act">${
+          /* The VIN decides the model, so the model offers nothing to press.
+             Not greyed out — removed, with the banner above saying whose
+             catalogue this is and carrying the way back to browsing. A
+             Change here would leave a car on screen beside another car's
+             parts. */
+          CAT.vin && level === "catalog" ? "" : `${ready
+          ? `<button class="mini" data-cat-edit="${level}">${picked ? "Change" : "Choose"}</button>`
+          : ""}${
+          /* Ed: a way out of a selection without reloading the page. Under
+             Change, on every node that has one — clearing a level clears the
+             ones below it, which is the cascade `catPick` already defines, so
+             Clear on the Model is the whole tool back to nothing. */
+          picked ? `<button class="mini" data-cat-clear="${level}">Clear</button>` : ""}`}</div>
+      </div>
+      <div class="psearch" data-cat-editor="${level}" ${CAT.open === level ? "" : "hidden"}>
+        <input type="text" placeholder="Filter…" autocomplete="off" spellcheck="false">
+        <div class="psugg"></div>
+      </div>
+    </div>`;
+  }).join("");
+
+  panel.innerHTML = catPanelHtml();
+  wireCatNodes();
+  requestAnimationFrame(() => {
+    drawWiresIn("catTreeWrap", "catNodes", "catPanel", k => Boolean(CAT[k]));
+    catShowHit();
+  });
+}
+
+/* Bring the jumped-to part into the panel's own scroll. `scrollIntoView`
+   would take the PAGE with it and undo the scroll catJump just did, so the
+   panel body is moved directly — a group of forty parts with the answer at
+   number thirty is exactly the case this exists for.
+
+   Silent when there is no mark and when the row is already in view. */
+function catShowHit(){
+  if(!CAT.hit) return;
+  const body = document.querySelector("#catPanel .cat-panel-body");
+  const row  = body && body.querySelector("[data-cat-hit-row]");
+  if(!row) return;
+  const top = row.offsetTop - body.offsetTop;
+  if(top >= body.scrollTop && top + row.offsetHeight <= body.scrollTop + body.clientHeight) return;
+  body.scrollTo({ top: Math.max(0, top - 12), behavior: "smooth" });
+}
+
+/* The panel: the children of the deepest pick, or the parts at the leaf. */
+function catPanelHtml(){
+  const deepest = [...CAT_LEVELS].reverse().find(k => CAT[k]) || null;
+  const head = (k, t) => `<div class="cat-panel-h">
+      <div class="cat-panel-k">${esc(k)}</div>
+      <div class="cat-panel-t">${esc(t)}</div></div>`;
+
+  if(CAT.busy && !CAT.catalogs)
+    return `<div class="cat-panel" id="catPanel">${head("Loading", "The catalogue")}
+      <div class="cat-empty">Asking the Service App…</div></div>`;
+
+  if(!deepest)
+    return `<div class="cat-panel" id="catPanel">${head("Start here", "Every model")}
+      <div class="cat-panel-body">${catRowsHtml("catalog")}</div></div>`;
+
+  if(deepest === "group"){
+    const g = CAT.group;
+    return `<div class="cat-panel" id="catPanel">${head("Parts", g.title || "")}
+      ${catDiagramHtml(g)}
+      <div class="cat-panel-body">${catPartsHtml()}</div></div>`;
+  }
+
+  const next = CAT_NEXT[deepest];
+  const picked = CAT[deepest];
+  return `<div class="cat-panel" id="catPanel">
+    ${head(CAT_LABEL[next], picked.name || picked.title || "")}
+    <div class="cat-panel-body">${catRowsHtml(next)}</div></div>`;
+}
+
+function catRowsHtml(level){
+  if(CAT.busy) return `<div class="cat-empty">Asking the Service App…</div>`;
+  const rows = catChildren(level);
+  if(!rows.length) return `<div class="cat-empty">Nothing under this one.</div>`;
+  return rows.map(r => `<button class="cat-row" data-cat-go="${esc(level)}"
+      data-cat-id="${esc(String(r.id))}"${
+      /* The URL rides on the row. The preview is then a read of the element
+         under the pointer rather than a second lookup into the tree, which
+         is what keeps it from ever showing a picture belonging to a row that
+         has since been repainted. */
+      r.pics && r.pics.length
+        ? ` data-cat-pics="${esc(JSON.stringify(r.pics))}"` +
+          ` data-cat-picnote="${esc(r.picNote || "")}"` : ""}>
+    <span class="cat-row-t">${esc(r.title)}${
+      r.sub ? `<br><span class="cat-row-n">${esc(r.sub)}</span>` : ""}</span>
+    ${r.n != null ? `<span class="cat-row-n">${r.n} ${esc(r.unit)}</span>` : ""}
+    <span class="cat-row-go" aria-hidden="true">›</span>
+  </button>`).join("");
+}
+
+/* The exploded view of the system group, above its parts.
+
+   Straight off epc.tesla.com in a plain `<img>` — that host answers 200 with
+   **no credential at all**, which is why there is no route behind this and no
+   proxy. Same as Pending Inventory and the car compositor; the opposite of
+   SCA's own photos, which need the bearer.
+
+   The PNG is what is drawn (182KB) and the SVG is what opens (1.28MB): the
+   drawing is worth zooming into and the panel is not the place to pay for
+   that. `loading="lazy"` because the panel is rebuilt on every node change
+   and most of those changes are not this one.
+
+   Three of 179 groups have no drawing, so the absence is ordinary and gets no
+   apology — the panel simply starts at the parts. */
+function catDiagramHtml(g){
+  const img = (g && g.img) || {};
+  const shown = img.png || img.svg;
+  if(!shown) return "";
+  const full = img.svg || img.png;
+  return `<div class="cat-dia">
+    <img src="${esc(shown)}" alt="Exploded view of ${esc(g.title || "this system group")}"
+      loading="lazy">
+    <div class="cat-dia-a">
+      <span>Exploded view · Tesla EPC</span>
+      <a class="mini" href="${esc(full)}" target="_blank" rel="noopener">Open full size</a>
+    </div>
+  </div>`;
+}
+
+/* A part row. Name, part number, and one stock figure per centre — Ed's three
+   things and nothing else. */
+function catPartsHtml(){
+  if(CAT.partsErr) return `<div class="cat-empty">${esc(CAT.partsErr)}</div>`;
+  if(CAT.parts == null) return `<div class="cat-empty">Reading the parts…</div>`;
+  if(!CAT.parts.length) return `<div class="cat-empty">This group lists no parts.</div>`;
+
+  const all = CAT.parts;
+  /* With a car in hand the default is the parts that fit it — that is what
+     the VIN was typed for. Nothing is hidden quietly: both counts are on
+     screen and one click swaps them. */
+  const fit = all.filter(p => p.fits);
+  const rows = CAT.vin && CAT.fitsOnly && fit.length ? fit : all;
+
+  const bar = !CAT.vin ? "" : `<div class="cat-fits">
+      <button class="chip${CAT.fitsOnly ? " on" : ""}" data-cat-fits="1">Fits this car</button>
+      <button class="chip${CAT.fitsOnly ? "" : " on"}" data-cat-fits="0">All parts</button>
+      <span class="cat-fits-n">${fit.length} of ${all.length} fit ${esc(CAT.vin.slice(-6))}${
+        fit.length ? "" : " — showing all"}</span>
+    </div>`;
+
+  return bar + rows.map(p => {
+    const meta = [
+      p.perCar != null ? `${p.perCar} per car` : "",
+      p.superseded ? "superseded" : "",
+      p.restriction
+    ].filter(Boolean).join(" · ");
+    const hit = CAT.hit && String(p.partNumber) === String(CAT.hit);
+    return `<div class="cat-part${hit ? " hit" : ""}"${hit ? ` data-cat-hit-row="1"` : ""}>
+      <div class="cat-part-t">${esc(p.name || "—")}${
+        /* Marked only while showing everything. With the list already
+           narrowed to the ones that fit, a badge on every row says nothing. */
+        CAT.vin && !CAT.fitsOnly && p.fits ? `<span class="cat-part-fit">fits</span>` : ""}</div>
+      <div class="cat-part-n">${esc(p.partNumber)}</div>
+      ${meta ? `<div class="cat-part-meta">${esc(meta)}</div>` : ""}
+      <div class="cat-stock">${catStockHtml(p.partNumber)}</div>
+      ${catPickBtnHtml(p)}
+    </div>`;
+  }).join("");
+}
+
+/* ── the way through to Part Picker ──
+
+   Ed's ask: a button in the corner of a part card that opens a ticket for
+   this car with THIS part on it, instead of the key card the correction
+   suggests.
+
+   Three conditions, and each is a different kind of guard:
+
+     - **A VIN.** Ed's, stated outright: the whole-catalogue view has no car,
+       and a ticket needs one. There is nothing to open from a Model S
+       catalogue nobody is looking at a Model S for.
+     - **In stock**, also Ed's. The figure here is the CATALOGUE's, read at
+       the centres on screen — a hint, not the gate. Part Picker bills at the
+       board's own site, which may not even be one of them, so the real check
+       is a fresh read at that site and it happens after the slider, before
+       anything is written. This button is only allowed to be wrong in the
+       safe direction.
+     - **Not already picked.** Pressing it twice would open two tickets.
+
+   `free` is the same on-hand-minus-allocated the rest of the board gates on,
+   so a part with two on the shelf and two allocated does not offer this. */
+function catPartFree(partNumber){
+  const rows = CAT.stock[String(partNumber).toUpperCase()];
+  if(!rows) return null;              // not read yet — no button, not a zero
+  let best = null;
+  for(const r of rows){
+    if(r.failed || r.free == null) continue;
+    best = best == null ? r.free : Math.max(best, r.free);
+  }
+  return best;
+}
+
+function catPickBtnHtml(p){
+  /* **Delivered cars get no button at all**, not a button that refuses. Ed's
+     rule: the catalogue can tell you what fits a customer's car, but Part
+     Picker is a pre-delivery tool and offering a door it will slam is worse
+     than not offering one. The banner above says so once, rather than every
+     row saying it forty times. */
+  if(!CAT.vin || !CAT.ticketable) return "";
+  const free = catPartFree(p.partNumber);
+  if(free == null || free <= 0) return "";
+  return `<div class="cat-part-go">
+    <button class="mini" data-cat-open-ticket="${esc(p.partNumber)}">Open Ticket and Select</button>
+  </div>`;
+}
+
+/* Stock, per centre. Four states and each says a different thing: no centre
+   chosen, not read yet, the read failed, and a number. Only the last is a
+   figure — a failed read must never render as nought, which would read as
+   "none here" when the truth is "nobody answered". */
+function catStockHtml(partNumber){
+  if(!CAT.locs.length)
+    return `<span class="pstock unknown">no location chosen</span>`;
+  if(CAT.stockErr)
+    return `<span class="pstock unknown">stock unavailable — ${esc(CAT.stockErr)}</span>`;
+
+  const rows = CAT.stock[String(partNumber).toUpperCase()];
+  if(!rows) return CAT.locs.map(l =>
+    `<span class="cat-stock-at"><span class="cat-at">${esc(l.name)}</span>
+       <span class="pstock unknown">reading…</span></span>`).join("");
+
+  return rows.map(r => {
+    const at = CAT.locs.find(l => Number(l.locationId) === Number(r.locationId));
+    const name = (at && at.name) || r.name || `location ${r.locationId}`;
+    const pill = r.failed || r.free == null
+      ? `<span class="pstock unknown">could not read</span>`
+      : `<span class="pstock ${r.free > 0 ? "some" : "none"}"><b>${r.free}</b>${
+          r.onHand != null && r.onHand !== r.free
+            ? ` <span style="font-weight:500;opacity:.75">of ${r.onHand}</span>` : ""}</span>`;
+    return `<span class="cat-stock-at" title="${esc(name)}"><span class="cat-at">${
+      esc(catShortSite(name))}</span>${pill}</span>`;
+  }).join("");
+}
+
+/* The tag above already carries the full name; down here it is printed once
+   per part per centre, so two centres over a five-part group is "Tesla
+   Service Houston-" ten times and the distinguishing word is at the end of
+   it. Only the prefix is dropped — the tag, and the title on every line,
+   still say the whole thing. */
+const catShortSite = name =>
+  String(name || "").replace(/^Tesla\s+(Service|Collision|Semi\s+Service)\s+/i, "").trim() || name;
+
+/* ── the node editors ──
+   A filter box over the level's own children. Local, unlike Part Picker's —
+   the whole vocabulary is already on the page, so there is nothing to ask
+   SCA and no debounce to get right. */
+function wireCatNodes(){
+  $("catNodes").querySelectorAll("[data-cat-edit]").forEach(b =>
+    b.addEventListener("click", () => catOpenEditor(b.dataset.catEdit)));
+
+  /* No confirmation. Nothing is lost that a click cannot put back, and this
+     exists because the alternative was reloading the page. */
+  $("catNodes").querySelectorAll("[data-cat-clear]").forEach(b =>
+    b.addEventListener("click", () => {
+      CAT.open = null;                      // an editor open below it would survive
+      catPick(b.dataset.catClear, null);
+    }));
+
+  /* A view of parts already fetched, so it repaints rather than reloading —
+     the same door the concern filter uses next door. */
+  $("catPanelCol").querySelectorAll("[data-cat-fits]").forEach(b =>
+    b.addEventListener("click", () => {
+      CAT.fitsOnly = b.dataset.catFits === "1";
+      paintCatTree();
+    }));
+
+  $("catPanelCol").querySelectorAll("[data-cat-open-ticket]").forEach(b =>
+    b.addEventListener("click", () => catAskTicket(b.dataset.catOpenTicket)));
+
+  $("catPanelCol").querySelectorAll("[data-cat-go]").forEach(b =>
+    b.addEventListener("click", () => {
+      const rows = catChildren(b.dataset.catGo);
+      const hit = rows.find(r => String(r.id) === b.dataset.catId);
+      if(hit) catPick(b.dataset.catGo, hit.value);
+    }));
+
+  /* An editor left open across a repaint has to be refilled, not just
+     unhidden. paintCatTree runs whenever stock lands, which can happen while
+     the box is open — and the markup alone would put back a visible, empty,
+     unwired field that swallowed every keystroke. */
+  if(CAT.open) catFillEditor(CAT.open);
+
+  /* The panel is rebuilt on every paint, so the preview it was showing is
+     about to belong to a row that no longer exists. */
+  catPrevHide();
+}
+
+/* ── the hover preview ──
+
+   Ed's ask: "when you hover over the text it shows you those images so you
+   can see better selections instead of having to fiddle around". Choosing
+   "1001 - Bumper and Fascia" out of a list of numbered names is a guess until
+   you have opened it; the picture turns it into a look.
+
+   Three things make this cheap enough to be worth having:
+
+   1. **Delegated on the panel, once, and never rebound.** The rows are
+      rewritten on every paint — per-row listeners would be re-attached each
+      time and leak the ones on the markup just discarded. `mouseover` and
+      `focusin` bubble, `mouseenter` does not, which is the whole reason
+      delegation works here at all.
+   2. **Nothing is fetched until the pointer settles.** A category image is a
+      ~450KB jpg; sweeping down 22 rows on the way to the scrollbar would
+      start 22 of them. `CAT_PREV_WAIT` is the intent test.
+   3. **Loaded URLs are remembered**, so a second hover is instant and paints
+      no "loading" line. The browser has the bytes; this only tracks whether
+      it is honest to claim so.
+
+   Keyboard gets it too. `.cat-row` is a button because the tree is the whole
+   navigation of this tool, and a preview only a mouse can reach would make
+   the keyboard path the worse one. */
+const CAT_PREV_WAIT = 140;
+const CAT_PREV_SEEN = new Set();
+let catPrevTimer = null, catPrevFor = null;
+
+function catPrevEl(){
+  let el = $("catPrev");
+  if(!el){
+    el = document.createElement("div");
+    el.id = "catPrev";
+    el.className = "cat-prev";
+    el.setAttribute("aria-hidden", "true");   // the row already says the name
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function catPrevHide(){
+  clearTimeout(catPrevTimer);
+  catPrevFor = null;
+  const el = $("catPrev");
+  if(el){ el.classList.remove("on"); el.innerHTML = ""; }
+}
+
+function catPrevShow(row){
+  const raw = row.dataset.catPics;
+  if(!raw) return catPrevHide();
+  if(catPrevFor === raw) return;              // already up for this row
+  catPrevFor = raw;
+
+  let pics = [];
+  try{ pics = JSON.parse(raw); }catch{ return catPrevHide(); }
+  if(!pics.length) return catPrevHide();
+
+  const el   = catPrevEl();
+  const note = row.dataset.catPicnote || "";
+  const name = (row.querySelector(".cat-row-t") || {}).textContent || "";
+  const grid = pics.length > 1;
+
+  /* Tiles are titled and the single picture is not, because with four
+     drawings side by side "which one is the mirrors" is the question being
+     asked, and with one there is nothing to tell apart. */
+  el.innerHTML = `
+    <div class="cat-prev-img${grid ? " grid" : ""}">${pics.map(p =>
+      `<figure class="cat-prev-tile" data-prev-url="${esc(p.url)}">${
+        CAT_PREV_SEEN.has(p.url)
+          ? `<img src="${esc(p.url)}" alt="">`
+          : `<span class="cat-prev-load">Loading…</span>`}${
+        grid && p.label ? `<figcaption>${esc(p.label)}</figcaption>` : ""}</figure>`).join("")}</div>
+    <div class="cat-prev-c"><b>${esc(name.trim())}</b>${
+      note ? `<br>${esc(note)}` : ""}</div>`;
+  el.classList.add("on");
+  catPrevPlace(row);
+
+  /* Loaded off-DOM: putting a live <img> in and waiting would leave a white
+     plate that jumps when the bytes land. A picture that 404s drops its own
+     tile rather than showing a broken frame, and a single picture that fails
+     takes the whole preview down — the row is still perfectly clickable
+     either way. */
+  for(const p of pics){
+    if(CAT_PREV_SEEN.has(p.url)) continue;
+    const probe = new Image();
+    probe.onload = () => {
+      CAT_PREV_SEEN.add(p.url);
+      if(catPrevFor !== raw) return;          // pointer has moved on
+      const tile = el.querySelector(`[data-prev-url="${CSS.escape(p.url)}"]`);
+      if(!tile) return;
+      const cap = tile.querySelector("figcaption");
+      tile.innerHTML = `<img src="${esc(p.url)}" alt="">` + (cap ? cap.outerHTML : "");
+      catPrevPlace(row);
+    };
+    probe.onerror = () => {
+      if(catPrevFor !== raw) return;
+      if(pics.length === 1) return catPrevHide();
+      const tile = el.querySelector(`[data-prev-url="${CSS.escape(p.url)}"]`);
+      if(tile) tile.remove();
+      catPrevPlace(row);
+    };
+    probe.src = p.url;
+  }
+}
+
+/* Left of the panel, vertically centred on the row and kept on screen. The
+   empty column beside the tree is exactly where there is room, and covering
+   the list with a picture of one of its rows would defeat the point. */
+function catPrevPlace(row){
+  const el = $("catPrev");
+  if(!el) return;
+  const r = row.getBoundingClientRect();
+  const panel = $("catPanel");
+  const p = panel ? panel.getBoundingClientRect() : r;
+  const w = el.offsetWidth || 360;
+  const h = el.offsetHeight || 200;
+  const gap = 14;
+
+  /* To the left by preference; to the right if the panel is too far over for
+     the picture to fit, which is what a narrow window does. */
+  let left = p.left - w - gap;
+  if(left < 12) left = Math.min(p.right + gap, window.innerWidth - w - 12);
+
+  let top = r.top + r.height / 2 - h / 2;
+  top = Math.max(12, Math.min(top, window.innerHeight - h - 12));
+
+  el.style.left = `${Math.round(left)}px`;
+  el.style.top  = `${Math.round(top)}px`;
+}
+
+/* One listener for the life of the page, on the column rather than the panel,
+   because the panel element itself is replaced on every paint. */
+(function wireCatPreview(){
+  const col = $("catPanelCol");
+  if(!col) return;
+
+  const enter = e => {
+    const row = e.target.closest("[data-cat-pics]");
+    if(!row){
+      /* Left the rows but still inside the column — a hover that ends on the
+         panel's padding should close, not linger. */
+      if(!e.target.closest(".cat-prev")) catPrevHide();
+      return;
+    }
+    if(catPrevFor === row.dataset.catPics) return;
+    clearTimeout(catPrevTimer);
+    catPrevTimer = setTimeout(() => catPrevShow(row), CAT_PREV_WAIT);
+  };
+
+  col.addEventListener("mouseover", enter);
+  col.addEventListener("mouseleave", catPrevHide);
+  /* Focus is not a hover and should not wait: arrowing down a list is a
+     deliberate move to one row, not a sweep across twenty. */
+  col.addEventListener("focusin", e => {
+    const row = e.target.closest("[data-cat-pics]");
+    if(row){ clearTimeout(catPrevTimer); catPrevShow(row); } else catPrevHide();
+  });
+  col.addEventListener("focusout", e => {
+    if(!col.contains(e.relatedTarget)) catPrevHide();
+  });
+  /* The rows scroll inside the panel body, so a pinned preview would drift
+     off its row; and the page itself scrolls under both. */
+  window.addEventListener("scroll", catPrevHide, true);
+  window.addEventListener("resize", catPrevHide);
+})();
+
+function catOpenEditor(level){
+  const host = $("catNodes").querySelector(`[data-cat-editor="${level}"]`);
+  if(!host) return;
+  if(CAT.open === level){ CAT.open = null; host.hidden = true; drawCatWires(); return; }
+  CAT.open = level;
+  $("catNodes").querySelectorAll("[data-cat-editor]").forEach(h => { h.hidden = true; });
+  host.hidden = false;
+  catFillEditor(level);
+}
+
+function catFillEditor(level){
+  const host = $("catNodes").querySelector(`[data-cat-editor="${level}"]`);
+  if(!host) return;
+  host.hidden = false;
+
+  const input = host.querySelector("input"), sugg = host.querySelector(".psugg");
+  const all = catChildren(level);
+  input.value = "";
+  input.placeholder = `Filter ${all.length} ${
+    level === "catalog" ? "models" : level === "group" ? "system groups"
+    : level === "sub" ? "subcategories" : "categories"}…`;
+
+  const paint = () => {
+    const q = input.value.trim().toLowerCase();
+    const hits = !q ? all : all.filter(r => r.title.toLowerCase().includes(q))
+      /* Prefix matches first, the same rule the Location tag input follows:
+         typing "brake" should lead with "33 - BRAKES", not with whatever
+         happens to contain the word further along. */
+      .sort((a, b) => (b.title.toLowerCase().startsWith(q) ? 1 : 0) -
+                      (a.title.toLowerCase().startsWith(q) ? 1 : 0));
+    sugg.innerHTML = hits.length
+      ? hits.map(r => `<button class="sug" data-cat-pick="${esc(String(r.id))}">${
+          esc(r.title)}${r.sub ? ` <span style="opacity:.6">${esc(r.sub)}</span>` : ""}</button>`).join("")
+      : `<div class="inv-more">Nothing matches “${esc(input.value.trim())}”.</div>`;
+    sugg.querySelectorAll("[data-cat-pick]").forEach(b =>
+      b.addEventListener("click", () => {
+        const hit = all.find(r => String(r.id) === b.dataset.catPick);
+        if(hit) catPick(level, hit.value);
+      }));
+    drawCatWires();
+  };
+  input.addEventListener("input", paint);
+  paint();
+  input.focus();
+}
+
+const drawCatWires = () => {
+  if($("catTreeWrap").hidden) return;
+  drawWiresIn("catTreeWrap", "catNodes", "catPanel", k => Boolean(CAT[k]));
+};
+window.addEventListener("resize", drawCatWires);
+
+/* The car banner. Only drawn when the catalogue was opened for a VIN, and it
+   carries the way out — the Parts Catalog button would ask again, which is a
+   longer road to the same place. */
+function paintCatVin(){
+  const box = $("catVin");
+  if(!box) return;
+  if(!CAT.vin){ box.innerHTML = ""; return; }
+  const c = CAT.catalog || {};
+  box.innerHTML = `<div class="cat-vin">
+    <span class="cat-vin-k">Parts for</span>
+    <span class="cat-vin-v">${esc(CAT.vin)}</span>
+    <span class="cat-vin-m">${esc(c.name || "")}${
+      c.generation ? ` · ${esc(c.generation)}` : ""}</span>
+    <button class="mini" data-cat-vin-clear="1">Whole catalogue</button>
+    ${CAT.ticketable ? "" : `<div class="cat-vin-no">This car ${esc(CAT.ticketWhy)},
+      so no ticket can be opened from here — Part Picker is pre-delivery only.
+      What fits it is still worth reading.</div>`}
+  </div>`;
+  const b = box.querySelector("[data-cat-vin-clear]");
+  if(b) b.addEventListener("click", () => {
+    catClearVin();
+    paintCatVin(); paintCatFind(); paintCatTree();
+  });
+}
+
+/* ── find a part ──
+
+   `partscatalog/search` takes a catalogue and a term and nothing else — no
+   VIN, no model id, no site — and answers with the ids of the category,
+   subcategory and system group each hit lives in. That last part is what
+   makes this a piece of NAVIGATION rather than a second read-out: clicking a
+   row puts the tree on the group holding the part, so you arrive with its
+   neighbours and its stock around it.
+
+   It is NOT the search Part Picker uses. That one is `partssearch`, which
+   demands a `Modelid` (36 for a Model Y) and a location, and a catalogue
+   knows neither — its own `catalogModelId` is 8, a different vocabulary that
+   answers "Model validation(s) failed" wherever it is offered. Two searches
+   on one board looks like duplication and is not: they take different inputs
+   and answer different questions.
+
+   Debounced, and unlike the locations box there is no local narrowing to be
+   had: SCA scores each term server-side, so "bumper" and "bumpers" are
+   different questions with different orders and a longer term's hits are not
+   a subset of a shorter one's. Every term is a real request. */
+const CAT_FIND_DEBOUNCE = 260;
+
+function paintCatFind(){
+  const box = $("catFind");
+  if(!box) return;
+  const q = CAT.find.trim();
+
+  box.innerHTML = `
+    <div class="facet-head"><span>Find a part</span>
+      ${q ? `<button class="mini" data-cat-find-clear="1">Clear</button>` : ""}</div>
+    <input class="inv-search" type="search" autocomplete="off" spellcheck="false"
+      data-cat-find="1" placeholder="Part name or part number"
+      value="${esc(CAT.find)}">
+    ${catFindHitsHtml()}`;
+  wireCatFind();
+}
+
+/* Where the search is looking, in the words the heading and the empty states
+   both need. With a model picked it is that catalogue; without one it is all
+   fifteen, which is the whole of Ed's "you shouldn't have to select a model
+   first". */
+const catFindScope = () => CAT.catalog
+  ? (CAT.catalog.name || "this catalogue") : "every model";
+
+/* What the rows ON SCREEN were fetched under, which is not always the scope
+   a search would use now: following a model chip out of an all-models result
+   selects a model while the wide rows stay up on purpose. The heading has to
+   describe the rows beneath it, not the box above it — it read "40 in Model
+   X June 2025 · 15 catalogues" for a moment, which is two answers at once
+   and neither of them true. */
+const catHitsScope = () => CAT.hitsAll ? "every model" : catFindScope();
+
+function catFindHitsHtml(){
+  const q = CAT.find.trim();
+  if(!q) return "";
+
+  if(q.length < 2) return `<div class="cat-hits"><div class="cat-empty">
+      Two characters or more.</div></div>`;
+
+  if(CAT.findBusy && CAT.hits == null) return `<div class="cat-hits"><div class="cat-empty">
+      Searching ${esc(catFindScope())}…</div></div>`;
+
+  if(CAT.findErr) return `<div class="cat-hits"><div class="cat-empty">
+      ${esc(CAT.findErr)}</div></div>`;
+
+  if(!CAT.hits || !CAT.hits.length) return `<div class="cat-hits"><div class="cat-empty">
+      Nothing in ${esc(catFindScope())} matches “${esc(q)}”.</div></div>`;
+
+  /* The heading names the scope, because the same term against one model and
+     against all fifteen are different answers and the two are easy to
+     confuse an hour later. A catalogue that did not reply is named rather
+     than folded into the count — fourteen of fifteen is a result, silently
+     calling it fifteen is not. */
+  const short = CAT.hitsOf && CAT.hitsSearched < CAT.hitsOf;
+  return `<div class="cat-hits">
+    <div class="cat-empty" style="padding:8px 13px;border-bottom:1px solid var(--line-soft)">
+      ${CAT.hits.length} in ${esc(catHitsScope())}${
+        CAT.hitsAll ? ` · ${CAT.hitsSearched} catalogues` : ""}${
+        short ? ` · ${esc(CAT.hitsFailed.join(", "))} did not answer` : ""}${
+        CAT.findBusy ? " · checking again…" : ""}</div>
+    <div class="cat-hits-body">${
+      CAT.hits.map((h, i) => CAT.hitsAll ? catHitWideHtml(h, i) : catHitOneHtml(h, i))
+        .join("")}</div></div>`;
+}
+
+/* Scoped to one model: the row is a single destination, so the whole row is
+   the button. */
+function catHitOneHtml(h, i){
+  return `<button class="cat-hit" data-cat-hit="${i}">
+      <span class="cat-hit-m">
+        <span class="cat-hit-t">${esc(h.name || "—")}</span>
+        <span class="cat-hit-n">${esc(h.partNumber)}</span>
+        ${catHitStockHtml(h.partNumber)}
+      </span>
+      <span class="cat-hit-w">${esc(h.groupTitle || "")}</span>
+    </button>`;
+}
+
+/* Across every model: the row is NOT one destination, so it is not one
+   button. A part in seven catalogues has seven places it could take you and
+   each model is its own button — picking for you would be picking wrongly
+   six times out of seven.
+
+   The models under the part are Ed's ask in his words: "when no model is
+   selected it'll display under the part the models its compatable with".
+   They cost nothing to know — a part number coming back from six catalogues
+   IS the compatibility list. */
+function catHitWideHtml(h, i){
+  return `<div class="cat-hit wide">
+      <div class="cat-hit-m">
+        <span class="cat-hit-t">${esc(h.name || "—")}</span>
+        <span class="cat-hit-n">${esc(h.partNumber)}</span>
+        ${catHitStockHtml(h.partNumber)}
+      </div>
+      <div class="cat-hit-models">
+        <span class="cat-hit-in">${h.models.length === 1 ? "In" : `In ${h.models.length} models`}</span>
+        ${h.models.map((m, j) => `<button class="cat-model" data-cat-hit="${i}"
+            data-cat-model="${j}" title="${esc(m.groupTitle || "")}${
+              /* A part can sit in several groups of one catalogue — the chip
+                 goes to the closest match and says there are others rather
+                 than pretending it is the only place. */
+              m.also ? ` · and ${m.also} other place${m.also > 1 ? "s" : ""} in this model` : ""
+            }">${esc(m.catalogName)}${
+            m.also ? `<span class="cat-model-n">+${m.also}</span>` : ""}</button>`).join("")}
+      </div>
+    </div>`;
+}
+
+/* Stock on a search hit. Deliberately the same four states as the parts
+   list — no centre chosen, not read yet, the read failed, a number — because
+   a figure that means "nobody answered" and a figure that means "none here"
+   must never look alike, and this is the read Ed searches to get. */
+function catHitStockHtml(partNumber){
+  if(!CAT.locs.length) return "";
+  const rows = CAT.hitStock[String(partNumber).toUpperCase()];
+  if(CAT.hitStockErr)
+    return `<span class="cat-hit-stock"><span class="pstock unknown">stock unavailable</span></span>`;
+  if(!rows)
+    return `<span class="cat-hit-stock"><span class="pstock unknown">reading…</span></span>`;
+  return `<span class="cat-hit-stock">${rows.map(r => {
+    const at = CAT.locs.find(l => Number(l.locationId) === Number(r.locationId));
+    const name = (at && at.name) || r.name || `location ${r.locationId}`;
+    return `<span class="cat-stock-at"><span class="cat-at">${esc(shortSite(name))}</span>${
+      r.failed || r.free == null
+        ? `<span class="pstock unknown">?</span>`
+        : `<span class="pstock ${r.free > 0 ? "some" : "none"}"><b>${r.free}</b></span>`}</span>`;
+  }).join("")}</span>`;
+}
+
+/* "Tesla Service Houston-Cypress" is 29 characters beside a two-digit
+   figure. The hit rows carry up to three centres, so the qualifier is
+   trimmed to the part that distinguishes them. */
+const shortSite = name => String(name)
+  .replace(/^Tesla\s+(Service|Collision|Semi)\s*-?\s*/i, "")
+  .trim() || String(name);
+
+function wireCatFind(){
+  const box = $("catFind");
+  const input = box.querySelector("[data-cat-find]");
+
+  const clear = box.querySelector("[data-cat-find-clear]");
+  if(clear) clear.addEventListener("click", () => {
+    CAT.find = ""; catFindClear(); paintCatFind();
+  });
+
+  box.querySelectorAll("[data-cat-hit]").forEach(b =>
+    b.addEventListener("click", () => {
+      const hit = CAT.hits[Number(b.dataset.catHit)];
+      if(!hit) return;
+      /* A wide row's buttons are its models, and each one names where to go.
+         A scoped row is one destination and carries the ids itself. */
+      const m = b.dataset.catModel != null ? hit.models[Number(b.dataset.catModel)] : null;
+      if(m) catJumpModel(hit, m); else catJump(hit);
+    }));
+
+  if(!input) return;
+  input.addEventListener("input", () => {
+    CAT.find = input.value;
+    const term = input.value.trim();
+    clearTimeout(CAT.findTimer);
+
+    if(term.length < 2){
+      CAT.findSeq++;                    // abandon anything in flight
+      catFindClear(); repaintCatFind(); return;
+    }
+    /* Already answered — the box was repainted for some other reason, or the
+       user retyped their way back to a term we hold. */
+    if(term === CAT.findFor && CAT.hits){ CAT.findBusy = false; repaintCatFind(); return; }
+
+    CAT.findBusy = true;
+    repaintCatFind();
+    CAT.findTimer = setTimeout(() => catFindRun(term), CAT_FIND_DEBOUNCE);
+  });
+
+  /* Enter runs it now rather than waiting out the debounce — a part number is
+     pasted and submitted, not typed and browsed. */
+  input.addEventListener("keydown", e => {
+    if(e.key === "Enter"){
+      e.preventDefault();
+      clearTimeout(CAT.findTimer);
+      const term = input.value.trim();
+      if(term.length >= 2) catFindRun(term);
+    }else if(e.key === "Escape"){
+      e.stopPropagation();
+      CAT.find = ""; catFindClear(); paintCatFind();
+    }
+  });
+}
+
+function catFindClear(){
+  clearTimeout(CAT.findTimer);
+  CAT.hits = null; CAT.findErr = ""; CAT.findBusy = false; CAT.findFor = "";
+  CAT.hitStock = {}; CAT.hitStockErr = "";
+  CAT.hitsSearched = 0; CAT.hitsOf = 0; CAT.hitsFailed = [];
+  /* Goes with the rows it describes. Left set, it would tell the next paint
+     that a fresh scoped search was a wide one. */
+  CAT.hitsAll = false;
+}
+
+async function catFindRun(term){
+  const mine = ++CAT.findSeq;
+  /* With a model picked the search is that catalogue; with none it is all
+     fifteen. The catalogId is simply left off — the route reads its absence
+     as the question rather than as a missing argument. */
+  const wide = !CAT.catalog;
+  CAT.findBusy = true; CAT.findErr = "";
+  repaintCatFind();
+  try{
+    const d = await api(`/api/catalog/search?q=${encodeURIComponent(term)}` +
+      (wide ? "" : `&catalogId=${encodeURIComponent(CAT.catalog.id)}`));
+    if(mine !== CAT.findSeq) return;    // a later term already won
+    CAT.hits = d.hits || [];
+    CAT.hitsAll = wide;
+    CAT.hitsSearched = d.searched || 0;
+    CAT.hitsOf = d.of || 0;
+    CAT.hitsFailed = d.failed || [];
+    CAT.findFor = term;
+    CAT.hitStock = {}; CAT.hitStockErr = "";
+  }catch(err){
+    if(mine !== CAT.findSeq) return;
+    CAT.hits = null; CAT.findErr = err.message; CAT.findFor = "";
+  }
+  CAT.findBusy = false;
+  repaintCatFind();
+  loadHitStock(mine);
+}
+
+/* The stock figures for whatever the search just found — one batched call
+   for the whole list, the same shape the parts panel uses. Fired AFTER the
+   rows are painted rather than awaited with them, because the part numbers
+   are the answer to "does this part exist" and the stock is the answer to a
+   second question; holding the list back for it is the latency this board
+   does not spend. Same rule as loadCatParts. */
+async function loadHitStock(seq){
+  const hits = CAT.hits || [];
+  if(!hits.length || !CAT.locs.length) return;
+  try{
+    const d = await api(`/api/catalog/stock?parts=` +
+      encodeURIComponent(hits.map(h => h.partNumber).join(",")) +
+      `&locs=` + encodeURIComponent(CAT.locs.map(l => l.locationId).join(",")));
+    if(seq !== CAT.findSeq) return;     // the term moved on while this was out
+    CAT.hitStock = d.stock || {};
+  }catch(err){
+    if(seq !== CAT.findSeq) return;
+    CAT.hitStockErr = err.message;
+  }
+  repaintCatFind();
+}
+
+/* The input is inside the block being rewritten, so focus and caret go back
+   by hand — the trap the locations box was rebuilt to avoid. It is tolerable
+   here because this control repaints on a REPLY, not on a keystroke. */
+function repaintCatFind(){
+  const before = $("catFind").querySelector("[data-cat-find]");
+  const at = before ? before.selectionStart : null;
+  const had = before && document.activeElement === before;
+  paintCatFind();
+  if(!had) return;
+  const next = $("catFind").querySelector("[data-cat-find]");
+  if(next){ next.focus(); if(at != null) next.setSelectionRange(at, at); }
+}
+
+/* A hit knows where it lives, so the click is a jump and not a lookup. The
+   ids are the tree's own — proven, 10 of 10 hits for "bumper" resolved and
+   the group really listed the part — but they are resolved against the tree
+   rather than trusted, because a tree that failed to load would otherwise
+   set three nodes to undefined and paint an empty panel. */
+/* A hit from the all-models search, into the model you picked off it. The
+   catalogue has to be loaded before its tree can be walked, so this is the
+   one jump with a wait in it — named as a wait rather than left silent,
+   because switching model is a two-second thing and a dead search box for
+   two seconds reads as a click that missed. */
+async function catJumpModel(hit, model){
+  if(!hit || !model) return;
+
+  if(!CAT.catalog || Number(CAT.catalog.id) !== Number(model.catalogId)){
+    const cat = (CAT.catalogs || []).find(c => Number(c.id) === Number(model.catalogId));
+    if(!cat){
+      CAT.findErr = `${esc(model.catalogName)} is not in the catalogue list.`;
+      paintCatFind(); return;
+    }
+    CAT.findBusy = true; repaintCatFind();
+    await catPick("catalog", cat);      // loads the tree
+    CAT.findBusy = false;
+    /* catPick paints the box while this was still busy, so without a repaint
+       here the heading keeps saying "checking again…" for a search that is
+       not running and never will — the wide hits are not re-fetched on
+       purpose. */
+    paintCatFind();
+    if(CAT.err) return;
+  }
+  catJump({ ...hit, ...model });
+}
+
+function catJump(hit){
+  if(!hit) return;
+  const tree = CAT.tree;
+  const cat = tree && (tree.categories || [])
+    .find(c => Number(c.id) === Number(hit.categoryId));
+  const sub = cat && (cat.subCategories || [])
+    .find(s => Number(s.id) === Number(hit.subCategoryId));
+  const grp = sub && (sub.systemGroups || [])
+    .find(g => Number(g.id) === Number(hit.systemGroupId));
+
+  if(!grp){
+    /* Name what could not be found rather than doing nothing. */
+    CAT.findErr = `${hit.partNumber} says it is in “${hit.groupTitle || "a group"}”,` +
+      ` which is not in this catalogue's tree.`;
+    paintCatFind();
+    return;
+  }
+
+  CAT.category = cat; CAT.sub = sub; CAT.group = grp;
+  CAT.parts = null; CAT.stock = {}; CAT.partsErr = ""; CAT.stockErr = "";
+  CAT.open = null;
+  CAT.hit = hit.partNumber;
+  paintCatTree();
+  loadCatParts();
+  $("catTreeWrap").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/* ── handing the part to Part Picker ──
+
+   The catalogue is read-only and stays read-only: nothing here writes. What
+   it does is fill in the VIN box and the part card of the tool next door and
+   pull its opening slide, which is the same sequence as doing it by hand.
+
+   Two guards run BEFORE the visit is created, and the order is the point. A
+   ticket that cannot be filled is worse than no ticket — it is a record on a
+   customer's car that somebody has to go and unpick — so the stock read
+   happens first, at the site Part Picker actually bills from, which is not
+   necessarily any of the centres the catalogue is showing. The undelivered
+   gate is `partsResolve`'s and comes second because it is the same call that
+   fetches everything the ticket needs. */
+function catAskTicket(partNumber){
+  const part = (CAT.parts || []).find(p => String(p.partNumber) === String(partNumber));
+  if(!part || !CAT.vin) return;
+
+  const g = CAT.group || {};
+  $("pcTicketCtx").textContent  = `${CAT.vin} · ${(CAT.catalog && CAT.catalog.name) || ""}`;
+  $("pcTicketPart").textContent = part.partNumber;
+  $("pcTicketDl").innerHTML = `
+    <dt>Part</dt><dd>${esc(part.name || "—")}</dd>
+    <dt>Number</dt><dd>${esc(part.partNumber)}</dd>
+    <dt>Where</dt><dd>${esc(g.title || "—")}</dd>
+    <dt>Car</dt><dd>${esc(CAT.vin)}</dd>`;
+  $("pcTicketErr").hidden = true;
+  showModal($("pcTicketModal"));
+
+  const slide = mountSlide($("pcTicketSlide"), "Confirm and open ticket", () => {
+    /* Asserted with the gesture, not trusted from when the card was drawn —
+       the panel can repaint under an open dialog. [[test-drags-fire-for-real]] */
+    if(!CAT.vin || PS.busy || PS.built){ slide.reset(); return; }
+    catOpenTicketWith(part, slide);
+  });
+}
+
+async function catOpenTicketWith(part, slide){
+  const err = $("pcTicketErr");
+  err.hidden = true;
+  const stop = msg => { err.textContent = msg; err.hidden = false; slide.reset(); };
+
+  try{
+    /* 1. Stock, at the site the ticket will bill from. The catalogue's figure
+          got the button on screen; this one decides. */
+    slide.busy("Checking stock here…");
+    const st = await api(`/api/parts/stock?part=${encodeURIComponent(part.partNumber)}`);
+    if(st.free == null)
+      return stop(`Could not read stock for ${part.partNumber} at this centre, so the ` +
+                  `ticket was not opened.`);
+    if(st.free <= 0)
+      return stop(`${part.partNumber} is not on the shelf at this centre — ` +
+                  `${st.onHand ?? 0} on hand, ${st.allocated ?? 0} allocated. ` +
+                  `The catalogue figure is for the centres you picked, which are not ` +
+                  `necessarily this one.`);
+
+    /* 2. The car. partsResolve carries the undelivered gate, so a delivered
+          car is refused here and never reaches the write. */
+    slide.busy("Looking the car up…");
+    const car = await api(`/api/parts/resolve?vin=${encodeURIComponent(CAT.vin)}`);
+
+    /* 3. Set Part Picker up exactly as its own lookup does, then put OUR part
+          in before anything opens — `partsSuggestPart` only fills an empty
+          slot, so the key card cannot win the race afterwards. */
+    partsReset();
+    PS.vin = CAT.vin; PS.car = car; PS.defaults = car.defaults;
+    PS.symptom    = { ...car.defaults.symptom };
+    PS.correction = { ...car.defaults.correction };
+    PS.tech       = { ...car.defaults.tech };
+    PS.part = {
+      partNumber: part.partNumber,
+      name      : part.name || "",
+      free      : st.free, onHand: st.onHand, allocated: st.allocated,
+      price     : st.price, currency: st.currency, binLocation: st.binLocation,
+      quantity  : 1,
+      /* NOT `suggested`. That flag means "the correction proposed this and it
+         is right about as often as it is wrong"; this part was chosen off a
+         diagram by the person holding the car. */
+      fromCatalog: true
+    };
+    $("partsCtx").textContent = `${PS.vin} · ${car.site.name || ""}`;
+
+    /* Already one of ours open on this car — carry on with it rather than
+       opening a second, the same rule the VIN box follows. The part still
+       goes on, which is the whole point of arriving this way. */
+    if(car.resume){
+      hideModal();
+      catHandoff();
+      partsResume(car.resume);
+      return;
+    }
+
+    slide.busy("Opening the ticket…");
+    PS.slide = slide;                 // so partsOpenTicket can label and reset it
+    $("partsNote").innerHTML = "";
+    await partsOpenTicket();
+
+    /* partsOpenTicket handles its own failures — but it reports them into the
+       Part Picker DIALOG, which is not the dialog that is open here. Three
+       endings, and the catalogue is only put away for two of them: it is the
+       thing to come back to when nothing happened. */
+    if(PS.built){ catHandoff(); return; }              // opened
+    if(!$("partsPage").hidden){ catHandoff(); return; } // partial — its own report is up
+    stop($("partsNote").textContent.trim() || "The ticket did not open.");
+  }catch(e){
+    stop(e.message);
+  }
+}
+
+/* Put the catalogue away. Not reset — the VIN, the tree and the node you were
+   on are all still true, and coming back to them after billing is the
+   ordinary next thing. */
+function catHandoff(){
+  /* Only the dialog. Which SURFACE is up belongs to showTool now, and every
+     caller of this has already asked it for Part Picker — a second mechanism
+     hiding the same div is exactly what let the tools stack. */
+  hideModal();
+}
+
+/* ── the locations: a drop-down search ──
+
+   Ed's words, and the report behind them: "im typing houston and nothing
+   poping up". It did pop up — about two and a half seconds later, having
+   fired one SCA call per keystroke, and showing "Two characters or more."
+   from the FIRST letter the whole time it waited. Three separate faults,
+   and the first cut had all of them:
+
+   1. **No debounce.** "houston" is six requests past the two-character
+      threshold. They queue behind each other at the Service App and the
+      answer arrives long after the typing stopped.
+   2. **The message was stale.** The `q.length < 2` branch repainted
+      SYNCHRONOUSLY on "h" and nothing repainted again until a reply landed,
+      so the panel sat contradicting the box it was attached to.
+   3. **The whole control was rebuilt per keystroke**, input included. It
+      survived because focus was put back by hand, but destroying the field
+      somebody is typing into is a fragile way to update a list underneath it.
+
+   ── what makes it instant ──
+
+   `trtbyterm` matches on substring and **does not cap** — "e" returns 2,004
+   rows — so a longer term's matches are always a SUBSET of a shorter term's.
+   Verified: all 9 of "houston" are among the 49 of "ho". That is the licence
+   to stop asking. The first two characters are fetched once and every
+   keystroke after that narrows the held list locally, with no request at all
+   and no wait. A debounced fetch still goes out behind it as the authority,
+   in case SCA matches on a field this list does not carry.
+
+   Only the panel is rewritten now. The input is built once and left alone. */
+const CAT_LOC_DEBOUNCE = 220;
+const CAT_LOC_SHOWN    = 8;
+
+function paintCatLocs(){
+  const box = $("catLocs");
+  box.innerHTML = `
+    <div class="facet-head"><span>Inventory locations</span>
+      ${CAT.locs.length ? `<button class="mini" data-cat-loc-clear="1">Clear</button>` : ""}</div>
+    ${CAT.locs.length ? `<div class="tags">${CAT.locs.map(l =>
+      `<span class="tag">${esc(l.name)}<button data-cat-untag="${esc(String(l.locationId))}"
+         aria-label="Remove ${esc(l.name)}">×</button></span>`).join("")}</div>` : ""}
+    <div class="tagbox">
+      <input class="inv-search" type="search" autocomplete="off" spellcheck="false"
+        data-cat-loc-search="1" role="combobox" aria-expanded="false"
+        aria-controls="catLocMenu" aria-autocomplete="list"
+        placeholder="${CAT.locs.length ? "Add another centre" : "Search service centres"}"
+        value="${esc(CAT.locSearch)}">
+      <div class="suggest" id="catLocMenu" role="listbox" hidden></div>
+    </div>
+    ${catLocNote()}`;
+  wireCatLocs();
+  paintCatMenu();
+}
+
+/* Says why the box is empty when it is empty for a REASON, rather than
+   looking like a control nobody has touched yet. The homeWhy path is
+   partsSite()'s own words — no centre in the nav, or SCA not connected. */
+function catLocNote(){
+  if(!CAT.locs.length && CAT.homeWhy)
+    return `<div class="cat-loc-note warn">${esc(CAT.homeWhy)} — search for a centre above.</div>`;
+  if(!CAT.locs.length)
+    return `<div class="cat-loc-note warn">No location chosen, so the parts below
+              carry no stock figure.</div>`;
+  if(CAT.locs.length === 1)
+    return `<div class="cat-loc-note">Add more centres to compare shelves.</div>`;
+  return `<div class="cat-loc-note">${CAT.locs.length} centres — every part below
+            carries a figure for each.</div>`;
+}
+
+/* What the drop-down is showing right now, decided from the CURRENT term
+   every time it is called — which is what stops the panel disagreeing with
+   the box above it. */
+function catLocRows(){
+  const q = CAT.locSearch.trim().toLowerCase();
+  const picked = new Set(CAT.locs.map(l => Number(l.locationId)));
+  return (CAT.locHits || [])
+    .filter(s => !picked.has(Number(s.locationId)))
+    .filter(s => !q || s.name.toLowerCase().includes(q))
+    /* Prefix first: "houston" should lead with the Houston centres, not with
+       "Tesla Service Dublin- Houston Place". Same rule as the Open Inventory
+       tag inputs and the node editors. */
+    .sort((a, b) => (b.name.toLowerCase().startsWith(q) ? 1 : 0) -
+                    (a.name.toLowerCase().startsWith(q) ? 1 : 0));
+}
+
+function paintCatMenu(){
+  const menu  = $("catLocMenu");
+  const input = $("catLocs").querySelector("[data-cat-loc-search]");
+  if(!menu) return;
+  const q = CAT.locSearch.trim();
+
+  /* Closed only when there is nothing to say. A drop-down that shows nothing
+     while a word sits in the box is the whole of Ed's report. */
+  const open = CAT.locOpen && (q.length > 0 || CAT.locBusy);
+  menu.hidden = !open;
+  if(input) input.setAttribute("aria-expanded", open ? "true" : "false");
+  if(!open){ menu.innerHTML = ""; return; }
+
+  if(q.length < 2){
+    menu.innerHTML = `<div class="inv-more">Keep typing — two characters or more.</div>`;
+    return;
+  }
+
+  const rows = catLocRows();
+  if(!rows.length){
+    /* Three different empties, and saying the wrong one is how this control
+       reads as broken. Busy first: a term with no local matches YET is
+       searching, not empty. Then the error — a dead SCA token answers every
+       term with nothing, and "Nothing matches “houston”" is a lie that sends
+       you looking for the centre instead of at the credential. */
+    menu.innerHTML =
+      CAT.locBusy ? `<div class="inv-more">Searching the site directory…</div>`
+      : CAT.locErr ? `<div class="inv-more">Could not reach the site directory —
+          ${esc(CAT.locErr)}. Check the Service App connection in Admin.</div>`
+      : `<div class="inv-more">Nothing matches “${esc(q)}”.${
+          CAT.locs.some(l => l.name.toLowerCase().includes(q.toLowerCase()))
+            ? " It is already on the list." : ""}</div>`;
+    return;
+  }
+
+  const shown = rows.slice(0, CAT_LOC_SHOWN);
+  if(CAT.locMark >= shown.length) CAT.locMark = 0;
+  menu.innerHTML = shown.map((s, i) =>
+    `<button class="sug${i === CAT.locMark ? " on" : ""}" role="option"
+       aria-selected="${i === CAT.locMark}"
+       data-cat-loc-pick="${esc(String(s.locationId))}">${esc(s.name)}</button>`).join("") +
+    (rows.length > shown.length
+      ? `<div class="inv-more">${rows.length - shown.length} more — keep typing.</div>` : "") +
+    (CAT.locBusy ? `<div class="inv-more">Checking the directory…</div>` : "");
+}
+
+function catLocPick(locationId){
+  const hit = (CAT.locHits || []).find(s => String(s.locationId) === String(locationId));
+  if(hit && !CAT.locs.some(l => Number(l.locationId) === Number(hit.locationId)))
+    CAT.locs.push(hit);
+  CAT.locSearch = ""; CAT.locOpen = false; CAT.locMark = 0;
+  paintCatLocs();
+  loadCatStock();
+}
+
+function wireCatLocs(){
+  const box = $("catLocs");
+  const input = box.querySelector("[data-cat-loc-search]");
+
+  box.querySelectorAll("[data-cat-untag]").forEach(b =>
+    b.addEventListener("click", () => {
+      CAT.locs = CAT.locs.filter(l => String(l.locationId) !== b.dataset.catUntag);
+      paintCatLocs(); loadCatStock();
+    }));
+
+  const clear = box.querySelector("[data-cat-loc-clear]");
+  if(clear) clear.addEventListener("click", () => {
+    CAT.locs = []; paintCatLocs(); loadCatStock();
+  });
+
+  /* Delegated on the panel, which is the one part of this control that is
+     rewritten — per-button listeners would have to be re-attached on every
+     keystroke and that is the churn this rewrite removes. `mousedown`, not
+     `click`: the input's blur fires first and would close the panel out from
+     under the pointer. */
+  const menu = box.querySelector("#catLocMenu");
+  if(menu) menu.addEventListener("mousedown", e => {
+    const b = e.target.closest("[data-cat-loc-pick]");
+    if(!b) return;
+    e.preventDefault();
+    catLocPick(b.dataset.catLocPick);
+  });
+
+  if(!input) return;
+  input.addEventListener("focus", () => { CAT.locOpen = true; paintCatMenu(); });
+  input.addEventListener("blur",  () => { CAT.locOpen = false; paintCatMenu(); });
+  input.addEventListener("input", () => catLocInput(input.value));
+  input.addEventListener("keydown", e => {
+    const n = Math.min(catLocRows().length, CAT_LOC_SHOWN);
+    if(e.key === "ArrowDown" && n){ e.preventDefault(); CAT.locMark = (CAT.locMark + 1) % n; paintCatMenu(); }
+    else if(e.key === "ArrowUp" && n){ e.preventDefault(); CAT.locMark = (CAT.locMark - 1 + n) % n; paintCatMenu(); }
+    else if(e.key === "Enter"){
+      const hit = catLocRows()[CAT.locMark];
+      if(hit){ e.preventDefault(); catLocPick(hit.locationId); }
+    }
+    /* stopPropagation or Escape closes the whole workspace instead of the
+       panel — the trap the Open Inventory suggestions hit. */
+    else if(e.key === "Escape"){ e.stopPropagation(); CAT.locOpen = false; paintCatMenu(); }
+  });
+}
+
+/* One keystroke. Narrow what is held FIRST and paint — that is the part with
+   no latency in it — and ask SCA only when nothing held or in flight can
+   answer.
+
+   `extends` is the whole mechanism: `trtbyterm` matches on substring and does
+   not cap, so a longer term's rows are always a SUBSET of a shorter term's.
+   Measured — "ho" 49, "houston" 9, and all 9 are among the 49.
+
+   The first cut debounced EVERY term, including the first, and a debounce
+   that restarts on each keystroke never fires while you are typing: the panel
+   said "Searching…" for the whole word and answered after you stopped. So the
+   opening fetch goes out immediately on the second character and is left
+   alone; the debounce is kept only for a term that walks off the held list —
+   a paste, or an edit in the middle of the word. */
+const catLocCovers = (base, term) =>
+  !!base && term.toLowerCase().startsWith(base.toLowerCase());
+
+function catLocInput(value){
+  CAT.locSearch = value;
+  CAT.locOpen = true;
+  CAT.locMark = 0;
+  const term = value.trim();
+
+  clearTimeout(CAT.locTimer);
+  if(term.length < 2){
+    CAT.locHits = []; CAT.locBase = ""; CAT.locWant = ""; CAT.locErr = "";
+    CAT.locBusy = false;
+    CAT.locSeq++;                      // abandon anything in flight
+    paintCatMenu();
+    return;
+  }
+
+  /* Held list already covers it: nothing is asked, nothing is awaited, and
+     catLocRows() narrows it. This is the common case — six of the seven
+     keystrokes in "houston". */
+  if(catLocCovers(CAT.locBase, term)){ CAT.locBusy = false; paintCatMenu(); return; }
+
+  /* A request is already out for a shorter term, so it will cover this one
+     when it lands. Re-firing here is what would put one call per keystroke
+     back on the wire. */
+  if(catLocCovers(CAT.locWant, term)){ CAT.locBusy = true; paintCatMenu(); return; }
+
+  CAT.locBusy = true;
+  paintCatMenu();
+  /* Opening term goes now; a diverged one waits, because the next keystroke
+     is likely to diverge again. */
+  if(!CAT.locBase && !CAT.locWant) catLocFetch(term);
+  else CAT.locTimer = setTimeout(() => catLocFetch(term), CAT_LOC_DEBOUNCE);
+}
+
+async function catLocFetch(term){
+  const mine = ++CAT.locSeq;
+  CAT.locWant = term;
+  try{
+    const d = await api(`/api/catalog/sites?q=${encodeURIComponent(term)}`);
+    if(mine !== CAT.locSeq) return;    // a later keystroke already won
+    CAT.locHits = d.sites || [];
+    CAT.locBase = term;
+    CAT.locErr = "";
+  }catch(err){
+    if(mine !== CAT.locSeq) return;
+    CAT.locHits = []; CAT.locBase = "";
+    CAT.locErr = err.message;
+  }
+  CAT.locWant = "";
+  CAT.locBusy = false;
+  paintCatMenu();
 }
 
 /* ── boot ── */

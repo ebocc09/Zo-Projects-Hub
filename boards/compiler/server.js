@@ -865,6 +865,96 @@ const server = http.createServer(async (req, res) => {
       }finally{ jobEnd(); }
     }
 
+    /* ══ Parts Catalog ══
+       The sixth tool, and the only block on this board that is GET all the
+       way down. There is deliberately no POST route here: the tool browses
+       SCA's catalogue and reads stock, and the absence of a write path is
+       what makes that a promise rather than a claim in a comment. */
+
+    if(p === "/api/catalog/list" && req.method === "GET"){
+      /* The catalogues and the default location together, so opening the tool
+         is one round trip. A centre that cannot be resolved comes back as
+         `homeWhy` rather than a blank picker — the locationFor lesson: a
+         branch that knows about a case must say so. */
+      const [catalogs, home] = await Promise.all([L.catalogList(), L.catalogHome()]);
+      return sendJson(res, 200, { catalogs, ...home });
+    }
+
+    if(p === "/api/catalog/tree" && req.method === "GET"){
+      const id = (url.searchParams.get("id") || "").trim();
+      if(!/^\d+$/.test(id)) return sendJson(res, 400, { error: "A catalogue id is required" });
+      const tree = await L.catalogTree(Number(id));
+      if(!tree) return sendJson(res, 404, { error: `The Service App has no catalogue ${id}` });
+      return sendJson(res, 200, tree);
+    }
+
+    if(p === "/api/catalog/parts" && req.method === "GET"){
+      const n = k => {
+        const v = (url.searchParams.get(k) || "").trim();
+        return /^\d+$/.test(v) ? Number(v) : null;
+      };
+      const ids = { catalogId: n("catalogId"), categoryId: n("categoryId"),
+                    subCategoryId: n("subCategoryId"), systemGroupId: n("systemGroupId") };
+      const missing = Object.keys(ids).filter(k => ids[k] === null);
+      if(missing.length)
+        return sendJson(res, 400, { error: `Numeric ${missing.join(", ")} required` });
+      /* Optional, and only ever changes which rows come back marked as
+         fitting the car. Absent is the ordinary browse. */
+      ids.vin = (url.searchParams.get("vin") || "").trim();
+      return sendJson(res, 200, { parts: await L.catalogParts(ids) });
+    }
+
+    /* The catalogue for one car. One call: SCA reads the VIN, decides the
+       model and generation, and returns that catalogue's whole tree — so
+       there is nothing to pick and no second fetch. A VIN it cannot resolve
+       comes back 200/success:false and surfaces here as a plain refusal. */
+    if(p === "/api/catalog/vin" && req.method === "GET"){
+      const vin = (url.searchParams.get("vin") || "").trim();
+      if(vin.length !== 17) return sendJson(res, 400, { error: "A VIN is 17 characters" });
+      return sendJson(res, 200, await L.catalogForVin(vin));
+    }
+
+    /* Part numbers and locations both arrive as CSV, because a system group is
+       five to forty parts against one to a handful of centres and that is one
+       readable URL rather than a POST body on a tool that has no writes. */
+    if(p === "/api/catalog/stock" && req.method === "GET"){
+      const pns = (url.searchParams.get("parts") || "").split(",")
+        .map(s => s.trim()).filter(Boolean);
+      const locs = (url.searchParams.get("locs") || "").split(",")
+        .map(s => s.trim()).filter(s => /^\d+$/.test(s))
+        .map(id => ({ locationId: Number(id) }));
+      if(!pns.length) return sendJson(res, 400, { error: "At least one part number is required" });
+      if(!locs.length) return sendJson(res, 200, { stock: {} });
+      /* Names are not sent up — the page already has them from the picker, and
+         echoing a name the client supplied would let a stale tab label another
+         centre's shelf with this one's name. */
+      return sendJson(res, 200, { stock: await L.catalogStock(pns, locs) });
+    }
+
+    /* Search by part name or part number. WITH a catalogue it is that
+       catalogue; WITHOUT one it is all fifteen, grouped by part number, and
+       every row carries the models it turned up in.
+
+       SCA's own call is one catalogue at a time — the "all" answer is this
+       board's, assembled from fifteen parallel ones. It is not defaulted to
+       a catalogue when none is given, because "no model chosen" is a real
+       question with a real answer and guessing a model would make a hit mean
+       something other than what was asked. */
+    if(p === "/api/catalog/search" && req.method === "GET"){
+      const term = (url.searchParams.get("q") || "").trim();
+      const catalogId = Number(url.searchParams.get("catalogId"));
+      if(term.length < 2) return sendJson(res, 200, { hits: [] });
+      if(catalogId)
+        return sendJson(res, 200, { hits: await L.catalogSearch(catalogId, term) });
+      return sendJson(res, 200, await L.catalogSearchAll(term));
+    }
+
+    if(p === "/api/catalog/sites" && req.method === "GET"){
+      const term = (url.searchParams.get("q") || "").trim();
+      if(term.length < 2) return sendJson(res, 200, { sites: [] });
+      return sendJson(res, 200, { sites: await L.catalogSites(term) });
+    }
+
     /* Admin › Part Picker — the technician, the note and the narrative. NOT
        the site: SCA's search really does return nothing for "17589", but the
        board holds the centre's NAME too, so the site is derived from the nav

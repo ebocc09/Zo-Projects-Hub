@@ -370,6 +370,14 @@ async function osEnsureToken({ force = false } = {}){
   finally { osHealing = null; }
 }
 
+/* The cooldown is a guard against a machine that CANNOT reach Tesla OS
+   spending forty-five seconds proving it on every run. The morning brief is
+   the one run where that trade goes the other way: it happens once a day, it
+   is the card that names customers, and a brief that skipped the renewal
+   because something failed ten minutes ago would name people who were never
+   asked. So the brief clears it and takes the forty-five seconds. */
+const osClearHealCooldown = () => { osHealFailedAt = 0; };
+
 /* Clears the cooldown and forces a fresh acquisition. The one thing a person
    can usefully do by hand here: they have just signed in somewhere, or fixed
    whatever was broken, and do not want to wait out the ten minutes. */
@@ -1852,6 +1860,122 @@ async function collectReport({ dates, trtId, vin, rn, mode, onProgress } = {}){
            notices: [...notes, ...takeNotices()] };
 }
 
+/* ─────────────── the morning brief's population: APPOINTMENTS ───────────
+   Used by the brief and by nothing else. The hourly digest is unchanged and
+   stays on collectReport.
+
+   collectReport is the wrong question for this card. It enumerates cars
+   Tesladex says were DELIVERED, and at the opening hour that is almost
+   nobody — the brief would open the day with an empty list at exactly the
+   moment the entire list is still ahead of it. "Nobody to chase" is then a
+   lie told to every advisor before they have handed over a single car.
+
+   So the brief asks Intrepid for the day's appointments: everyone booked in
+   today, picked up or not. That is the population the card is about — who is
+   coming in, who among them has never said they want FSD, and when they are
+   due — and it is knowable at 08:00 because it is a diary, not a measurement.
+
+   NOTHING is filtered out. Across 481 rows sampled over eleven days the only
+   appointment types were CustomerPickup and TeslaDirect, both real customers
+   collecting real cars, and the only statuses were DELIVERED, BOOKED and
+   ORDER_PLACED — stages of the same day rather than reasons to drop someone.
+   Dropping a row here means one customer nobody is told about, so a filter
+   needs a reason and there is not one yet. Already-delivered rows stay in
+   deliberately: the brief says what today looks like, and an advisor reading
+   it at 13:00 should still see the 09:00 handover that got away.
+
+   Advanced only. Appointments come from Intrepid and Sub-Intent from Tesla
+   OS; a basic board cannot answer this question and says so, rather than
+   returning an empty list that reads as good news. */
+async function briefAppointments(date, trtId){
+  const notes = [];
+  const chosen = effectiveMode(undefined);
+  if(chosen.mode !== "advanced"){
+    return { rows: [], total: 0, unknown: 0, mode: "basic", basic: true,
+             notices: [chosen.why || "The morning brief needs advanced mode: the day's " +
+                       "appointments come from Intrepid, which basic mode never calls."] };
+  }
+
+  const raw = await appointmentsOn(date, trtId);
+
+  /* One row per reference number, earliest slot kept. A rescheduled order can
+     appear twice on the same day, and naming that customer twice would read
+     as two people to chase. */
+  const byRn = new Map();
+  for(const a of raw){
+    const rn = String(a.referenceNumber || "").trim();
+    if(!rn) continue;
+    const prev = byRn.get(rn);
+    if(!prev || Date.parse(a.startDateTime || 0) < Date.parse(prev.startDateTime || 0)){
+      byRn.set(rn, a);
+    }
+  }
+  const appts = [...byRn.values()];
+  if(!appts.length) return { rows: [], total: 0, unknown: 0, mode: "advanced", notices: notes };
+
+  /* Who owns each one. Same call the report uses, one per appointment, pooled
+     the same way — this is the expensive half of the brief and it is why the
+     card takes a little longer than an hourly check. */
+  const staffByRn = new Map();
+  await pool(appts, Math.min(6, appts.length), async a => {
+    const s = await appointmentStaff(a.referenceNumber).catch(() => null);
+    if(s) staffByRn.set(String(a.referenceNumber), s);
+  });
+  for(const s of staffByRn.values()){
+    learnStaff(s.advisorUser, s.advisorName);
+    learnStaff(s.salesUser,   s.salesName);
+  }
+  staffFlush();
+
+  const custs = await resolveCustomers(appts.map(a => a.userId));
+  const cache = await resolveStaff([...staffByRn.values()].map(s => s.hostUser));
+
+  /* Sub-Intent. Optional in the same way it is for a report: every row is
+     left null on failure and never "none", because a lapsed token must not
+     turn the whole centre into customers who said they were not interested. */
+  let intents = null;
+  if(osConnected()){
+    try{ intents = await resolveFsdIntent(appts.map(a => a.referenceNumber)); }
+    catch(err){
+      notes.push(`FSD Sub-Intent could not be read for this brief: ${err.message}`);
+    }
+  }else{
+    notes.push("FSD Sub-Intent is not shown — Tesla OS has not been connected on this " +
+               "machine yet. Connect it once under Admin › Sources.");
+  }
+
+  const rows = appts.map(a => {
+    const rn    = String(a.referenceNumber);
+    const staff = staffByRn.get(rn) || null;
+    const seen  = intents ? intents.get(rn) : null;
+    return {
+      rn,
+      vin      : a.vin || "",
+      model    : a.model || "",
+      customer : a.userId ? (custs.get(String(a.userId)) || "") : "",
+      /* The delivery advisor by name, then whoever is driving the handover,
+         then the raw username — the same ladder the report walks down, so a
+         person is named the same way on both cards. */
+      advisor  : (staff && staff.advisorName)
+                 || (staff ? staffName(cache, staff.hostUser) : "")
+                 || "",
+      // The booked slot, not a delivery timestamp: this is a diary entry and
+      // most of these cars have not moved yet.
+      at       : a.startDateTime || null,
+      fsdIntent: seen ? seen.state : null,
+      fsdStatus: seen ? seen.text  : ""
+    };
+  });
+
+  return {
+    rows,
+    total  : rows.length,
+    unknown: rows.filter(r => r.fsdIntent == null).length,
+    mode   : "advanced",
+    notices: [...notes, ...takeNotices()]
+  };
+}
+
 /* ── what counts as having driven on FSD ──
    A distance, because anything short of one is a lot shuffle or a bay
    reposition rather than a customer choosing to use the feature.
@@ -2201,13 +2325,28 @@ function connectionsSummary(){
    The webhook URL is a credential: whoever holds it can post into the
    channel. It is NEVER returned here, and the input box is never pre-filled
    from it. */
+/* ── which day's brief has already gone out ──
+
+   ON DISK, not in memory, and that is the whole point of it. lastAlertHour is
+   allowed to be a variable because losing it costs one skipped digest; losing
+   this one costs a SECOND morning brief posted into the channel after a
+   restart, naming the same customers again. A flat key, like every other
+   alert setting, because saveConnections is a shallow merge. */
+const briefSentDate = () => String(loadConnections().alertBriefDate || "") || null;
+const markBriefSent = date => saveConnections({ alertBriefDate: String(date) });
+
 function alertsSummary(c){
   const url  = String(c.alertWebhook || "").trim();
   const days = A.normaliseDays(c.alertDays);
   const on   = c.alertsOn === true;
+  const briefDate = String(c.alertBriefDate || "") || null;
 
   return {
     on,
+    /* The brief is not a separate schedule with its own switch — it IS the
+       day's first post, so the panel describes it from the same settings
+       rather than offering another set to keep in step. */
+    brief: { date: briefDate, sentToday: briefDate === A.dayKey(new Date()) },
     start: A.normaliseTime(c.alertStart, A.DEFAULTS.start),
     end  : A.normaliseTime(c.alertEnd,   A.DEFAULTS.end),
     days,
@@ -2239,11 +2378,13 @@ module.exports = {
   appointmentsOn, appointmentStaff, intrepidCookie,
   resolveStaff, staffName, resolveCustomers, resolveFsdIntent,
   osConnected, osStatus, osSignIn, osDisconnect, osEnsureToken, osReconnect,
+  osClearHealCooldown, briefSentDate, markBriefSent,
   osSignInStatus: osx.signInStatus, osCancelSignIn: osx.cancelSignIn,
   byHost, byAdvisor, DROVE_THRESHOLD, droveThreshold, MIN_QUALIFY,
   WINDOW_HOURS, windowHours, clearMeasureCache,
   trtInfo, trtDirectory, searchSites,
-  ensureSession, callTool, fsdMilesFor, collectReport, summarise, garageUrl,
+  ensureSession, callTool, fsdMilesFor, collectReport, briefAppointments,
+  summarise, garageUrl,
   tesladexDeliveries, unroutedDeliveries, nationalCount,
   trtAtDelivery, dayRangeEpoch,
   beyondVitalsWindow, VITALS_CEILING_DAYS,
